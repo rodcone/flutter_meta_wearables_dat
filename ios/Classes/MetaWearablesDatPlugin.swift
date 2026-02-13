@@ -4,12 +4,46 @@ import MWDATCore
 import MWDATCamera
 import MWDATMockDevice
 import AVFoundation
+import CoreMedia
 
-public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
+// MARK: - PixelBufferTexture
+/// A FlutterTexture backed by a CVPixelBuffer. When Flutter's rasteriser needs
+/// a new frame it calls `copyPixelBuffer()` which returns the latest buffer
+/// pushed from the native video-frame listener.
+private class PixelBufferTexture: NSObject, FlutterTexture {
+  /// The latest pixel buffer to be rendered. Access is guarded by an
+  /// unfair lock so the video-frame callback (main actor) and the raster
+  /// thread (which calls `copyPixelBuffer`) never race.
+  private var _latestPixelBuffer: CVPixelBuffer?
+  private var lock = os_unfair_lock()
+
+  var latestPixelBuffer: CVPixelBuffer? {
+    get {
+      os_unfair_lock_lock(&lock)
+      let buf = _latestPixelBuffer
+      os_unfair_lock_unlock(&lock)
+      return buf
+    }
+    set {
+      os_unfair_lock_lock(&lock)
+      _latestPixelBuffer = newValue
+      os_unfair_lock_unlock(&lock)
+    }
+  }
+
+  func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
+    os_unfair_lock_lock(&lock)
+    let buf = _latestPixelBuffer
+    os_unfair_lock_unlock(&lock)
+    guard let buf else { return nil }
+    return Unmanaged.passRetained(buf)
+  }
+}
+
+public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Dictionary to store StreamSession instances keyed by device UUID
   private var streamSessions: [String: StreamSession] = [:]
-  // Video frame streaming
-  private var videoEventSink: FlutterEventSink?
+  // Video frame listener tokens
   private var videoListenerTokens: [String: any MWDATCore.AnyListenerToken] = [:]
   private var errorListenerTokens: [String: any MWDATCore.AnyListenerToken] = [:]
   private var frameCounters: [String: Int] = [:]
@@ -19,26 +53,28 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
   // Device discovery
   private var deviceDiscoveryToken: (any MWDATCore.AnyListenerToken)?
   private var discoveredDevices: [String: String] = [:] // UUID -> identifier mapping
-  
+  // Texture API (zero-copy path)
+  private var textureRegistry: FlutterTextureRegistry?
+  private var pixelBufferTextures: [String: PixelBufferTexture] = [:]
+  private var textureIds: [String: Int64] = [:]
+
   // Initializer
   public override init() {
     super.init()
   }
-  
+
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: registrar.messenger())
     let instance = MetaWearablesDatPlugin()
+    instance.textureRegistry = registrar.textures()
     registrar.addMethodCallDelegate(instance, channel: channel)
-    // Event channel for streaming video frames to Flutter
-    let videoFramesChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/video_frames", binaryMessenger: registrar.messenger())
-    videoFramesChannel.setStreamHandler(instance)
     // Event channel for registration state updates
     let registrationStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/registration_state", binaryMessenger: registrar.messenger())
     registrationStateChannel.setStreamHandler(RegistrationStateStreamHandler())
     // Event channel for active device availability updates
     let activeDeviceChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/active_device", binaryMessenger: registrar.messenger())
     activeDeviceChannel.setStreamHandler(ActiveDeviceStreamHandler())
-    
+
     Task { @MainActor in
       try? Wearables.configure()
     }
@@ -46,8 +82,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
-      case "getPlatformVersion":
-        result("iOS " + UIDevice.current.systemVersion)
       case "pairMockRayBanMeta":
         pairMockRayBanMeta(result: result)
       case "unpairMockRayBanMeta":
@@ -119,7 +153,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
         result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock device with uuid \(uuidString)", details: nil))
         return
       }
-      
+
       // Stop and remove any active stream session for this device
       if let streamSession = streamSessions[uuidString] {
         await streamSession.stop()
@@ -131,12 +165,18 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
           await token.cancel()
           errorListenerTokens.removeValue(forKey: uuidString)
         }
+        // Unregister texture
+        if let texId = textureIds[uuidString] {
+          textureRegistry?.unregisterTexture(texId)
+          textureIds.removeValue(forKey: uuidString)
+          pixelBufferTextures.removeValue(forKey: uuidString)
+        }
         streamSessions.removeValue(forKey: uuidString)
         frameCounters.removeValue(forKey: uuidString)
         lastFrameSendTime.removeValue(forKey: uuidString)
         targetFPS.removeValue(forKey: uuidString)
       }
-      
+
       MockDeviceKit.shared.unpairDevice(device)
       result(true)
     }
@@ -185,8 +225,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       do {
         let status = try await Wearables.shared.checkPermissionStatus(.camera)
         result(status == .granted)
-      } catch let e as MWDATCore.PermissionError {
-        result(FlutterError(code: "PERMISSION_ERROR", message: e.localizedDescription, details: e.rawValue))
+      } catch is MWDATCore.PermissionError {
+        // Permission not granted yet or denied — return false instead of error
+        result(false)
       } catch {
         result(FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil))
       }
@@ -270,108 +311,48 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
     }
   }
 
-  // MARK: - Frame Processing Helper
-  private func processAndSendFrame(_ videoFrame: VideoFrame, forDevice uuidString: String) {
+  // MARK: - Frame Processing (zero-copy via Texture API)
+  /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
+  /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
+  private func processAndSendFrame(_ videoFrame: VideoFrame, forDevice sessionKey: String) {
     let now = Date()
-    let fps = targetFPS[uuidString] ?? 30.0 // Default to 30.0 FPS if not set
-    let minInterval = 1.0 / fps // Minimum seconds between frames
-    
-    // Check if enough time has passed since last frame
+    let fps = targetFPS[sessionKey] ?? 30.0
+    let minInterval = 1.0 / fps
+
     let timeSinceLastFrame: TimeInterval
-    if let lastSendTime = lastFrameSendTime[uuidString] {
+    if let lastSendTime = lastFrameSendTime[sessionKey] {
       timeSinceLastFrame = now.timeIntervalSince(lastSendTime)
       if timeSinceLastFrame < minInterval {
-        // Skip this frame - not enough time has passed
-        return
+        return // throttle
       }
     } else {
       timeSinceLastFrame = 0
     }
-    
-    // Convert frame to UIImage
-    guard let uiImage = videoFrame.makeUIImage() else {
-      NSLog("[MWDAT] makeUIImage() returned nil for a video frame")
+
+    // Extract CVPixelBuffer directly from CMSampleBuffer — zero conversion cost
+    guard let pixelBuffer = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer) else {
+      NSLog("[MWDAT] CMSampleBufferGetImageBuffer returned nil")
       return
     }
-    
-    // Encode to JPEG with optimized quality for better performance
-    // Use slightly lower quality for better framerate, but still maintain visual quality
-    var bytes: Data?
-    if let jpeg = uiImage.jpegData(compressionQuality: 0.85) {
-      bytes = jpeg
-    } else if let png = uiImage.pngData() {
-      bytes = png
-    }
-    
-    guard let bytes, let eventSink = self.videoEventSink else {
-      if bytes == nil {
-        NSLog("[MWDAT] Failed to encode UIImage to JPEG/PNG data")
-      }
+
+    guard let texture = pixelBufferTextures[sessionKey],
+          let textureId = textureIds[sessionKey] else {
       return
     }
-    
-    // Send frame to Flutter
-    let typed = FlutterStandardTypedData(bytes: bytes)
-    eventSink(typed)
-    
-    // Update last send time and frame counter
-    lastFrameSendTime[uuidString] = now
-    let count = (self.frameCounters[uuidString] ?? 0) + 1
-    self.frameCounters[uuidString] = count
-    
-    // Log every 30 frames to avoid spam
+
+    // Swap the pixel buffer (lock-protected) and notify Flutter's rasteriser
+    texture.latestPixelBuffer = pixelBuffer
+    textureRegistry?.textureFrameAvailable(textureId)
+
+    // Update timing + counters
+    lastFrameSendTime[sessionKey] = now
+    let count = (frameCounters[sessionKey] ?? 0) + 1
+    frameCounters[sessionKey] = count
+
     if count % 30 == 0 && timeSinceLastFrame > 0 {
       let actualFPS = 1.0 / timeSinceLastFrame
-      NSLog("[MWDAT] Emitted \(count) frames for device: \(uuidString), target FPS: \(fps), actual FPS: \(String(format: "%.1f", actualFPS))")
+      NSLog("[MWDAT] \(count) frames for \(sessionKey), target: \(fps), actual: \(String(format: "%.1f", actualFPS)) FPS")
     }
-  }
-
-  // MARK: - FlutterStreamHandler (video frames)
-  public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-    // deviceUUID is optional - if not provided, we'll use "auto" for AutoDeviceSelector
-    let uuidString = (arguments as? [String : Any])?["deviceUUID"] as? String ?? "auto"
-    self.videoEventSink = events
-    
-    // Subscribe to video frames on the main actor
-    // If stream session doesn't exist yet, it will be subscribed when it's created in startStreamSession
-    Task { @MainActor in
-      // Wait for the stream session to be created and started
-      var attempts = 0
-      while streamSessions[uuidString] == nil && attempts < 20 {
-        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-        attempts += 1
-      }
-      
-      guard let streamSession = self.streamSessions[uuidString] else {
-        NSLog("[MWDAT] Stream session not found for device \(uuidString) after waiting")
-        return
-      }
-      
-      // Only subscribe if we don't already have a listener for this device
-      if self.videoListenerTokens[uuidString] == nil {
-        self.frameCounters[uuidString] = 0
-        self.lastFrameSendTime.removeValue(forKey: uuidString) // Reset to allow first frame immediately
-        let token = streamSession.videoFramePublisher.listen { [weak self] videoFrame in
-          guard let self else { return }
-          self.processAndSendFrame(videoFrame, forDevice: uuidString)
-        }
-        self.videoListenerTokens[uuidString] = token
-        NSLog("[MWDAT] Subscribed to video frames for device: \(uuidString)")
-      }
-    }
-    return nil
-  }
-
-  public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    self.videoEventSink = nil
-    // Cancel all video listeners
-    for (_, token) in videoListenerTokens {
-      Task { @MainActor in
-        await token.cancel()
-      }
-    }
-    videoListenerTokens.removeAll()
-    return nil
   }
 
   func setMockCameraFeed(call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -380,49 +361,49 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID missing", details: nil))
       return
     }
-    
+
     Task { @MainActor in
       let devices = MockDeviceKit.shared.pairedDevices
       guard let device = devices.first(where: { $0.deviceIdentifier == uuidString }) else {
         result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock device with uuid \(uuidString)", details: nil))
         return
       }
-      
+
       guard let mockDisplaylessGlasses = device as? any MWDATMockDevice.MockDisplaylessGlasses else {
         result(FlutterError(code: "INVALID_DEVICE_TYPE", message: "Device does not support camera", details: nil))
         return
       }
-      
+
       let cameraKit = mockDisplaylessGlasses.getCameraKit()
-      
+
       if let videoPath = args["videoPath"] as? String, !videoPath.isEmpty {
         let fileURL = URL(fileURLWithPath: videoPath)
-        
+
         // Validate file exists
         let fileManager = FileManager.default
         if !fileManager.fileExists(atPath: videoPath) {
           result(FlutterError(code: "FILE_NOT_FOUND", message: "Video file not found at path: \(videoPath)", details: nil))
           return
         }
-        
+
         // Validate video codec - must be HEVC/H.265
         let asset = AVAsset(url: fileURL)
         let tracks = try? await asset.loadTracks(withMediaType: .video)
         var foundHEVC = false
-        
+
         if let videoTracks = tracks {
           for videoTrack in videoTracks {
             if let formatDescriptions = try? await videoTrack.load(.formatDescriptions) as? [CMFormatDescription],
                let formatDescription = formatDescriptions.first {
               let codecType = CMFormatDescriptionGetMediaSubType(formatDescription)
-              let codecString = String(format: "%c%c%c%c", 
+              let codecString = String(format: "%c%c%c%c",
                                       (codecType >> 24) & 0xFF,
                                       (codecType >> 16) & 0xFF,
                                       (codecType >> 8) & 0xFF,
                                       codecType & 0xFF)
-              
-              if codecType == kCMVideoCodecType_HEVC || 
-                 codecString == "hvc1" || 
+
+              if codecType == kCMVideoCodecType_HEVC ||
+                 codecString == "hvc1" ||
                  codecString == "hev1" {
                 foundHEVC = true
                 break
@@ -430,12 +411,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
             }
           }
         }
-        
+
         if !foundHEVC {
           result(FlutterError(code: "INVALID_CODEC", message: "Video must be HEVC/H.265 format. Use file_picker (not image_picker) to preserve original format.", details: nil))
           return
         }
-        
+
         await cameraKit.setCameraFeed(fileURL: fileURL)
         result(true)
       } else {
@@ -450,21 +431,21 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID missing", details: nil))
       return
     }
-    
+
     Task { @MainActor in
       let devices = MockDeviceKit.shared.pairedDevices
       guard let device = devices.first(where: { $0.deviceIdentifier == uuidString }) else {
         result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock device with uuid \(uuidString)", details: nil))
         return
       }
-      
+
       guard let mockDisplaylessGlasses = device as? any MWDATMockDevice.MockDisplaylessGlasses else {
         result(FlutterError(code: "INVALID_DEVICE_TYPE", message: "Device does not support camera", details: nil))
         return
       }
-      
+
       let cameraKit = mockDisplaylessGlasses.getCameraKit()
-      
+
       if let imagePath = args["imagePath"] as? String, !imagePath.isEmpty {
         let fileURL = URL(fileURLWithPath: imagePath)
         await cameraKit.setCapturedImage(fileURL: fileURL)
@@ -481,18 +462,19 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       result(FlutterError(code: "INVALID_ARGS", message: "arguments missing", details: nil))
       return
     }
-    
+
     // Get FPS parameter (default to 30.0 if not provided)
     let fps = (args["fps"] as? Double) ?? 30.0
-    
+    let streamQuality = Self.parseStreamQuality(args["streamQuality"] as? String)
+
     // deviceUUID is optional - if not provided, use AutoDeviceSelector
     let uuidString = args["deviceUUID"] as? String
-    
+
     Task { @MainActor in
       // Determine device selector
       let deviceSelector: any DeviceSelector
       let sessionKey: String
-      
+
       if let uuidString = uuidString {
         // Use specific device selector
         deviceSelector = SpecificDeviceSelector(device: uuidString)
@@ -501,7 +483,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
         // Use auto device selector to discover and connect to available devices
         deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
         sessionKey = "auto"
-        
+
         // Listen for active device changes from AutoDeviceSelector using async sequence
         Task { [weak self] in
           guard let self else { return }
@@ -514,53 +496,77 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
           }
         }
       }
-      
+
       // Store FPS for this session
       targetFPS[sessionKey] = fps
-      
+
       // Check if a session already exists
-      if let existingSession = streamSessions[sessionKey] {
-        await existingSession.start()
-        result(true)
+      if streamSessions[sessionKey] != nil {
+        if let textureId = textureIds[sessionKey] {
+          result(textureId)
+        } else {
+          result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
+        }
         return
       }
-      
-      // Create a new StreamSession
-      let streamSession = StreamSession(deviceSelector: deviceSelector)
-      
+
+      // Register a Flutter texture
+      guard let registry = textureRegistry else {
+        result(FlutterError(code: "TEXTURE_ERROR", message: "Texture registry not available", details: nil))
+        return
+      }
+      let texture = PixelBufferTexture()
+      let texId = registry.register(texture)
+      pixelBufferTextures[sessionKey] = texture
+      textureIds[sessionKey] = texId
+      NSLog("[MWDAT] Registered texture \(texId) for session \(sessionKey)")
+
+      // Create a new StreamSession with explicit quality configuration.
+      let fpsValue = UInt(max(1, Int(fps.rounded())))
+      let streamConfig = StreamSessionConfig(
+        videoCodec: .raw,
+        resolution: Self.resolution(for: streamQuality),
+        frameRate: fpsValue
+      )
+      let streamSession = StreamSession(
+        streamSessionConfig: streamConfig,
+        deviceSelector: deviceSelector
+      )
+
       // Observe errors
       let errorToken = streamSession.errorPublisher.listen { error in
         NSLog("[MWDAT] StreamSession error for \(sessionKey): \(error)")
       }
       errorListenerTokens[sessionKey] = errorToken
-      
+
       // Store the session
       streamSessions[sessionKey] = streamSession
-      
-      // If videoEventSink already exists (Flutter already listening), subscribe immediately
-      if self.videoEventSink != nil {
-        self.frameCounters[sessionKey] = 0
-        self.lastFrameSendTime.removeValue(forKey: sessionKey) // Reset to allow first frame immediately
-        let token = streamSession.videoFramePublisher.listen { [weak self] videoFrame in
-          guard let self else { return }
-          self.processAndSendFrame(videoFrame, forDevice: sessionKey)
-        }
-        self.videoListenerTokens[sessionKey] = token
+
+      // Subscribe to video frames — push CVPixelBuffer directly, no encoding
+      self.frameCounters[sessionKey] = 0
+      self.lastFrameSendTime.removeValue(forKey: sessionKey)
+      let token = streamSession.videoFramePublisher.listen { [weak self] videoFrame in
+        guard let self else { return }
+        self.processAndSendFrame(videoFrame, forDevice: sessionKey)
       }
-      
+      self.videoListenerTokens[sessionKey] = token
+
       // Start the session
       do {
         await streamSession.start()
-        
+
         // If using AutoDeviceSelector, get the active device UUID
         if uuidString == nil, let activeDevice = deviceSelector.activeDevice {
           let activeUUID = activeDevice // DeviceIdentifier is already a String
           NSLog("[MWDAT] AutoDeviceSelector connected to device: \(activeUUID)")
-          // We could notify Flutter here about the discovered device
         }
-        
-        result(true)
+
+        result(texId)
       } catch {
+        // Clean up texture on failure
+        textureRegistry?.unregisterTexture(texId)
+        pixelBufferTextures.removeValue(forKey: sessionKey)
+        textureIds.removeValue(forKey: sessionKey)
         result(FlutterError(code: "STREAM_SESSION_ERROR", message: error.localizedDescription, details: nil))
       }
     }
@@ -571,21 +577,28 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       result(FlutterError(code: "INVALID_ARGS", message: "arguments missing", details: nil))
       return
     }
-    
+
     // deviceUUID is optional - use "auto" if not provided
     let uuidString = args["deviceUUID"] as? String ?? "auto"
-    
+
     Task { @MainActor in
       guard let streamSession = streamSessions[uuidString] else {
         result(FlutterError(code: "SESSION_NOT_FOUND", message: "No stream session found for device \(uuidString)", details: nil))
         return
       }
-      
+
       await streamSession.stop()
       // Cancel any video listener for this device
       if let token = videoListenerTokens[uuidString] {
         await token.cancel()
         videoListenerTokens.removeValue(forKey: uuidString)
+      }
+      // Unregister texture
+      if let texId = textureIds[uuidString] {
+        textureRegistry?.unregisterTexture(texId)
+        textureIds.removeValue(forKey: uuidString)
+        pixelBufferTextures.removeValue(forKey: uuidString)
+        NSLog("[MWDAT] Unregistered texture \(texId) for session \(uuidString)")
       }
       streamSessions.removeValue(forKey: uuidString)
       frameCounters.removeValue(forKey: uuidString)
@@ -636,4 +649,34 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       result(state.rawValue)
     }
   }
+
+  private static func parseStreamQuality(_ value: String?) -> StreamQuality {
+    switch value?.lowercased() {
+    case "high":
+      return .high
+    case "low":
+      return .low
+    case "medium":
+      return .medium
+    default:
+      return .high
+    }
+  }
+
+  private static func resolution(for quality: StreamQuality) -> StreamingResolution {
+    switch quality {
+    case .high:
+      return .high
+    case .low:
+      return .low
+    case .medium:
+      return .medium
+    }
+  }
+}
+
+private enum StreamQuality {
+  case high
+  case medium
+  case low
 }

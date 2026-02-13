@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 
 /// Provider to manage mock device operations and state.
@@ -10,6 +13,8 @@ class MockDeviceProvider extends ChangeNotifier {
   bool get hasDevice => _deviceUUID != null;
 
   Future<void> pairMockRayBanMeta() async {
+    unawaited(HapticFeedback.lightImpact());
+
     final deviceUUID = await MetaWearablesDat.pairMockRayBanMeta();
     _deviceUUID = deviceUUID;
     notifyListeners();

@@ -238,9 +238,26 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 
 ### 3. Session (After registration and permissions)
 - Once registered and permissions are granted, start a streaming session
-- Call `MetaWearablesDat.startStreamSession(deviceUUID)` to begin receiving video frames
-- Listen to video frames via the `flutter_meta_wearables_dat/video_frames` event channel
+- Call `MetaWearablesDat.startStreamSession(deviceUUID)` — returns a `textureId`
+- Render the live video feed using Flutter's `Texture` widget with the returned ID
 - Call `MetaWearablesDat.stopStreamSession(deviceUUID)` to end the session
+
+```dart
+// Start streaming — returns a texture ID for zero-copy rendering
+final textureId = await MetaWearablesDat.startStreamSession(
+  deviceUUID,
+  fps: 30,
+  streamQuality: StreamQuality.high,
+);
+
+// Render the live video feed
+Texture(textureId: textureId);
+
+// Stop streaming when done
+await MetaWearablesDat.stopStreamSession(deviceUUID);
+```
+
+Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
 
 **Note:** See the example app for a complete implementation.
 

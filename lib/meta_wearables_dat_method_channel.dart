@@ -24,14 +24,6 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   );
 
   @override
-  Future<String?> getPlatformVersion() async {
-    final version = await methodChannel.invokeMethod<String>(
-      'getPlatformVersion',
-    );
-    return version;
-  }
-
-  @override
   Future<String?> pairMockRayBanMeta() async {
     final deviceUUID = await methodChannel.invokeMethod<String>(
       'pairMockRayBanMeta',
@@ -177,19 +169,29 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
-  Future<bool> startStreamSession(
+  Future<int> startStreamSession(
     String? deviceUUID, {
     double fps = 30.0,
+    StreamQuality streamQuality = StreamQuality.high,
   }) async {
-    final args = <String, dynamic>{'fps': fps};
+    final args = <String, dynamic>{
+      'fps': fps,
+      'streamQuality': streamQuality.value,
+    };
     if (deviceUUID != null) {
       args['deviceUUID'] = deviceUUID;
     }
-    final ok = await methodChannel.invokeMethod<bool>(
+    final textureId = await methodChannel.invokeMethod<int>(
       'startStreamSession',
       args,
     );
-    return ok ?? false;
+    if (textureId == null) {
+      throw PlatformException(
+        code: 'TEXTURE_REGISTRATION_FAILED',
+        message: 'Failed to register a Flutter texture for video streaming.',
+      );
+    }
+    return textureId;
   }
 
   @override
