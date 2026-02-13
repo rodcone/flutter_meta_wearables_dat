@@ -1,3 +1,7 @@
+![Pub Version](https://img.shields.io/pub/v/flutter_meta_wearables_dat)
+![Pub Likes](https://img.shields.io/pub/likes/flutter_meta_wearables_dat)
+![Pub Points](https://img.shields.io/pub/points/flutter_meta_wearables_dat)
+![Pub Downloads](https://img.shields.io/pub/dm/flutter_meta_wearables_dat)
 [![style: very good analysis](https://img.shields.io/badge/style-very_good_analysis-B22C89.svg)](https://pub.dev/packages/very_good_analysis)
 
 # flutter_meta_wearables_dat
@@ -6,10 +10,10 @@
 
 A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolkit (DAT), enabling integration with Meta AI Glasses for iOS and Android.
 
-## 📋 Table of contents
+## Table of contents
 - [flutter\_meta\_wearables\_dat](#flutter_meta_wearables_dat)
-  - [📋 Table of contents](#-table-of-contents)
-  - [⚠️ Publishing disclaimer](#️-publishing-disclaimer)
+  - [Table of contents](#table-of-contents)
+  - [Publishing disclaimer](#publishing-disclaimer)
   - [Setup](#setup)
     - [iOS Configuration](#ios-configuration)
     - [Android Configuration](#android-configuration)
@@ -23,9 +27,10 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
     - [2. Permissions (First-time camera access)](#2-permissions-first-time-camera-access)
     - [3. Session (After registration and permissions)](#3-session-after-registration-and-permissions)
   - [Example app](#example-app)
+  - [Contributing](#contributing)
   - [License](#license)
 
-## ⚠️ Publishing disclaimer
+## Publishing disclaimer
 
 The Meta Wearables Device Access Toolkit is currently in **developer preview**. During this phase:
 
@@ -246,6 +251,10 @@ Here's a demo showing how the DAT integration looks like:
 
 ![optimized](https://github.com/user-attachments/assets/9b81450d-6d80-4d58-9738-245c8cba49ed)
 
+## Contributing
+
+Contributions are welcome! Feel free to open [issues](https://github.com/rodcone/flutter_meta_wearables_dat/issues) for bugs or feature requests, and [pull requests](https://github.com/rodcone/flutter_meta_wearables_dat/pulls) for improvements.
+
 ## License
 
-To be defined.
+MIT License — see [LICENSE](LICENSE) for details.
