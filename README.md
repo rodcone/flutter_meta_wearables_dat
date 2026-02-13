@@ -2,9 +2,9 @@
 
 # flutter_meta_wearables_dat
 
-<img width="500" height="95" alt="flutter_dat" src="https://github.com/user-attachments/assets/7a603ae6-c99c-44c0-92f6-70e871082a89" />
+<img width="500" height="95" alt="flutter_dat" src="https://github.com/user-attachments/assets/b3958072-1bb5-434d-8006-8f35ae054213" />
 
-A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolkit (DAT), enabling integration with Meta AI Glasses.
+A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolkit (DAT), enabling integration with Meta AI Glasses for iOS and Android.
 
 ## 📋 Table of contents
 - [flutter\_meta\_wearables\_dat](#flutter_meta_wearables_dat)
