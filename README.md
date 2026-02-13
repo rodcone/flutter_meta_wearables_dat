@@ -26,6 +26,7 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
     - [1. Registration (One-time)](#1-registration-one-time)
     - [2. Permissions (First-time camera access)](#2-permissions-first-time-camera-access)
     - [3. Session (After registration and permissions)](#3-session-after-registration-and-permissions)
+  - [Troubleshooting](#troubleshooting)
   - [Example app](#example-app)
   - [Contributing](#contributing)
   - [License](#license)
@@ -242,6 +243,19 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - Call `MetaWearablesDat.stopStreamSession(deviceUUID)` to end the session
 
 **Note:** See the example app for a complete implementation.
+
+## Troubleshooting
+
+If you run into issues, try these steps first:
+
+- **Update Meta AI app** — Make sure you have the latest version of the Meta AI app installed on your phone.
+- **Update Glasses in Meta AI app** — In the Meta AI app, check for and install any available firmware updates for your glasses.
+- **Verify installation** — Ensure you have followed all installation steps above, including configuration in your code and in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter).
+- **Restart your glasses** — If the glasses don't connect or the stream doesn't start, try restarting them:
+  1. Switch the power button to off.
+  2. Press and hold the capture button, then slide the power switch on.
+  3. Release the capture button when the LED turns red (don't wait until the LED turns white).
+- **Still having issues?** — Open a [GitHub issue](https://github.com/rodcone/flutter_meta_wearables_dat/issues) with all the details you can provide. This helps us pinpoint the problem and assist you more efficiently.
 
 ## Example app
 
