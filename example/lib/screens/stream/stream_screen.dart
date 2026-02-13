@@ -1,4 +1,4 @@
-import 'dart:ui' as ui;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,10 +18,6 @@ class StreamScreen extends StatefulWidget {
 }
 
 class _StreamScreenState extends State<StreamScreen> {
-  static const _videoFramesChannel = EventChannel(
-    'flutter_meta_wearables_dat/video_frames',
-  );
-
   @override
   Widget build(BuildContext context) {
     return Consumer3<
@@ -30,9 +26,6 @@ class _StreamScreenState extends State<StreamScreen> {
       stream_providers.StreamSessionProvider
     >(
       builder: (context, deviceProvider, mockDeviceProvider, streamProvider, child) {
-        // deviceUUID is optional - use "auto" for AutoDeviceSelector if null
-        final deviceUUID = mockDeviceProvider.deviceUUID ?? 'auto';
-
         // Use the actual active device status from the DAT SDK
         final hasActiveDevice = streamProvider.hasActiveDevice;
 
@@ -41,10 +34,8 @@ class _StreamScreenState extends State<StreamScreen> {
             // Full screen video stream or placeholder
             Positioned.fill(
               child: streamProvider.isStreaming
-                  ? _VideoStreamWidget(
-                      stream: _videoFramesChannel.receiveBroadcastStream({
-                        'deviceUUID': deviceUUID,
-                      }),
+                  ? _TextureStreamWidget(
+                      textureId: streamProvider.textureId!,
                     )
                   : ColoredBox(
                       color: Colors.black,
@@ -121,19 +112,32 @@ class _StreamScreenState extends State<StreamScreen> {
                         ),
                       ),
                     ),
+                    // FPS and quality settings (only when not streaming)
+                    if (!streamProvider.isStreaming)
+                      _StreamSettingsRow(
+                        fps: streamProvider.fps,
+                        highQuality: streamProvider.highQuality,
+                        onFpsChanged: streamProvider.setFps,
+                        onHighQualityChanged: streamProvider.setHighQuality,
+                      ),
                     // Show Start button only when not streaming
                     if (!streamProvider.isStreaming)
                       MetaButton.text(
                         text: 'Start streaming',
                         enabled: hasActiveDevice,
                         onPressed: () async {
+                          unawaited(HapticFeedback.mediumImpact());
+
                           if (!hasActiveDevice) return;
 
                           final hasPermission = await deviceProvider
                               .ensureCameraPermission();
                           if (!hasPermission || !context.mounted) return;
 
-                          await streamProvider.startStreamSession(fps: 45);
+                          await streamProvider.startStreamSession(
+                            fps: streamProvider.fps,
+                            streamQuality: streamProvider.streamQuality,
+                          );
                         },
                       ),
                     // Show Stop button only when streaming
@@ -152,6 +156,8 @@ class _StreamScreenState extends State<StreamScreen> {
                           MetaButton.icon(
                             icon: const Icon(Icons.camera_alt),
                             onPressed: () async {
+                              unawaited(HapticFeedback.mediumImpact());
+
                               final photo = await streamProvider.capturePhoto();
                               if (photo == null || !context.mounted) {
                                 return;
@@ -191,145 +197,148 @@ class _StreamScreenState extends State<StreamScreen> {
   }
 }
 
-class _VideoStreamWidget extends StatefulWidget {
-  final Stream<dynamic> stream;
+class _StreamSettingsRow extends StatelessWidget {
+  final double fps;
+  final bool highQuality;
+  final ValueChanged<double> onFpsChanged;
+  final ValueChanged<bool> onHighQualityChanged;
 
-  const _VideoStreamWidget({required this.stream});
+  const _StreamSettingsRow({
+    required this.fps,
+    required this.highQuality,
+    required this.onFpsChanged,
+    required this.onHighQualityChanged,
+  });
 
-  @override
-  State<_VideoStreamWidget> createState() => _VideoStreamWidgetState();
-}
-
-class _VideoStreamWidgetState extends State<_VideoStreamWidget> {
-  Uint8List? _lastFrameBytes;
-  ui.Image? _decodedImage;
-
-  @override
-  void dispose() {
-    _decodedImage?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _decodeAndSetImage(Uint8List bytes) async {
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    final newImage = frame.image;
-
-    if (mounted) {
-      setState(() {
-        _decodedImage?.dispose();
-        _decodedImage = newImage;
-        _lastFrameBytes = bytes;
-      });
-    } else {
-      newImage.dispose();
-    }
-  }
+  static const List<(double, IconData)> _fpsOptions = [
+    (30.0, Icons.thirty_fps_select),
+    (60.0, Icons.sixty_fps_select),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: Colors.black,
-      child: StreamBuilder<dynamic>(
-        stream: widget.stream,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                'Stream error: ${snapshot.error}',
-                style: const TextStyle(color: Colors.white),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12, left: 50, right: 50),
+      child: Row(
+        children: [
+          // FPS selection
+          ..._fpsOptions.map(
+            (option) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: _FpsIconButton(
+                fps: option.$1,
+                icon: option.$2,
+                selected: fps == option.$1,
+                onTap: () => onFpsChanged(option.$1),
               ),
-            );
-          }
-
-          // Decode and update frame when new data arrives
-          if (snapshot.hasData) {
-            final bytes = snapshot.data as Uint8List;
-            // Only decode if it's a new frame (check by reference first, then by content if needed)
-            if (_lastFrameBytes != bytes) {
-              // Quick reference check - if different object, it's definitely a new frame
-              _decodeAndSetImage(bytes);
-            }
-          }
-
-          // Show decoded image if available, otherwise show waiting message
-          if (_decodedImage != null) {
-            // Check if image is landscape and needs rotation to portrait
-            final isLandscape = _decodedImage!.width > _decodedImage!.height;
-            return RepaintBoundary(
-              child: isLandscape
-                  ? RotatedBox(
-                      quarterTurns: 1,
-                      child: CustomPaint(
-                        painter: _ImagePainter(_decodedImage!),
-                        child: Container(),
-                      ),
-                    )
-                  : CustomPaint(
-                      painter: _ImagePainter(_decodedImage!),
-                      child: Container(),
-                    ),
-            );
-          }
-
-          return const Center(
-            child: Text(
-              'Waiting for frames…',
-              style: TextStyle(color: Colors.white70),
             ),
-          );
-        },
+          ),
+          const Spacer(),
+          // Quality toggle (high = filled, medium = outlined)
+          _QualityIconButton(
+            highQuality: highQuality,
+            onTap: () => onHighQualityChanged(!highQuality),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _ImagePainter extends CustomPainter {
-  final ui.Image image;
+class _FpsIconButton extends StatelessWidget {
+  final double fps;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
 
-  _ImagePainter(this.image);
+  const _FpsIconButton({
+    required this.fps,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final srcRect = Rect.fromLTWH(
-      0,
-      0,
-      image.width.toDouble(),
-      image.height.toDouble(),
+  Widget build(BuildContext context) {
+    final color = selected ? Colors.white : Colors.white.withOpacity(0.5);
+    return Tooltip(
+      message: '${fps.toInt()} fps',
+      child: Material(
+        color: selected
+            ? Colors.white.withOpacity(0.15)
+            : Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(icon, size: 24, color: color),
+          ),
+        ),
+      ),
     );
-
-    // Calculate aspect ratio preserving rect
-    // For portrait display, we want to fit the image to fill the canvas
-    // while maintaining aspect ratio
-    final imageAspect = image.width / image.height;
-    final canvasAspect = size.width / size.height;
-
-    Rect targetRect;
-    if (imageAspect > canvasAspect) {
-      // Image is wider than canvas aspect - fit to height and center horizontally
-      final width = size.height * imageAspect;
-      targetRect = Rect.fromLTWH(
-        (size.width - width) / 2,
-        0,
-        width,
-        size.height,
-      );
-    } else {
-      // Image is taller than canvas aspect - fit to width and center vertically
-      final height = size.width / imageAspect;
-      targetRect = Rect.fromLTWH(
-        0,
-        (size.height - height) / 2,
-        size.width,
-        height,
-      );
-    }
-
-    canvas.drawImageRect(image, srcRect, targetRect, Paint());
   }
+}
+
+class _QualityIconButton extends StatelessWidget {
+  final bool highQuality;
+  final VoidCallback onTap;
+
+  const _QualityIconButton({
+    required this.highQuality,
+    required this.onTap,
+  });
 
   @override
-  bool shouldRepaint(_ImagePainter oldDelegate) {
-    return oldDelegate.image != image;
+  Widget build(BuildContext context) {
+    final color = highQuality ? Colors.white : Colors.white.withOpacity(0.5);
+    return Tooltip(
+      message: highQuality ? 'High quality' : 'Medium quality',
+      child: Material(
+        color: highQuality
+            ? Colors.white.withOpacity(0.15)
+            : Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(
+              highQuality ? Icons.high_quality : Icons.high_quality_outlined,
+              size: 24,
+              color: color,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Renders the video stream using Flutter's Texture API (zero-copy).
+/// The native side pushes CVPixelBuffer / SurfaceTexture frames directly —
+/// no JPEG encoding, no byte copying, no Dart-side decoding.
+class _TextureStreamWidget extends StatelessWidget {
+  final int textureId;
+
+  const _TextureStreamWidget({required this.textureId});
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black,
+      child: SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: 720,
+            height: 1280,
+            child: Texture(textureId: textureId),
+          ),
+        ),
+      ),
+    );
   }
 }

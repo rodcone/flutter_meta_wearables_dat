@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
@@ -128,11 +129,14 @@ class _MyAppState extends State<MyApp> {
                       heroTag: 'mock_device',
                       backgroundColor: Colors.blue,
                       tooltip: 'Mock device',
-                      onPressed: () => showModalBottomSheet<void>(
-                        isScrollControlled: true,
-                        context: context,
-                        builder: (ctx) => const MockDeviceSheet(),
-                      ),
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        showModalBottomSheet<void>(
+                          isScrollControlled: true,
+                          context: context,
+                          builder: (ctx) => const MockDeviceSheet(),
+                        );
+                      },
                       child: const Icon(Icons.bug_report, color: Colors.white),
                     ),
                   ],

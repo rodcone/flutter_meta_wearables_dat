@@ -4,12 +4,12 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
-import android.os.Handler
-import android.os.Looper
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.util.Log
+import android.view.Surface
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.meta.wearable.dat.camera.StreamSession
 import com.meta.wearable.dat.camera.startStreamSession
 import com.meta.wearable.dat.camera.types.PhotoData
@@ -32,17 +32,17 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry
+import io.flutter.view.TextureRegistry
 import java.io.ByteArrayOutputStream
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
+import java.nio.ByteBuffer
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -106,9 +106,13 @@ class MetaWearablesDatPlugin :
     private val frameCounters = mutableMapOf<String, Int>()
     private val videoJobs = mutableMapOf<String, Job>()
     private val stateJobs = mutableMapOf<String, Job>()
-    private lateinit var videoFramesChannel: EventChannel
-    private var videoFramesStreamHandler: VideoFramesStreamHandler? = null
-    private val mainHandler = Handler(Looper.getMainLooper())
+    // Texture API — renders I420 frames to a SurfaceTexture
+    // instead of encoding to JPEG and copying bytes across the platform channel.
+    private var textureRegistry: TextureRegistry? = null
+    private val textureEntries = mutableMapOf<String, TextureRegistry.SurfaceTextureEntry>()
+    private val textureSurfaces = mutableMapOf<String, Surface>()
+    // Reusable bitmap per session to avoid per-frame allocation
+    private val reusableBitmaps = mutableMapOf<String, Bitmap>()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_meta_wearables_dat")
@@ -140,13 +144,7 @@ class MetaWearablesDatPlugin :
                 )
         registrationStateChannel.setStreamHandler(registrationStateStreamHandler)
 
-        videoFramesChannel =
-                EventChannel(
-                        flutterPluginBinding.binaryMessenger,
-                        "flutter_meta_wearables_dat/video_frames"
-                )
-        videoFramesStreamHandler = VideoFramesStreamHandler()
-        videoFramesChannel.setStreamHandler(videoFramesStreamHandler)
+        textureRegistry = flutterPluginBinding.textureRegistry
 
         val context = flutterPluginBinding.applicationContext
         application = context as? Application
@@ -159,7 +157,6 @@ class MetaWearablesDatPlugin :
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
-            "getPlatformVersion" -> result.success("Android ${android.os.Build.VERSION.RELEASE}")
             "requestAndroidPermissions" -> requestAndroidPermissions(result)
             "startRegistration" -> startRegistration(result)
             "disconnect" -> disconnect(result)
@@ -192,9 +189,6 @@ class MetaWearablesDatPlugin :
         registrationStateChannel.setStreamHandler(null)
         registrationStateStreamHandler?.dispose()
         registrationStateStreamHandler = null
-        videoFramesChannel.setStreamHandler(null)
-        videoFramesStreamHandler?.dispose()
-        videoFramesStreamHandler = null
 
         // Clean up all stream sessions
         videoJobs.values.forEach { it.cancel() }
@@ -206,6 +200,15 @@ class MetaWearablesDatPlugin :
         targetFPS.clear()
         frameCounters.clear()
         lastFrameSendTime.clear()
+
+        // Clean up texture resources
+        textureSurfaces.values.forEach { it.release() }
+        textureSurfaces.clear()
+        textureEntries.values.forEach { it.release() }
+        textureEntries.clear()
+        reusableBitmaps.values.forEach { it.recycle() }
+        reusableBitmaps.clear()
+        textureRegistry = null
 
         scope.cancel()
     }
@@ -265,8 +268,9 @@ class MetaWearablesDatPlugin :
         if (requestCode != BT_PERMISSION_REQUEST_CODE) return false
         val pendingResult = btPermissionResult ?: return false
         btPermissionResult = null
-        val allGranted = grantResults.isNotEmpty() &&
-                grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+        val allGranted =
+                grantResults.isNotEmpty() &&
+                        grantResults.all { it == PackageManager.PERMISSION_GRANTED }
         if (allGranted) {
             // Initialize SDK now that BT permissions are granted (mirrors reference app pattern)
             btPermissionsGranted = true
@@ -340,9 +344,7 @@ class MetaWearablesDatPlugin :
     private suspend fun checkCameraPermissionStatus(result: Result): PermissionStatus? {
         val checkResult = Wearables.checkPermissionStatus(Permission.CAMERA)
         var permissionErrorMessage: String? = null
-        checkResult.onFailure { error, _ ->
-            permissionErrorMessage = error.description
-        }
+        checkResult.onFailure { error, _ -> permissionErrorMessage = error.description }
         if (permissionErrorMessage != null) {
             result.error("PERMISSION_ERROR", permissionErrorMessage, null)
             return null
@@ -351,8 +353,8 @@ class MetaWearablesDatPlugin :
     }
 
     /**
-     * Request camera permission from the wearable device. Uses startActivityForResult with
-     * the DAT SDK's RequestPermissionContract to show the Meta AI permission bottom sheet.
+     * Request camera permission from the wearable device. Uses startActivityForResult with the DAT
+     * SDK's RequestPermissionContract to show the Meta AI permission bottom sheet.
      */
     private fun requestCameraPermission(result: Result) {
         scope.launch {
@@ -380,8 +382,7 @@ class MetaWearablesDatPlugin :
                             suspendCancellableCoroutine<PermissionStatus> { continuation ->
                                 permissionContinuation = continuation
                                 continuation.invokeOnCancellation { permissionContinuation = null }
-                                val intent =
-                                        permissionContract.createIntent(act, Permission.CAMERA)
+                                val intent = permissionContract.createIntent(act, Permission.CAMERA)
                                 act.startActivityForResult(intent, PERMISSION_REQUEST_CODE)
                             }
 
@@ -616,15 +617,17 @@ class MetaWearablesDatPlugin :
 
         val args = call.arguments as? Map<*, *>
         val fps = (args?.get("fps") as? Double) ?: 30.0
+        val streamQuality = parseStreamQuality(args?.get("streamQuality") as? String)
         val deviceUUID = args?.get("deviceUUID") as? String
         val sessionKey = deviceUUID ?: "auto"
 
         if (streamSessions.containsKey(sessionKey)) {
-            result.error(
-                    "SESSION_EXISTS",
-                    "Stream session already exists for '$sessionKey'. Stop it first.",
-                    null
-            )
+            val existingEntry = textureEntries[sessionKey]
+            if (existingEntry != null) {
+                result.success(existingEntry.id())
+            } else {
+                result.error("TEXTURE_REGISTRATION_FAILED", "No texture registered for session $sessionKey", null)
+            }
             return
         }
 
@@ -636,23 +639,44 @@ class MetaWearablesDatPlugin :
                 frameCounters[sessionKey] = 0
                 lastFrameSendTime.remove(sessionKey)
 
+                // Register a Flutter texture for zero-copy rendering
+                val registry = textureRegistry
+                if (registry == null) {
+                    result.error("TEXTURE_REGISTRATION_FAILED", "TextureRegistry is not available.", null)
+                    return@launch
+                }
+                val entry = registry.createSurfaceTexture()
+                val surfaceTexture = entry.surfaceTexture()
+                // Set default buffer size — will be updated when first frame arrives
+                surfaceTexture.setDefaultBufferSize(1280, 720)
+                val surface = Surface(surfaceTexture)
+                textureEntries[sessionKey] = entry
+                textureSurfaces[sessionKey] = surface
+                val textureId = entry.id()
+                Log.d(TAG, "Registered texture $textureId for session $sessionKey")
+
                 val streamSession =
                         Wearables.startStreamSession(
                                 app,
                                 deviceSelector,
-                                StreamConfiguration(
-                                        videoQuality = VideoQuality.MEDIUM,
-                                        fps.toInt()
-                                )
+                                StreamConfiguration(videoQuality = streamQuality, fps.toInt())
                         )
                 streamSessions[sessionKey] = streamSession
 
-                videoJobs[sessionKey] =
-                        scope.launch(Dispatchers.Default) {
-                            streamSession.videoStream.collect { videoFrame ->
-                                processAndSendFrame(videoFrame, sessionKey)
+                // Subscribe to video frames — render I420 → ARGB bitmap → SurfaceTexture
+                videoJobs[sessionKey] = scope.launch(Dispatchers.Default) {
+                    streamSession.videoStream.collect { videoFrame ->
+                        // Update SurfaceTexture buffer size if frame dimensions change
+                        val texEntry = textureEntries[sessionKey]
+                        if (texEntry != null) {
+                            val bmp = reusableBitmaps[sessionKey]
+                            if (bmp == null || bmp.width != videoFrame.width || bmp.height != videoFrame.height) {
+                                texEntry.surfaceTexture().setDefaultBufferSize(videoFrame.width, videoFrame.height)
                             }
                         }
+                        processAndSendFrame(videoFrame, sessionKey)
+                    }
+                }
 
                 stateJobs[sessionKey] =
                         scope.launch {
@@ -661,15 +685,11 @@ class MetaWearablesDatPlugin :
                             }
                         }
 
-                result.success(true)
+                result.success(textureId)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start stream session", e)
                 cleanupSession(sessionKey)
-                result.error(
-                        "STREAM_ERROR",
-                        e.message ?: "Failed to start stream session.",
-                        null
-                )
+                result.error("STREAM_ERROR", e.message ?: "Failed to start stream session.", null)
             }
         }
     }
@@ -681,11 +701,7 @@ class MetaWearablesDatPlugin :
 
         val streamSession = streamSessions[sessionKey]
         if (streamSession == null) {
-            result.error(
-                    "SESSION_NOT_FOUND",
-                    "No stream session found for '$sessionKey'.",
-                    null
-            )
+            result.error("SESSION_NOT_FOUND", "No stream session found for '$sessionKey'.", null)
             return
         }
 
@@ -697,6 +713,7 @@ class MetaWearablesDatPlugin :
         result.success(true)
     }
 
+
     private fun capturePhoto(call: MethodCall, result: Result) {
         val args = call.arguments as? Map<*, *>
         val deviceUUID = args?.get("deviceUUID") as? String
@@ -704,11 +721,7 @@ class MetaWearablesDatPlugin :
 
         val streamSession = streamSessions[sessionKey]
         if (streamSession == null) {
-            result.error(
-                    "SESSION_NOT_FOUND",
-                    "No stream session found for '$sessionKey'.",
-                    null
-            )
+            result.error("SESSION_NOT_FOUND", "No stream session found for '$sessionKey'.", null)
             return
         }
 
@@ -726,7 +739,10 @@ class MetaWearablesDatPlugin :
                                                     85,
                                                     stream
                                             )
-                                            mapOf("bytes" to stream.toByteArray(), "format" to "jpeg")
+                                            mapOf(
+                                                    "bytes" to stream.toByteArray(),
+                                                    "format" to "jpeg"
+                                            )
                                         }
                                         is PhotoData.HEIC -> {
                                             val buffer = photoData.data
@@ -747,22 +763,16 @@ class MetaWearablesDatPlugin :
                         }
             } catch (e: Exception) {
                 Log.e(TAG, "Photo capture exception", e)
-                result.error(
-                        "CAPTURE_PHOTO_FAILED",
-                        e.message ?: "Photo capture failed.",
-                        null
-                )
+                result.error("CAPTURE_PHOTO_FAILED", e.message ?: "Photo capture failed.", null)
             }
         }
     }
 
     /**
-     * Process a video frame: apply FPS throttling, convert I420 to JPEG, and send to Flutter.
-     * Called on Dispatchers.Default — dispatches to main thread for EventSink delivery.
+     * Convert I420 → ARGB bitmap → draw onto SurfaceTexture (zero-copy path).
+     * Called on Dispatchers.Default.
      */
     private fun processAndSendFrame(videoFrame: VideoFrame, sessionKey: String) {
-        val eventSink = videoFramesStreamHandler?.eventSink ?: return
-
         // FPS throttling
         val fps = targetFPS[sessionKey] ?: 30.0
         val minIntervalNanos = (1_000_000_000.0 / fps).toLong()
@@ -772,9 +782,35 @@ class MetaWearablesDatPlugin :
             return
         }
 
-        val jpegBytes = videoFrameToJpegBytes(videoFrame) ?: return
+        val surface = textureSurfaces[sessionKey] ?: return
+        if (!surface.isValid) return
 
-        mainHandler.post { eventSink.success(jpegBytes) }
+        val width = videoFrame.width
+        val height = videoFrame.height
+
+        // Reuse bitmap to avoid per-frame allocation
+        var bitmap = reusableBitmaps[sessionKey]
+        if (bitmap == null || bitmap.width != width || bitmap.height != height) {
+            bitmap?.recycle()
+            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            reusableBitmaps[sessionKey] = bitmap
+        }
+
+        // Convert I420 → ARGB directly into the bitmap's pixel buffer
+        convertI420toArgbBitmap(videoFrame.buffer, width, height, bitmap)
+
+        // Draw bitmap onto the SurfaceTexture — this pushes a frame to Flutter
+        try {
+            val canvas: Canvas = surface.lockCanvas(null) ?: return
+            try {
+                canvas.drawBitmap(bitmap, 0f, 0f, null)
+            } finally {
+                surface.unlockCanvasAndPost(canvas)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to render frame to texture surface", e)
+            return
+        }
 
         lastFrameSendTime[sessionKey] = now
         val count = (frameCounters[sessionKey] ?: 0) + 1
@@ -783,53 +819,49 @@ class MetaWearablesDatPlugin :
             val actualFPS = 1_000_000_000.0 / (now - lastTime)
             Log.d(
                     TAG,
-                    "Emitted $count frames for session: $sessionKey, " +
-                            "target FPS: $fps, actual FPS: ${"%.1f".format(actualFPS)}"
+                    "Texture path — $count frames for $sessionKey, " +
+                            "target: $fps, actual: ${"%.1f".format(actualFPS)} FPS"
             )
         }
     }
 
     /**
-     * Convert a VideoFrame (I420 format) to JPEG bytes.
-     * Pipeline: extract ByteBuffer → I420 → NV21 → YuvImage → JPEG (quality 85).
+     * Convert I420 (planar YUV) directly to an ARGB_8888 Bitmap — no JPEG intermediate step.
+     * Uses the BT.601 full-range conversion matrix. Writes directly into [bitmap]'s pixels.
      */
-    private fun videoFrameToJpegBytes(videoFrame: VideoFrame): ByteArray? {
-        val buffer = videoFrame.buffer
-        val width = videoFrame.width
-        val height = videoFrame.height
-
+    private fun convertI420toArgbBitmap(buffer: ByteBuffer, width: Int, height: Int, bitmap: Bitmap) {
         val dataSize = buffer.remaining()
         val byteArray = ByteArray(dataSize)
         val originalPosition = buffer.position()
         buffer.get(byteArray)
         buffer.position(originalPosition)
 
-        val nv21 = convertI420toNV21(byteArray, width, height)
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-
-        val outputStream = ByteArrayOutputStream()
-        val success =
-                yuvImage.compressToJpeg(Rect(0, 0, width, height), 85, outputStream)
-        return if (success) outputStream.toByteArray() else null
-    }
-
-    /**
-     * Convert I420 (planar YUV: Y + U + V) to NV21 (semi-planar: Y + VU interleaved).
-     */
-    private fun convertI420toNV21(input: ByteArray, width: Int, height: Int): ByteArray {
-        val output = ByteArray(input.size)
         val ySize = width * height
         val uvQuarter = ySize / 4
+        val pixels = IntArray(ySize)
 
-        // Y plane is unchanged
-        input.copyInto(output, 0, 0, ySize)
+        for (j in 0 until height) {
+            for (i in 0 until width) {
+                val yIndex = j * width + i
+                val uvIndex = (j / 2) * (width / 2) + (i / 2)
 
-        // Interleave U and V planes into VU order (NV21)
-        for (i in 0 until uvQuarter) {
-            output[ySize + i * 2] = input[ySize + uvQuarter + i]     // V
-            output[ySize + i * 2 + 1] = input[ySize + i]            // U
+                val y = (byteArray[yIndex].toInt() and 0xFF)
+                val u = (byteArray[ySize + uvIndex].toInt() and 0xFF) - 128
+                val v = (byteArray[ySize + uvQuarter + uvIndex].toInt() and 0xFF) - 128
+
+                var r = y + (1.370705f * v).toInt()
+                var g = y - (0.337633f * u).toInt() - (0.698001f * v).toInt()
+                var b = y + (1.732446f * u).toInt()
+
+                r = r.coerceIn(0, 255)
+                g = g.coerceIn(0, 255)
+                b = b.coerceIn(0, 255)
+
+                pixels[yIndex] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
         }
-        return output
+
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
     }
 
     private fun cleanupSession(sessionKey: String) {
@@ -839,6 +871,14 @@ class MetaWearablesDatPlugin :
         targetFPS.remove(sessionKey)
         frameCounters.remove(sessionKey)
         lastFrameSendTime.remove(sessionKey)
+        // Release texture resources
+        textureSurfaces.remove(sessionKey)?.release()
+        val entry = textureEntries.remove(sessionKey)
+        if (entry != null) {
+            Log.d(TAG, "Unregistered texture ${entry.id()} for session $sessionKey")
+            entry.release()
+        }
+        reusableBitmaps.remove(sessionKey)?.recycle()
     }
 
     // endregion
@@ -863,26 +903,18 @@ class MetaWearablesDatPlugin :
         }
     }
 
+    private fun parseStreamQuality(value: String?): VideoQuality {
+        return when (value?.lowercase()) {
+            "high" -> VideoQuality.HIGH
+            "low" -> VideoQuality.LOW
+            "medium" -> VideoQuality.MEDIUM
+            else -> VideoQuality.HIGH
+        }
+    }
+
     // endregion
 
     // region Stream Handlers
-
-    private class VideoFramesStreamHandler : EventChannel.StreamHandler {
-        var eventSink: EventChannel.EventSink? = null
-            private set
-
-        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-            eventSink = events
-        }
-
-        override fun onCancel(arguments: Any?) {
-            eventSink = null
-        }
-
-        fun dispose() {
-            eventSink = null
-        }
-    }
 
     private class ActiveDeviceStreamHandler(
             private val deviceSelector: DeviceSelector,
@@ -911,10 +943,9 @@ class MetaWearablesDatPlugin :
         }
 
         /**
-         * Restart device monitoring by cancelling the current collection and
-         * re-subscribing to the active device flow. Called after BT permissions
-         * are granted or after registration completes so the flow picks up
-         * newly available devices.
+         * Restart device monitoring by cancelling the current collection and re-subscribing to the
+         * active device flow. Called after BT permissions are granted or after registration
+         * completes so the flow picks up newly available devices.
          */
         fun restartMonitoring() {
             val sink = eventSink ?: return
@@ -966,8 +997,8 @@ class MetaWearablesDatPlugin :
         }
 
         /**
-         * Start or restart collecting registration state events.
-         * Called when SDK becomes initialized.
+         * Start or restart collecting registration state events. Called when SDK becomes
+         * initialized.
          */
         fun restartMonitoring() {
             val sink = eventSink ?: return

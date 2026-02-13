@@ -27,10 +27,6 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     _instance = instance;
   }
 
-  Future<String?> getPlatformVersion() {
-    throw UnimplementedError('platformVersion() has not been implemented.');
-  }
-
   Future<String?> pairMockRayBanMeta() {
     throw UnimplementedError('pairMockRayBanMeta() has not been implemented.');
   }
@@ -97,7 +93,13 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     );
   }
 
-  Future<bool> startStreamSession(String? deviceUUID, {double fps = 30.0}) {
+  /// Starts a stream session. Returns a texture ID (int) for rendering
+  /// via the Flutter `Texture` widget (zero-copy path).
+  Future<int> startStreamSession(
+    String? deviceUUID, {
+    double fps = 30.0,
+    StreamQuality streamQuality = StreamQuality.high,
+  }) {
     throw UnimplementedError('startStreamSession() has not been implemented.');
   }
 

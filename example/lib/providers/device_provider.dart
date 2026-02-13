@@ -66,6 +66,8 @@ class DeviceProvider extends ChangeNotifier {
   }
 
   Future<void> disconnect() async {
+    unawaited(HapticFeedback.lightImpact());
+
     try {
       await MetaWearablesDat.disconnect();
     } on PlatformException catch (e) {
@@ -84,6 +86,8 @@ class DeviceProvider extends ChangeNotifier {
   }
 
   Future<void> startRegistration() async {
+    unawaited(HapticFeedback.mediumImpact());
+
     try {
       await MetaWearablesDat.startRegistration();
     } on PlatformException catch (e) {

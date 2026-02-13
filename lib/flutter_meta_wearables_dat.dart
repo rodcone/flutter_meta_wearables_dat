@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_meta_wearables_dat/meta_wearables_dat_platform_interface.dart';
 
 /// Represents the current state of user registration with the Meta Wearables platform.
@@ -28,6 +29,23 @@ enum RegistrationState {
       orElse: () => RegistrationState.unavailable,
     );
   }
+}
+
+/// Supported streaming quality levels.
+enum StreamQuality {
+  /// High quality stream (best image quality, highest bandwidth/CPU).
+  high('high'),
+
+  /// Medium quality stream (balanced quality/performance).
+  medium('medium'),
+
+  /// Low quality stream (lowest bandwidth/CPU usage).
+  low('low');
+
+  const StreamQuality(this.value);
+
+  /// String value sent over the platform channel.
+  final String value;
 }
 
 /// Exception thrown when a camera permission request fails.
@@ -77,11 +95,6 @@ class CapturedPhoto {
 
 /// The main class for the Meta Wearables DAT.
 class MetaWearablesDat {
-  /// Gets the platform version.
-  static Future<String?> getPlatformVersion() {
-    return MetaWearablesDatPlatform.instance.getPlatformVersion();
-  }
-
   /// Pairs a mock RayBan Meta device.
   static Future<String?> pairMockRayBanMeta() {
     return MetaWearablesDatPlatform.instance.pairMockRayBanMeta();
@@ -165,14 +178,23 @@ class MetaWearablesDat {
     );
   }
 
-  /// Starts a stream session with the given device UUID and FPS.
-  static Future<bool> startStreamSession(
+  /// Starts a stream session with the given device UUID, FPS, and stream quality.
+  ///
+  /// Returns a texture ID for rendering via the Flutter `Texture` widget.
+  /// Video frames are pushed directly from native to the GPU — no encoding,
+  /// no byte copying, no Dart-side decoding.
+  static Future<int> startStreamSession(
     String? deviceUUID, {
     double fps = 30.0,
+    StreamQuality streamQuality = StreamQuality.high,
   }) {
+    debugPrint(
+      '[MetaWearablesDAT] Starting stream session with device UUID: $deviceUUID, FPS: $fps, Stream quality: $streamQuality',
+    );
     return MetaWearablesDatPlatform.instance.startStreamSession(
       deviceUUID,
       fps: fps,
+      streamQuality: streamQuality,
     );
   }
 
@@ -183,17 +205,25 @@ class MetaWearablesDat {
 
   /// Captures a photo from the active stream session.
   static Future<CapturedPhoto> capturePhoto(String? deviceUUID) {
+    debugPrint(
+      '[MetaWearablesDAT] Capturing photo with device UUID: $deviceUUID',
+    );
     return MetaWearablesDatPlatform.instance.capturePhoto(deviceUUID);
   }
 
   /// Gets the current registration state.
-  static Future<RegistrationState> getRegistrationState() {
-    return MetaWearablesDatPlatform.instance.getRegistrationState();
+  static Future<RegistrationState> getRegistrationState() async {
+    final registrationState = await MetaWearablesDatPlatform.instance
+        .getRegistrationState();
+    debugPrint('[MetaWearablesDAT] Registration state: $registrationState');
+    return registrationState;
   }
 
   /// Stream of registration state changes.
   static Stream<RegistrationState> registrationStateStream() {
-    return MetaWearablesDatPlatform.instance.registrationStateStream();
+    final registrationStateStream = MetaWearablesDatPlatform.instance
+        .registrationStateStream();
+    return registrationStateStream;
   }
 
   /// Stream of active device availability changes.
