@@ -1,0 +1,262 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
+import 'package:flutter_meta_wearables_dat/meta_wearables_dat_platform_interface.dart';
+
+/// An implementation of [MetaWearablesDatPlatform] that uses method channels.
+class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
+  /// The method channel used to interact with the native platform.
+  @visibleForTesting
+  final methodChannel = const MethodChannel('flutter_meta_wearables_dat');
+
+  /// The event channel used to receive registration state updates.
+  @visibleForTesting
+  final eventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/registration_state',
+  );
+
+  /// The event channel used to receive active device availability updates.
+  @visibleForTesting
+  final activeDeviceEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/active_device',
+  );
+
+  @override
+  Future<String?> getPlatformVersion() async {
+    final version = await methodChannel.invokeMethod<String>(
+      'getPlatformVersion',
+    );
+    return version;
+  }
+
+  @override
+  Future<String?> pairMockRayBanMeta() async {
+    final deviceUUID = await methodChannel.invokeMethod<String>(
+      'pairMockRayBanMeta',
+    );
+    return deviceUUID;
+  }
+
+  @override
+  Future<bool> unpairMockRayBanMeta(String deviceUUID) async {
+    final ok = await methodChannel.invokeMethod<bool>('unpairMockRayBanMeta', {
+      'deviceUUID': deviceUUID,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> mockDevicePowerOn(String deviceUUID) async {
+    final ok = await methodChannel.invokeMethod<bool>('mockDevicePowerOn', {
+      'deviceUUID': deviceUUID,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> mockDevicePowerOff(String deviceUUID) async {
+    final ok = await methodChannel.invokeMethod<bool>('mockDevicePowerOff', {
+      'deviceUUID': deviceUUID,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> mockDeviceDon(String deviceUUID) async {
+    final ok = await methodChannel.invokeMethod<bool>('mockDeviceDon', {
+      'deviceUUID': deviceUUID,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> mockDeviceDoff(String deviceUUID) async {
+    final ok = await methodChannel.invokeMethod<bool>('mockDeviceDoff', {
+      'deviceUUID': deviceUUID,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> requestAndroidPermissions() async {
+    final ok = await methodChannel.invokeMethod<bool>(
+      'requestAndroidPermissions',
+    );
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> requestCameraPermission() async {
+    try {
+      final ok = await methodChannel.invokeMethod<bool>(
+        'requestCameraPermission',
+      );
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      throw CameraPermissionException(
+        code: e.code,
+        message: e.message ?? 'Unknown permission error',
+        details: e.details is Map<Object?, Object?>
+            ? Map<String, dynamic>.from(e.details as Map<Object?, Object?>)
+            : null,
+      );
+    }
+  }
+
+  @override
+  Future<bool> getCameraPermissionStatus() async {
+    try {
+      final ok = await methodChannel.invokeMethod<bool>(
+        'getCameraPermissionStatus',
+      );
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      throw CameraPermissionException(
+        code: e.code,
+        message: e.message ?? 'Unknown permission status error',
+        details: e.details is Map<Object?, Object?>
+            ? Map<String, dynamic>.from(e.details as Map<Object?, Object?>)
+            : null,
+      );
+    }
+  }
+
+  @override
+  Future<bool> startRegistration() async {
+    try {
+      final ok = await methodChannel.invokeMethod<bool>('startRegistration');
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      if (e.code == 'REGISTRATION_ERROR') {
+        // Re-throw with more context if needed, or handle specific error codes
+        throw PlatformException(
+          code: e.code,
+          message: e.message,
+          details: e.details,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<bool> handleUrl(String url) async {
+    final ok = await methodChannel.invokeMethod<bool>('handleUrl', {
+      'url': url,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> disconnect() async {
+    final ok = await methodChannel.invokeMethod<bool>('disconnect');
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> setMockCameraFeed(String deviceUUID, String? videoPath) async {
+    final ok = await methodChannel.invokeMethod<bool>('setMockCameraFeed', {
+      'deviceUUID': deviceUUID,
+      'videoPath': videoPath,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> setMockCapturedImage(
+    String deviceUUID,
+    String? imagePath,
+  ) async {
+    final ok = await methodChannel.invokeMethod<bool>('setMockCapturedImage', {
+      'deviceUUID': deviceUUID,
+      'imagePath': imagePath,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> startStreamSession(
+    String? deviceUUID, {
+    double fps = 30.0,
+  }) async {
+    final args = <String, dynamic>{'fps': fps};
+    if (deviceUUID != null) {
+      args['deviceUUID'] = deviceUUID;
+    }
+    final ok = await methodChannel.invokeMethod<bool>(
+      'startStreamSession',
+      args,
+    );
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> stopStreamSession(String? deviceUUID) async {
+    final args = <String, dynamic>{};
+    if (deviceUUID != null) {
+      args['deviceUUID'] = deviceUUID;
+    }
+    final ok = await methodChannel.invokeMethod<bool>(
+      'stopStreamSession',
+      args,
+    );
+    return ok ?? false;
+  }
+
+  @override
+  Future<CapturedPhoto> capturePhoto(String? deviceUUID) async {
+    final args = <String, dynamic>{};
+    if (deviceUUID != null) {
+      args['deviceUUID'] = deviceUUID;
+    }
+    final result = await methodChannel.invokeMapMethod<String, dynamic>(
+      'capturePhoto',
+      args,
+    );
+    if (result == null) {
+      throw PlatformException(
+        code: 'CAPTURE_PHOTO_FAILED',
+        message: 'No photo data returned from platform.',
+      );
+    }
+    final bytes = result['bytes'] as Uint8List?;
+    final format = result['format'] as String?;
+    if (bytes == null || format == null) {
+      throw PlatformException(
+        code: 'CAPTURE_PHOTO_FAILED',
+        message: 'Invalid photo data returned from platform.',
+      );
+    }
+    return CapturedPhoto(bytes: bytes, format: format);
+  }
+
+  @override
+  Future<RegistrationState> getRegistrationState() async {
+    final value = await methodChannel.invokeMethod<int>('getRegistrationState');
+    return RegistrationState.fromInt(value ?? 0);
+  }
+
+  @override
+  Stream<RegistrationState> registrationStateStream() {
+    return eventChannel.receiveBroadcastStream().map(
+      (dynamic event) => RegistrationState.fromInt(event as int),
+    );
+  }
+
+  @override
+  Stream<bool> activeDeviceStream() {
+    return activeDeviceEventChannel.receiveBroadcastStream().map(
+      (dynamic event) => event as bool,
+    );
+  }
+
+  @override
+  Future<bool> restartActiveDeviceMonitoring() async {
+    final ok = await methodChannel.invokeMethod<bool>(
+      'restartActiveDeviceMonitoring',
+    );
+    return ok ?? false;
+  }
+}

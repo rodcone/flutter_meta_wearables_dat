@@ -1,0 +1,50 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+# Libraries should not include pubspec.lock, per https://dart.dev/guides/libraries/private-files#pubspeclock.
+/pubspec.lock
+**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+/build/
+/coverage/
+
+# Meta Sample app used as reference
+docs/ios/CameraAccess/
+docs/android/CameraAccess/
+
+# --- SENSITIVE: Never commit these ---
+# Android local.properties (contains flutter.sdk path + GitHub token for DAT SDK)
+**/local.properties
+
+# Meta Wearables DAT secrets (copy from .template files, fill with real values)
+example/android/secrets.properties
+example/ios/Flutter/Secrets.xcconfig
+
+# Android signing keys (keystores and key.properties)
+**/key.properties
+**/*.keystore
+**/*.jks

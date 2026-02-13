@@ -1,0 +1,6 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"
+#include "Generated.xcconfig"
+// Meta DAT secrets - copy Secrets.template.xcconfig to Secrets.xcconfig
+META_APP_ID = YOUR_APP_ID
+META_CLIENT_TOKEN = YOUR_CLIENT_TOKEN
+#include? "Secrets.xcconfig"

@@ -1,0 +1,13 @@
+{
+    "dart.flutterSdkPath": null,
+    "dart.debugExternalPackageLibraries": false,
+    "dart.debugSdkLibraries": false,
+    "dart.previewFlutterUiGuides": true,
+    "dart.previewFlutterUiGuidesCustomTracking": true,
+    "files.exclude": {
+        "**/.git": true,
+        "**/.dart_tool": true,
+        "**/build": true
+    }
+}
+

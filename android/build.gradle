@@ -1,0 +1,75 @@
+group = "io.rodcone.flutter_meta_wearables_dat"
+version = "1.0-SNAPSHOT"
+
+ext.mwdat_version = "0.4.0"
+
+buildscript {
+    ext.kotlin_version = "2.1.0"
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.9.1")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    namespace = "io.rodcone.flutter_meta_wearables_dat"
+
+    compileSdk = 36
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
+    }
+
+    defaultConfig {
+        minSdk = 29
+    }
+
+    dependencies {
+        implementation("com.meta.wearable:mwdat-core:$mwdat_version")
+        implementation("com.meta.wearable:mwdat-camera:$mwdat_version")
+        implementation("com.meta.wearable:mwdat-mockdevice:$mwdat_version")
+        implementation("androidx.emoji2:emoji2:1.5.0")
+        // Required for ActivityResultRegistry and ComponentActivity
+        implementation("androidx.activity:activity-ktx:1.9.3")
+
+        testImplementation("org.jetbrains.kotlin:kotlin-test")
+        testImplementation("org.mockito:mockito-core:5.0.0")
+    }
+
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+
+            testLogging {
+               events "passed", "skipped", "failed", "standardOut", "standardError"
+               outputs.upToDateWhen {false}
+               showStandardStreams = true
+            }
+        }
+    }
+}

@@ -1,0 +1,10 @@
+include: package:very_good_analysis/analysis_options.yaml
+
+analyzer:
+  exclude: [lib/src/generated/**, lib/**/*.g.dart]
+  errors:
+    document_ignores: ignore
+    lines_longer_than_80_chars: ignore
+    public_member_api_docs: ignore
+    sort_constructors_first: ignore
+    todo: ignore
