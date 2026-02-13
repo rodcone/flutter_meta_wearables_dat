@@ -1,3 +1,8 @@
+## 0.1.0
+* Implement Texture API for streaming optimization.
+* Add `streamQuality` parameter.
+* Improve documentation and example app.
+
 ## 0.0.3
 * Fix demo gif in README.
 
