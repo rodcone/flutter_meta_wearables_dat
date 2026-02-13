@@ -249,7 +249,7 @@ The example app is a clone of the Meta's sample Camera Access native app.
 
 Here's a demo showing how the DAT integration looks like:
 
-![optimized](https://github.com/user-attachments/assets/9b81450d-6d80-4d58-9738-245c8cba49ed)
+![demo](https://github.com/user-attachments/assets/4947911e-5a37-4369-acb7-fdc005899821)
 
 ## Contributing
 
