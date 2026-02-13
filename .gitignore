@@ -33,8 +33,8 @@ migrate_working_dir/
 /coverage/
 
 # Meta Sample app used as reference
-docs/ios/CameraAccess/
-docs/android/CameraAccess/
+doc/ios/CameraAccess/
+doc/android/CameraAccess/
 
 # --- SENSITIVE: Never commit these ---
 # Android local.properties (contains flutter.sdk path + GitHub token for DAT SDK)

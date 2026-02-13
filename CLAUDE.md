@@ -76,7 +76,7 @@ Deep link handling via `app_links` package for DAT registration callbacks.
 
 ## Updating DAT Versions
 
-See `docs/MAINTAINERS.md` for detailed steps. Summary:
+See `doc/MAINTAINERS.md` for detailed steps. Summary:
 - **iOS**: Download xcframeworks from github.com/facebook/meta-wearables-dat-ios releases → replace in `ios/Frameworks/` → `pod update` in example/ios
 - **Android**: Update `ext.mwdat_version` in `android/build.gradle` → sync Gradle
 

@@ -1,7 +1,7 @@
 name: flutter_meta_wearables_dat
-description: "A new Flutter plugin project."
+description: "A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolkit (DAT)"
 version: 0.0.1
-homepage:
+repository: https://github.com/rodcone/flutter_meta_wearables_dat
 
 environment:
   sdk: ^3.9.2

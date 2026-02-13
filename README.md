@@ -22,6 +22,7 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
     - [1. Registration (One-time)](#1-registration-one-time)
     - [2. Permissions (First-time camera access)](#2-permissions-first-time-camera-access)
     - [3. Session (After registration and permissions)](#3-session-after-registration-and-permissions)
+  - [Example app](#example-app)
   - [License](#license)
 
 ## ⚠️ Publishing disclaimer
@@ -97,7 +98,7 @@ Add the following to your `Info.plist`:
 ```
 
 **Security:** Do not commit real `MetaAppID` or `ClientToken` values to public
-repositories. Use placeholders in docs and a gitignored config file for local
+repositories. Use placeholders in doc/ and a gitignored config file for local
 development (see the [example app README](example/README.md#secrets-setup-required-to-run)
 for the xcconfig / secrets.properties pattern used in this project).
 
