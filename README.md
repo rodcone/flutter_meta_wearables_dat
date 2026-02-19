@@ -14,7 +14,9 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
 - [flutter\_meta\_wearables\_dat](#flutter_meta_wearables_dat)
   - [Table of contents](#table-of-contents)
   - [Publishing disclaimer](#publishing-disclaimer)
+  - [Compatible devices](#compatible-devices)
   - [Setup](#setup)
+    - [Glasses setup (Developer mode)](#glasses-setup-developer-mode)
     - [iOS Configuration](#ios-configuration)
     - [Android Configuration](#android-configuration)
       - [1. AndroidManifest.xml](#1-androidmanifestxml)
@@ -41,7 +43,18 @@ The Meta Wearables Device Access Toolkit is currently in **developer preview**. 
 
 Meta is running the preview to test, learn, and refine the toolkit; broader publishing (general availability) is planned for 2026. For full details, see [Introducing the Meta Wearables Device Access Toolkit](https://developers.meta.com/blog/introducing-meta-wearables-device-access-toolkit/) and the [Meta Wearables FAQ](https://developer.meta.com/wearables/faq).
 
+## Compatible devices
+
+- Ray-Ban Meta (Gen 1 & 2)
+- Meta Ray-Ban Display
+- Oakley Meta HSTN
+- Oakley Meta Vanguard
+
 ## Setup
+
+### Glasses setup (Developer mode)
+
+To set up your glasses for development, you must enable **Developer mode** in the Meta AI app. See [Enable developer mode in the Meta AI app](https://wearables.developer.meta.com/docs/getting-started-toolkit/#enable-developer-mode-in-the-meta-ai-app) for instructions.
 
 ### iOS Configuration
 
@@ -102,11 +115,6 @@ Add the following to your `Info.plist`:
     </dict>
 </dict>
 ```
-
-**Security:** Do not commit real `MetaAppID` or `ClientToken` values to public
-repositories. Use placeholders in doc/ and a gitignored config file for local
-development (see the [example app README](example/README.md#secrets-setup-required-to-run)
-for the xcconfig / secrets.properties pattern used in this project).
 
 ### Android Configuration
 
@@ -259,7 +267,7 @@ await MetaWearablesDat.stopStreamSession(deviceUUID);
 
 Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
 
-**Note:** See the example app for a complete implementation.
+**Note:** See the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) for a complete implementation.
 
 ## Troubleshooting
 
@@ -272,11 +280,15 @@ If you run into issues, try these steps first:
   1. Switch the power button to off.
   2. Press and hold the capture button, then slide the power switch on.
   3. Release the capture button when the LED turns red (don't wait until the LED turns white).
-- **Still having issues?** — Open a [GitHub issue](https://github.com/rodcone/flutter_meta_wearables_dat/issues) with all the details you can provide. This helps us pinpoint the problem and assist you more efficiently.
+
+Common issues:
+- **Registration deep link not returning** — If registration opens the Meta AI app but the callback does not return to your app, verify that your URL scheme matches the one registered in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter). On iOS, ensure `CFBundleURLSchemes` in `Info.plist` (and `AppLinkURLScheme` in the `MWDAT` dict) use the same scheme. On Android, ensure the `data android:scheme` in your activity's intent-filter matches that scheme.
+
+**Still having issues?** — Open a [GitHub issue](https://github.com/rodcone/flutter_meta_wearables_dat/issues) with all the details you can provide. This helps us pinpoint the problem and assist you more efficiently.
 
 ## Example app
 
-The example app is a clone of the Meta's sample Camera Access native app.
+The [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) is a clone of the Meta's sample Camera Access native app.
 
 Here's a demo showing how the DAT integration looks like:
 

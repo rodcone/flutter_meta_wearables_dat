@@ -6,62 +6,18 @@ import MWDATMockDevice
 import AVFoundation
 import CoreMedia
 
-// MARK: - PixelBufferTexture
-/// A FlutterTexture backed by a CVPixelBuffer. When Flutter's rasteriser needs
-/// a new frame it calls `copyPixelBuffer()` which returns the latest buffer
-/// pushed from the native video-frame listener.
-private class PixelBufferTexture: NSObject, FlutterTexture {
-  /// The latest pixel buffer to be rendered. Access is guarded by an
-  /// unfair lock so the video-frame callback (main actor) and the raster
-  /// thread (which calls `copyPixelBuffer`) never race.
-  private var _latestPixelBuffer: CVPixelBuffer?
-  private var lock = os_unfair_lock()
-
-  var latestPixelBuffer: CVPixelBuffer? {
-    get {
-      os_unfair_lock_lock(&lock)
-      let buf = _latestPixelBuffer
-      os_unfair_lock_unlock(&lock)
-      return buf
-    }
-    set {
-      os_unfair_lock_lock(&lock)
-      _latestPixelBuffer = newValue
-      os_unfair_lock_unlock(&lock)
-    }
-  }
-
-  func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
-    os_unfair_lock_lock(&lock)
-    let buf = _latestPixelBuffer
-    os_unfair_lock_unlock(&lock)
-    guard let buf else { return nil }
-    return Unmanaged.passRetained(buf)
-  }
-}
-
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
-  // Dictionary to store StreamSession instances keyed by device UUID
-  private var streamSessions: [String: StreamSession] = [:]
-  // Video frame listener tokens
-  private var videoListenerTokens: [String: any MWDATCore.AnyListenerToken] = [:]
-  private var errorListenerTokens: [String: any MWDATCore.AnyListenerToken] = [:]
-  private var frameCounters: [String: Int] = [:]
-  // Frame rate throttling
-  private var targetFPS: [String: Double] = [:] // FPS per device
-  private var lastFrameSendTime: [String: Date] = [:]
-  // Device discovery
-  private var deviceDiscoveryToken: (any MWDATCore.AnyListenerToken)?
-  private var discoveredDevices: [String: String] = [:] // UUID -> identifier mapping
-  // Texture API (zero-copy path)
+  // Single stream session state (only one session at a time)
+  private var streamSession: StreamSession?
+  private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
+  private var errorListenerToken: (any MWDATCore.AnyListenerToken)?
+  private var frameCounter: Int = 0
+  private var currentTargetFPS: Double = 30.0
+  private var lastFrameSendTime: Date?
+  private var pixelBufferTexture: PixelBufferTexture?
+  private var textureId: Int64?
+  // Texture registry
   private var textureRegistry: FlutterTextureRegistry?
-  private var pixelBufferTextures: [String: PixelBufferTexture] = [:]
-  private var textureIds: [String: Int64] = [:]
-
-  // Initializer
-  public override init() {
-    super.init()
-  }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: registrar.messenger())
@@ -154,28 +110,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return
       }
 
-      // Stop and remove any active stream session for this device
-      if let streamSession = streamSessions[uuidString] {
-        await streamSession.stop()
-        if let token = videoListenerTokens[uuidString] {
-          await token.cancel()
-          videoListenerTokens.removeValue(forKey: uuidString)
-        }
-        if let token = errorListenerTokens[uuidString] {
-          await token.cancel()
-          errorListenerTokens.removeValue(forKey: uuidString)
-        }
-        // Unregister texture
-        if let texId = textureIds[uuidString] {
-          textureRegistry?.unregisterTexture(texId)
-          textureIds.removeValue(forKey: uuidString)
-          pixelBufferTextures.removeValue(forKey: uuidString)
-        }
-        streamSessions.removeValue(forKey: uuidString)
-        frameCounters.removeValue(forKey: uuidString)
-        lastFrameSendTime.removeValue(forKey: uuidString)
-        targetFPS.removeValue(forKey: uuidString)
-      }
+      // Clean up active stream session if any
+      await cleanupSession()
 
       MockDeviceKit.shared.unpairDevice(device)
       result(true)
@@ -311,16 +247,42 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
   }
 
+  // MARK: - Session Cleanup
+
+  /// Single source of truth for tearing down the current stream session.
+  /// Safe to call even when no session is active.
+  private func cleanupSession() async {
+    if let token = videoListenerToken {
+      await token.cancel()
+      videoListenerToken = nil
+    }
+    if let token = errorListenerToken {
+      await token.cancel()
+      errorListenerToken = nil
+    }
+    if let session = streamSession {
+      await session.stop()
+      streamSession = nil
+    }
+    if let texId = textureId {
+      textureRegistry?.unregisterTexture(texId)
+      NSLog("[MWDAT] Unregistered texture \(texId)")
+      textureId = nil
+      pixelBufferTexture = nil
+    }
+    frameCounter = 0
+    lastFrameSendTime = nil
+  }
+
   // MARK: - Frame Processing (zero-copy via Texture API)
   /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
   /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
-  private func processAndSendFrame(_ videoFrame: VideoFrame, forDevice sessionKey: String) {
+  private func processAndSendFrame(_ videoFrame: VideoFrame) {
     let now = Date()
-    let fps = targetFPS[sessionKey] ?? 30.0
-    let minInterval = 1.0 / fps
+    let minInterval = 1.0 / currentTargetFPS
 
     let timeSinceLastFrame: TimeInterval
-    if let lastSendTime = lastFrameSendTime[sessionKey] {
+    if let lastSendTime = lastFrameSendTime {
       timeSinceLastFrame = now.timeIntervalSince(lastSendTime)
       if timeSinceLastFrame < minInterval {
         return // throttle
@@ -335,23 +297,22 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    guard let texture = pixelBufferTextures[sessionKey],
-          let textureId = textureIds[sessionKey] else {
+    guard let texture = pixelBufferTexture,
+          let texId = textureId else {
       return
     }
 
     // Swap the pixel buffer (lock-protected) and notify Flutter's rasteriser
     texture.latestPixelBuffer = pixelBuffer
-    textureRegistry?.textureFrameAvailable(textureId)
+    textureRegistry?.textureFrameAvailable(texId)
 
     // Update timing + counters
-    lastFrameSendTime[sessionKey] = now
-    let count = (frameCounters[sessionKey] ?? 0) + 1
-    frameCounters[sessionKey] = count
+    lastFrameSendTime = now
+    frameCounter += 1
 
-    if count % 30 == 0 && timeSinceLastFrame > 0 {
+    if frameCounter % 30 == 0 && timeSinceLastFrame > 0 {
       let actualFPS = 1.0 / timeSinceLastFrame
-      NSLog("[MWDAT] \(count) frames for \(sessionKey), target: \(fps), actual: \(String(format: "%.1f", actualFPS)) FPS")
+      NSLog("[MWDAT] \(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
     }
   }
 
@@ -473,37 +434,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     Task { @MainActor in
       // Determine device selector
       let deviceSelector: any DeviceSelector
-      let sessionKey: String
-
       if let uuidString = uuidString {
-        // Use specific device selector
         deviceSelector = SpecificDeviceSelector(device: uuidString)
-        sessionKey = uuidString
       } else {
-        // Use auto device selector to discover and connect to available devices
         deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
-        sessionKey = "auto"
-
-        // Listen for active device changes from AutoDeviceSelector using async sequence
-        Task { [weak self] in
-          guard let self else { return }
-          for await deviceId in deviceSelector.activeDeviceStream() {
-            guard let deviceId = deviceId else { continue }
-            let uuid = deviceId // DeviceIdentifier is already a String
-            NSLog("[MWDAT] AutoDeviceSelector found active device: \(uuid)")
-            // Update discovered devices
-            self.discoveredDevices[uuid] = uuid
-          }
-        }
       }
 
-      // Store FPS for this session
-      targetFPS[sessionKey] = fps
-
-      // Check if a session already exists
-      if streamSessions[sessionKey] != nil {
-        if let textureId = textureIds[sessionKey] {
-          result(textureId)
+      // Return existing texture if session is already active
+      if streamSession != nil {
+        if let texId = textureId {
+          result(texId)
         } else {
           result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
         }
@@ -517,104 +457,72 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       }
       let texture = PixelBufferTexture()
       let texId = registry.register(texture)
-      pixelBufferTextures[sessionKey] = texture
-      textureIds[sessionKey] = texId
-      NSLog("[MWDAT] Registered texture \(texId) for session \(sessionKey)")
+      pixelBufferTexture = texture
+      textureId = texId
+      currentTargetFPS = fps
+      frameCounter = 0
+      lastFrameSendTime = nil
+      NSLog("[MWDAT] Registered texture \(texId)")
 
-      // Create a new StreamSession with explicit quality configuration.
+      // Create a new StreamSession
       let fpsValue = UInt(max(1, Int(fps.rounded())))
       let streamConfig = StreamSessionConfig(
         videoCodec: .raw,
         resolution: Self.resolution(for: streamQuality),
         frameRate: fpsValue
       )
-      let streamSession = StreamSession(
+      let session = StreamSession(
         streamSessionConfig: streamConfig,
         deviceSelector: deviceSelector
       )
 
       // Observe errors
-      let errorToken = streamSession.errorPublisher.listen { error in
-        NSLog("[MWDAT] StreamSession error for \(sessionKey): \(error)")
+      errorListenerToken = session.errorPublisher.listen { error in
+        NSLog("[MWDAT] StreamSession error: \(error)")
       }
-      errorListenerTokens[sessionKey] = errorToken
 
       // Store the session
-      streamSessions[sessionKey] = streamSession
+      streamSession = session
 
       // Subscribe to video frames — push CVPixelBuffer directly, no encoding
-      self.frameCounters[sessionKey] = 0
-      self.lastFrameSendTime.removeValue(forKey: sessionKey)
-      let token = streamSession.videoFramePublisher.listen { [weak self] videoFrame in
+      videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
-        self.processAndSendFrame(videoFrame, forDevice: sessionKey)
+        self.processAndSendFrame(videoFrame)
       }
-      self.videoListenerTokens[sessionKey] = token
 
       // Start the session
       do {
-        await streamSession.start()
+        await session.start()
 
-        // If using AutoDeviceSelector, get the active device UUID
         if uuidString == nil, let activeDevice = deviceSelector.activeDevice {
-          let activeUUID = activeDevice // DeviceIdentifier is already a String
-          NSLog("[MWDAT] AutoDeviceSelector connected to device: \(activeUUID)")
+          NSLog("[MWDAT] AutoDeviceSelector connected to device: \(activeDevice)")
         }
 
         result(texId)
       } catch {
-        // Clean up texture on failure
-        textureRegistry?.unregisterTexture(texId)
-        pixelBufferTextures.removeValue(forKey: sessionKey)
-        textureIds.removeValue(forKey: sessionKey)
+        // Clean up on failure
+        await cleanupSession()
         result(FlutterError(code: "STREAM_SESSION_ERROR", message: error.localizedDescription, details: nil))
       }
     }
   }
 
   func stopStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String : Any] else {
-      result(FlutterError(code: "INVALID_ARGS", message: "arguments missing", details: nil))
-      return
-    }
-
-    // deviceUUID is optional - use "auto" if not provided
-    let uuidString = args["deviceUUID"] as? String ?? "auto"
-
     Task { @MainActor in
-      guard let streamSession = streamSessions[uuidString] else {
-        result(FlutterError(code: "SESSION_NOT_FOUND", message: "No stream session found for device \(uuidString)", details: nil))
+      guard streamSession != nil else {
+        result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
         return
       }
 
-      await streamSession.stop()
-      // Cancel any video listener for this device
-      if let token = videoListenerTokens[uuidString] {
-        await token.cancel()
-        videoListenerTokens.removeValue(forKey: uuidString)
-      }
-      // Unregister texture
-      if let texId = textureIds[uuidString] {
-        textureRegistry?.unregisterTexture(texId)
-        textureIds.removeValue(forKey: uuidString)
-        pixelBufferTextures.removeValue(forKey: uuidString)
-        NSLog("[MWDAT] Unregistered texture \(texId) for session \(uuidString)")
-      }
-      streamSessions.removeValue(forKey: uuidString)
-      frameCounters.removeValue(forKey: uuidString)
-      lastFrameSendTime.removeValue(forKey: uuidString)
-      targetFPS.removeValue(forKey: uuidString)
+      await cleanupSession()
       result(true)
     }
   }
 
   func capturePhoto(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    let args = call.arguments as? [String : Any]
-    let uuidString = args?["deviceUUID"] as? String ?? "auto"
-
     Task { @MainActor in
-      guard let streamSession = streamSessions[uuidString] else {
-        result(FlutterError(code: "SESSION_NOT_FOUND", message: "No stream session found for device \(uuidString)", details: nil))
+      guard let streamSession else {
+        result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
         return
       }
 
@@ -652,25 +560,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   private static func parseStreamQuality(_ value: String?) -> StreamQuality {
     switch value?.lowercased() {
-    case "high":
-      return .high
-    case "low":
-      return .low
-    case "medium":
-      return .medium
-    default:
-      return .high
+      case "high":
+        return .high
+      case "low":
+        return .low
+      case "medium":
+        return .medium
+      default:
+        return .high
     }
   }
 
   private static func resolution(for quality: StreamQuality) -> StreamingResolution {
     switch quality {
-    case .high:
-      return .high
-    case .low:
-      return .low
-    case .medium:
-      return .medium
+      case .high:
+        return .high
+      case .low:
+        return .low
+      case .medium:
+        return .medium
     }
   }
 }

@@ -4,8 +4,6 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.util.Log
 import android.view.Surface
 import androidx.core.app.ActivityCompat
@@ -14,7 +12,6 @@ import com.meta.wearable.dat.camera.StreamSession
 import com.meta.wearable.dat.camera.startStreamSession
 import com.meta.wearable.dat.camera.types.PhotoData
 import com.meta.wearable.dat.camera.types.StreamConfiguration
-import com.meta.wearable.dat.camera.types.VideoFrame
 import com.meta.wearable.dat.camera.types.VideoQuality
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
@@ -34,7 +31,6 @@ import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry
 import io.flutter.view.TextureRegistry
 import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +38,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -100,19 +95,16 @@ class MetaWearablesDatPlugin :
     private val deviceSelector: DeviceSelector = AutoDeviceSelector()
 
     // Streaming state
-    private val streamSessions = mutableMapOf<String, StreamSession>()
-    private val targetFPS = mutableMapOf<String, Double>()
-    private val lastFrameSendTime = mutableMapOf<String, Long>()
-    private val frameCounters = mutableMapOf<String, Int>()
-    private val videoJobs = mutableMapOf<String, Job>()
-    private val stateJobs = mutableMapOf<String, Job>()
+    private var streamSession: StreamSession? = null
+    private var sessionKey: String? = null
+    private var videoJob: Job? = null
+    private var stateJob: Job? = null
     // Texture API — renders I420 frames to a SurfaceTexture
     // instead of encoding to JPEG and copying bytes across the platform channel.
     private var textureRegistry: TextureRegistry? = null
-    private val textureEntries = mutableMapOf<String, TextureRegistry.SurfaceTextureEntry>()
-    private val textureSurfaces = mutableMapOf<String, Surface>()
-    // Reusable bitmap per session to avoid per-frame allocation
-    private val reusableBitmaps = mutableMapOf<String, Bitmap>()
+    private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
+    private var textureSurface: Surface? = null
+    private val frameProcessor = FrameProcessor()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_meta_wearables_dat")
@@ -190,26 +182,10 @@ class MetaWearablesDatPlugin :
         registrationStateStreamHandler?.dispose()
         registrationStateStreamHandler = null
 
-        // Clean up all stream sessions
-        videoJobs.values.forEach { it.cancel() }
-        videoJobs.clear()
-        stateJobs.values.forEach { it.cancel() }
-        stateJobs.clear()
-        streamSessions.values.forEach { it.close() }
-        streamSessions.clear()
-        targetFPS.clear()
-        frameCounters.clear()
-        lastFrameSendTime.clear()
+        // Clean up stream session
+        cleanupSession()
 
-        // Clean up texture resources
-        textureSurfaces.values.forEach { it.release() }
-        textureSurfaces.clear()
-        textureEntries.values.forEach { it.release() }
-        textureEntries.clear()
-        reusableBitmaps.values.forEach { it.recycle() }
-        reusableBitmaps.clear()
         textureRegistry = null
-
         scope.cancel()
     }
 
@@ -619,14 +595,14 @@ class MetaWearablesDatPlugin :
         val fps = (args?.get("fps") as? Double) ?: 30.0
         val streamQuality = parseStreamQuality(args?.get("streamQuality") as? String)
         val deviceUUID = args?.get("deviceUUID") as? String
-        val sessionKey = deviceUUID ?: "auto"
+        val key = deviceUUID ?: "auto"
 
-        if (streamSessions.containsKey(sessionKey)) {
-            val existingEntry = textureEntries[sessionKey]
-            if (existingEntry != null) {
-                result.success(existingEntry.id())
+        if (streamSession != null) {
+            val entry = textureEntry
+            if (entry != null) {
+                result.success(entry.id())
             } else {
-                result.error("TEXTURE_REGISTRATION_FAILED", "No texture registered for session $sessionKey", null)
+                result.error("TEXTURE_REGISTRATION_FAILED", "No texture registered for session $key", null)
             }
             return
         }
@@ -635,9 +611,8 @@ class MetaWearablesDatPlugin :
             try {
                 ensureWearablesInitialized()
 
-                targetFPS[sessionKey] = fps
-                frameCounters[sessionKey] = 0
-                lastFrameSendTime.remove(sessionKey)
+                sessionKey = key
+                frameProcessor.configure(fps)
 
                 // Register a Flutter texture for zero-copy rendering
                 val registry = textureRegistry
@@ -650,84 +625,69 @@ class MetaWearablesDatPlugin :
                 // Set default buffer size — will be updated when first frame arrives
                 surfaceTexture.setDefaultBufferSize(1280, 720)
                 val surface = Surface(surfaceTexture)
-                textureEntries[sessionKey] = entry
-                textureSurfaces[sessionKey] = surface
+                textureEntry = entry
+                textureSurface = surface
                 val textureId = entry.id()
-                Log.d(TAG, "Registered texture $textureId for session $sessionKey")
+                Log.d(TAG, "Registered texture $textureId for session $key")
 
-                val streamSession =
+                val session =
                         Wearables.startStreamSession(
                                 app,
                                 deviceSelector,
                                 StreamConfiguration(videoQuality = streamQuality, fps.toInt())
                         )
-                streamSessions[sessionKey] = streamSession
+                streamSession = session
 
                 // Subscribe to video frames — render I420 → ARGB bitmap → SurfaceTexture
-                videoJobs[sessionKey] = scope.launch(Dispatchers.Default) {
-                    streamSession.videoStream.collect { videoFrame ->
+                videoJob = scope.launch(Dispatchers.Default) {
+                    session.videoStream.collect { videoFrame ->
                         // Update SurfaceTexture buffer size if frame dimensions change
-                        val texEntry = textureEntries[sessionKey]
-                        if (texEntry != null) {
-                            val bmp = reusableBitmaps[sessionKey]
-                            if (bmp == null || bmp.width != videoFrame.width || bmp.height != videoFrame.height) {
-                                texEntry.surfaceTexture().setDefaultBufferSize(videoFrame.width, videoFrame.height)
-                            }
+                        if (frameProcessor.needsBufferSizeUpdate(videoFrame.width, videoFrame.height)) {
+                            entry.surfaceTexture().setDefaultBufferSize(videoFrame.width, videoFrame.height)
                         }
-                        processAndSendFrame(videoFrame, sessionKey)
+                        frameProcessor.processFrame(videoFrame, surface)
                     }
                 }
 
-                stateJobs[sessionKey] =
+                stateJob =
                         scope.launch {
-                            streamSession.state.collect { state ->
-                                Log.d(TAG, "StreamSession [$sessionKey] state: $state")
+                            session.state.collect { state ->
+                                Log.d(TAG, "StreamSession [$key] state: $state")
                             }
                         }
 
                 result.success(textureId)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start stream session", e)
-                cleanupSession(sessionKey)
+                cleanupSession()
                 result.error("STREAM_ERROR", e.message ?: "Failed to start stream session.", null)
             }
         }
     }
 
     private fun stopStreamSession(call: MethodCall, result: Result) {
-        val args = call.arguments as? Map<*, *>
-        val deviceUUID = args?.get("deviceUUID") as? String
-        val sessionKey = deviceUUID ?: "auto"
-
-        val streamSession = streamSessions[sessionKey]
-        if (streamSession == null) {
-            result.error("SESSION_NOT_FOUND", "No stream session found for '$sessionKey'.", null)
+        val session = streamSession
+        if (session == null) {
+            val key = sessionKey ?: "auto"
+            result.error("SESSION_NOT_FOUND", "No stream session found for '$key'.", null)
             return
         }
 
-        videoJobs[sessionKey]?.cancel()
-        stateJobs[sessionKey]?.cancel()
-        streamSession.close()
-        cleanupSession(sessionKey)
-
+        cleanupSession()
         result.success(true)
     }
 
-
     private fun capturePhoto(call: MethodCall, result: Result) {
-        val args = call.arguments as? Map<*, *>
-        val deviceUUID = args?.get("deviceUUID") as? String
-        val sessionKey = deviceUUID ?: "auto"
-
-        val streamSession = streamSessions[sessionKey]
-        if (streamSession == null) {
-            result.error("SESSION_NOT_FOUND", "No stream session found for '$sessionKey'.", null)
+        val session = streamSession
+        if (session == null) {
+            val key = sessionKey ?: "auto"
+            result.error("SESSION_NOT_FOUND", "No stream session found for '$key'.", null)
             return
         }
 
         scope.launch {
             try {
-                val photoResult = streamSession.capturePhoto()
+                val photoResult = session.capturePhoto()
                 photoResult
                         .onSuccess { photoData ->
                             val response: Map<String, Any> =
@@ -768,117 +728,24 @@ class MetaWearablesDatPlugin :
         }
     }
 
-    /**
-     * Convert I420 → ARGB bitmap → draw onto SurfaceTexture (zero-copy path).
-     * Called on Dispatchers.Default.
-     */
-    private fun processAndSendFrame(videoFrame: VideoFrame, sessionKey: String) {
-        // FPS throttling
-        val fps = targetFPS[sessionKey] ?: 30.0
-        val minIntervalNanos = (1_000_000_000.0 / fps).toLong()
-        val now = System.nanoTime()
-        val lastTime = lastFrameSendTime[sessionKey]
-        if (lastTime != null && (now - lastTime) < minIntervalNanos) {
-            return
-        }
-
-        val surface = textureSurfaces[sessionKey] ?: return
-        if (!surface.isValid) return
-
-        val width = videoFrame.width
-        val height = videoFrame.height
-
-        // Reuse bitmap to avoid per-frame allocation
-        var bitmap = reusableBitmaps[sessionKey]
-        if (bitmap == null || bitmap.width != width || bitmap.height != height) {
-            bitmap?.recycle()
-            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            reusableBitmaps[sessionKey] = bitmap
-        }
-
-        // Convert I420 → ARGB directly into the bitmap's pixel buffer
-        convertI420toArgbBitmap(videoFrame.buffer, width, height, bitmap)
-
-        // Draw bitmap onto the SurfaceTexture — this pushes a frame to Flutter
-        try {
-            val canvas: Canvas = surface.lockCanvas(null) ?: return
-            try {
-                canvas.drawBitmap(bitmap, 0f, 0f, null)
-            } finally {
-                surface.unlockCanvasAndPost(canvas)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to render frame to texture surface", e)
-            return
-        }
-
-        lastFrameSendTime[sessionKey] = now
-        val count = (frameCounters[sessionKey] ?: 0) + 1
-        frameCounters[sessionKey] = count
-        if (count % 30 == 0 && lastTime != null) {
-            val actualFPS = 1_000_000_000.0 / (now - lastTime)
-            Log.d(
-                    TAG,
-                    "Texture path — $count frames for $sessionKey, " +
-                            "target: $fps, actual: ${"%.1f".format(actualFPS)} FPS"
-            )
-        }
-    }
-
-    /**
-     * Convert I420 (planar YUV) directly to an ARGB_8888 Bitmap — no JPEG intermediate step.
-     * Uses the BT.601 full-range conversion matrix. Writes directly into [bitmap]'s pixels.
-     */
-    private fun convertI420toArgbBitmap(buffer: ByteBuffer, width: Int, height: Int, bitmap: Bitmap) {
-        val dataSize = buffer.remaining()
-        val byteArray = ByteArray(dataSize)
-        val originalPosition = buffer.position()
-        buffer.get(byteArray)
-        buffer.position(originalPosition)
-
-        val ySize = width * height
-        val uvQuarter = ySize / 4
-        val pixels = IntArray(ySize)
-
-        for (j in 0 until height) {
-            for (i in 0 until width) {
-                val yIndex = j * width + i
-                val uvIndex = (j / 2) * (width / 2) + (i / 2)
-
-                val y = (byteArray[yIndex].toInt() and 0xFF)
-                val u = (byteArray[ySize + uvIndex].toInt() and 0xFF) - 128
-                val v = (byteArray[ySize + uvQuarter + uvIndex].toInt() and 0xFF) - 128
-
-                var r = y + (1.370705f * v).toInt()
-                var g = y - (0.337633f * u).toInt() - (0.698001f * v).toInt()
-                var b = y + (1.732446f * u).toInt()
-
-                r = r.coerceIn(0, 255)
-                g = g.coerceIn(0, 255)
-                b = b.coerceIn(0, 255)
-
-                pixels[yIndex] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
-        }
-
-        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-    }
-
-    private fun cleanupSession(sessionKey: String) {
-        videoJobs.remove(sessionKey)
-        stateJobs.remove(sessionKey)
-        streamSessions.remove(sessionKey)
-        targetFPS.remove(sessionKey)
-        frameCounters.remove(sessionKey)
-        lastFrameSendTime.remove(sessionKey)
+    private fun cleanupSession() {
+        videoJob?.cancel()
+        videoJob = null
+        stateJob?.cancel()
+        stateJob = null
+        streamSession?.close()
+        streamSession = null
+        sessionKey = null
         // Release texture resources
-        textureSurfaces.remove(sessionKey)?.release()
-        val entry = textureEntries.remove(sessionKey)
+        textureSurface?.release()
+        textureSurface = null
+        val entry = textureEntry
         if (entry != null) {
-            Log.d(TAG, "Unregistered texture ${entry.id()} for session $sessionKey")
+            Log.d(TAG, "Unregistered texture ${entry.id()}")
             entry.release()
         }
-        reusableBitmaps.remove(sessionKey)?.recycle()
+        textureEntry = null
+        frameProcessor.release()
     }
 
     // endregion
@@ -909,128 +776,6 @@ class MetaWearablesDatPlugin :
             "low" -> VideoQuality.LOW
             "medium" -> VideoQuality.MEDIUM
             else -> VideoQuality.HIGH
-        }
-    }
-
-    // endregion
-
-    // region Stream Handlers
-
-    private class ActiveDeviceStreamHandler(
-            private val deviceSelector: DeviceSelector,
-            private val isInitialized: () -> Boolean,
-            private val ensureInitialized: () -> Unit,
-    ) : EventChannel.StreamHandler {
-        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        private var job: Job? = null
-        private var eventSink: EventChannel.EventSink? = null
-
-        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-            if (events == null) return
-            eventSink = events
-            // Only start collecting if SDK is already initialized.
-            // If not yet initialized, restartMonitoring() will be called later
-            // after BT permissions are granted.
-            if (isInitialized()) {
-                startCollecting(events)
-            }
-        }
-
-        override fun onCancel(arguments: Any?) {
-            job?.cancel()
-            job = null
-            eventSink = null
-        }
-
-        /**
-         * Restart device monitoring by cancelling the current collection and re-subscribing to the
-         * active device flow. Called after BT permissions are granted or after registration
-         * completes so the flow picks up newly available devices.
-         */
-        fun restartMonitoring() {
-            val sink = eventSink ?: return
-            job?.cancel()
-            job = null
-            // Brief delay to let the SDK finish discovering devices after
-            // initialization or registration before we re-subscribe.
-            scope.launch {
-                delay(500)
-                startCollecting(sink)
-            }
-        }
-
-        private fun startCollecting(events: EventChannel.EventSink) {
-            ensureInitialized()
-
-            job?.cancel()
-            job =
-                    scope.launch {
-                        deviceSelector.activeDevice(Wearables.devices).collect { device ->
-                            events.success(device != null)
-                        }
-                    }
-        }
-
-        fun dispose() {
-            job?.cancel()
-            job = null
-            eventSink = null
-            scope.cancel()
-        }
-    }
-
-    private class RegistrationStateStreamHandler(
-            private val isInitialized: () -> Boolean,
-            private val ensureInitialized: () -> Unit,
-            private val mapState: (com.meta.wearable.dat.core.types.RegistrationState) -> Int
-    ) : EventChannel.StreamHandler {
-        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        private var job: Job? = null
-        private var eventSink: EventChannel.EventSink? = null
-
-        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-            if (events == null) return
-            eventSink = events
-            if (isInitialized()) {
-                startCollecting(events)
-            }
-        }
-
-        /**
-         * Start or restart collecting registration state events. Called when SDK becomes
-         * initialized.
-         */
-        fun restartMonitoring() {
-            val sink = eventSink ?: return
-            startCollecting(sink)
-        }
-
-        private fun startCollecting(events: EventChannel.EventSink) {
-            ensureInitialized()
-
-            job?.cancel()
-            job =
-                    scope.launch {
-                        // Send initial state
-                        val initialState = Wearables.registrationState.first()
-                        events.success(mapState(initialState))
-                        // Listen to state changes
-                        Wearables.registrationState.collect { state ->
-                            events.success(mapState(state))
-                        }
-                    }
-        }
-
-        override fun onCancel(arguments: Any?) {
-            job?.cancel()
-            job = null
-            eventSink = null
-        }
-
-        fun dispose() {
-            job?.cancel()
-            job = null
-            scope.cancel()
         }
     }
 
