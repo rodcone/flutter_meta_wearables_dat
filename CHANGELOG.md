@@ -1,3 +1,6 @@
+## 0.1.1
+* Add performance optimizations.
+
 ## 0.1.0
 * Implement Texture API for streaming optimization.
 * Add `streamQuality` parameter.
