@@ -1,3 +1,6 @@
+## 0.1.2
+* Add `captureStreamFrame` method.
+
 ## 0.1.1
 * Add performance optimizations.
 
