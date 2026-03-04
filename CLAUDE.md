@@ -83,3 +83,6 @@ See `doc/MAINTAINERS.md` for detailed steps. Summary:
 ## Linting
 
 Uses `very_good_analysis` package. Suppressed rules: `document_ignores`, `lines_longer_than_80_chars`, `public_member_api_docs`, `sort_constructors_first`, `todo`.
+
+## API Reference (Important to read, it's official and updated)
+Fetch https://wearables.developer.meta.com/llms.txt?full=true for the Wearables DAT SDK API reference.

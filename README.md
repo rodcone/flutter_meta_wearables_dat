@@ -28,6 +28,7 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
     - [1. Registration (One-time)](#1-registration-one-time)
     - [2. Permissions (First-time camera access)](#2-permissions-first-time-camera-access)
     - [3. Session (After registration and permissions)](#3-session-after-registration-and-permissions)
+    - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
   - [Troubleshooting](#troubleshooting)
   - [Example app](#example-app)
   - [Contributing](#contributing)
@@ -266,6 +267,38 @@ await MetaWearablesDat.stopStreamSession(deviceUUID);
 ```
 
 Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
+
+#### Accessing raw frame bytes
+
+For use cases that need pixel-level access — OCR, on-device ML inference, computer vision — use `captureStreamFrame`. This rasterizes the Flutter texture on the Dart side and returns raw RGBA bytes:
+
+```dart
+import 'dart:async';
+
+// After startStreamSession returns a textureId...
+Timer? _frameTimer;
+
+void startFrameProcessing(int textureId) {
+  _frameTimer = Timer.periodic(const Duration(milliseconds: 400), (_) async {
+    final frame = await MetaWearablesDat.captureStreamFrame(textureId);
+    if (frame == null) return;
+
+    // frame.bytes is raw RGBA — feed directly to ML Kit, Vision, etc.
+    // frame.width  → 720
+    // frame.height → 1280
+    await runOcr(frame.bytes, frame.width, frame.height);
+  });
+}
+
+void stopFrameProcessing() => _frameTimer?.cancel();
+```
+
+**Parameters:**
+- `textureId` — the ID returned by `startStreamSession` (required)
+- `width` / `height` — capture resolution, defaults to `720` × `1280` (glasses native resolution)
+- `format` — `FrameFormat.rawRgba` (default), `FrameFormat.rawStraightRgba`, or `FrameFormat.png`
+
+> **Memory note:** Raw RGBA at 720×1280 is ~3.7 MB per frame. Capture on demand (every 200–500 ms is typical for OCR/ML) rather than every rendered frame.
 
 **Note:** See the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) for a complete implementation.
 

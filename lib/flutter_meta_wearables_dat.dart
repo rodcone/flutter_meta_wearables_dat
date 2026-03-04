@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/rendering.dart';
 import 'package:flutter_meta_wearables_dat/meta_wearables_dat_platform_interface.dart';
 
@@ -48,6 +50,22 @@ enum StreamQuality {
   final String value;
 }
 
+/// Supported pixel formats for captured stream frames.
+///
+/// These map to Flutter's [ui.ImageByteFormat] values internally.
+enum FrameFormat {
+  /// Raw RGBA pixel data (4 bytes per pixel, pre-multiplied alpha).
+  /// Best for ML inference and image processing pipelines.
+  rawRgba,
+
+  /// Raw RGBA pixel data with straight (non-pre-multiplied) alpha.
+  rawStraightRgba,
+
+  /// PNG-encoded image data.
+  /// Larger than raw formats but widely compatible.
+  png,
+}
+
 /// Exception thrown when a camera permission request fails.
 class CameraPermissionException implements Exception {
   /// The error code from the native SDK.
@@ -91,6 +109,38 @@ class CapturedPhoto {
   String get fileExtension => format == 'heic' ? 'heic' : 'jpg';
 
   String get mimeType => format == 'heic' ? 'image/heic' : 'image/jpeg';
+}
+
+/// A single video frame captured from an active stream session's Flutter
+/// texture.
+///
+/// [CapturedFrame] is captured silently on the Dart side by rasterizing the
+/// Flutter texture. The pixel data is suitable for OCR, ML inference, or any
+/// image processing that needs raw frame access.
+class CapturedFrame {
+  /// The raw pixel data of the captured frame.
+  ///
+  /// The encoding depends on the [format] used during capture:
+  /// - [FrameFormat.rawRgba] / [FrameFormat.rawStraightRgba]: 4 bytes per
+  ///   pixel (R, G, B, A), total size = [width] * [height] * 4.
+  /// - [FrameFormat.png]: PNG-encoded image data.
+  final Uint8List bytes;
+
+  /// The width of the captured frame in pixels.
+  final int width;
+
+  /// The height of the captured frame in pixels.
+  final int height;
+
+  /// The pixel format of [bytes].
+  final FrameFormat format;
+
+  const CapturedFrame({
+    required this.bytes,
+    required this.width,
+    required this.height,
+    required this.format,
+  });
 }
 
 /// The main class for the Meta Wearables DAT.
@@ -209,6 +259,62 @@ class MetaWearablesDat {
       '[MetaWearablesDAT] Capturing photo with device UUID: $deviceUUID',
     );
     return MetaWearablesDatPlatform.instance.capturePhoto(deviceUUID);
+  }
+
+  /// Captures a single frame from an active stream session's Flutter texture.
+  ///
+  /// This is a **Dart-side** operation that rasterizes the texture identified
+  /// by [textureId] (returned by [startStreamSession]) into pixel data.
+  /// No native code is invoked and the capture is near-instantaneous.
+  ///
+  /// Use this when you need raw frame bytes for OCR, ML inference, computer
+  /// vision, or any processing that requires direct pixel access.
+  ///
+  /// **Note:** Raw RGBA at the default 720x1280 resolution is ~3.7 MB per
+  /// frame. This method is intended for on-demand captures (e.g., every
+  /// 200-500 ms), not continuous per-frame processing.
+  ///
+  /// Returns a [CapturedFrame] containing the pixel data, or `null` if the
+  /// capture failed (e.g., texture not available).
+  static Future<CapturedFrame?> captureStreamFrame(
+    int textureId, {
+    int width = 720,
+    int height = 1280,
+    FrameFormat format = FrameFormat.rawRgba,
+  }) async {
+    final builder = ui.SceneBuilder()
+      ..addTexture(
+        textureId,
+        width: width.toDouble(),
+        height: height.toDouble(),
+        freeze: true,
+        filterQuality: ui.FilterQuality.high,
+      );
+    final scene = builder.build();
+    try {
+      final image = await scene.toImage(width, height);
+      try {
+        final imageByteFormat = switch (format) {
+          FrameFormat.rawRgba => ui.ImageByteFormat.rawRgba,
+          FrameFormat.rawStraightRgba => ui.ImageByteFormat.rawStraightRgba,
+          FrameFormat.png => ui.ImageByteFormat.png,
+        };
+        final byteData = await image.toByteData(
+          format: imageByteFormat,
+        );
+        if (byteData == null) return null;
+        return CapturedFrame(
+          bytes: byteData.buffer.asUint8List(),
+          width: width,
+          height: height,
+          format: format,
+        );
+      } finally {
+        image.dispose();
+      }
+    } finally {
+      scene.dispose();
+    }
   }
 
   /// Gets the current registration state.
