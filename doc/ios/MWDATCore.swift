@@ -503,6 +503,10 @@ final public class Device : Sendable {
     /// The human-readable device name, or empty string if unavailable.
     final public var name: String { get }
 
+    /// This UUID is persisted across app launches and used for Airship scope registration.
+    /// Note: This differs from `identifier` which comes from the server manifest.
+    final public var deviceUUID: UUID { get }
+
     /// Returns the device name if available, otherwise returns the device identifier.
     /// This provides a fallback for display purposes when the device name is not set.
     /// - Returns: The device name or identifier as a fallback.
@@ -573,6 +577,8 @@ public protocol DevicePrivate : Sendable {
 
     var firmwareVersion: String? { get }
 
+    var deviceUUID: UUID { get }
+
     func addLinkStateListener(_ listener: @escaping @Sendable (MWDATCore.LinkState) -> Void) -> any MWDATCore.AnyListenerToken
 
     func addCompatibilityListener(_ listener: @escaping @Sendable (MWDATCore.Compatibility) -> Void) -> any MWDATCore.AnyListenerToken
@@ -599,26 +605,6 @@ public protocol DeviceSelector : Sendable {
 
     /// Creates a stream of active device changes.
     func activeDeviceStream() -> MWDATCore.AnyAsyncSequence<MWDATCore.DeviceIdentifier?>
-}
-
-/// Represents the current state of a Meta Wearables device, including battery and hinge information.
-public struct DeviceState : Equatable, Sendable {
-
-    /// The current battery level of the device as a percentage (0-100).
-    public let batteryLevel: Int
-
-    /// The current state of the device's hinge mechanism.
-    public let hingeState: MWDATCore.HingeState
-
-    /// Returns a Boolean value indicating whether two values are equal.
-    ///
-    /// Equality is the inverse of inequality. For any values `a` and `b`,
-    /// `a == b` implies that `a != b` is `false`.
-    ///
-    /// - Parameters:
-    ///   - lhs: A value to compare.
-    ///   - rhs: Another value to compare.
-    public static func == (a: MWDATCore.DeviceState, b: MWDATCore.DeviceState) -> Bool
 }
 
 /// Manages a session for monitoring device state changes.
@@ -720,59 +706,6 @@ extension DeviceType : Hashable {
 }
 
 extension DeviceType : RawRepresentable {
-}
-
-/// Represents the physical state of the device's hinge mechanism.
-@frozen public enum HingeState : Equatable, Sendable {
-
-    /// The device is in an open position (e.g., glasses are unfolded).
-    case open
-
-    /// The device is in a closed position (e.g., glasses are folded).
-    case closed
-
-    /// Returns a Boolean value indicating whether two values are equal.
-    ///
-    /// Equality is the inverse of inequality. For any values `a` and `b`,
-    /// `a == b` implies that `a != b` is `false`.
-    ///
-    /// - Parameters:
-    ///   - lhs: A value to compare.
-    ///   - rhs: Another value to compare.
-    public static func == (a: MWDATCore.HingeState, b: MWDATCore.HingeState) -> Bool
-
-    /// Hashes the essential components of this value by feeding them into the
-    /// given hasher.
-    ///
-    /// Implement this method to conform to the `Hashable` protocol. The
-    /// components used for hashing must be the same as the components compared
-    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
-    /// with each of these components.
-    ///
-    /// - Important: In your implementation of `hash(into:)`,
-    ///   don't call `finalize()` on the `hasher` instance provided,
-    ///   or replace it with a different instance.
-    ///   Doing so may become a compile-time error in the future.
-    ///
-    /// - Parameter hasher: The hasher to use when combining the components
-    ///   of this instance.
-    public func hash(into hasher: inout Hasher)
-
-    /// The hash value.
-    ///
-    /// Hash values are not guaranteed to be equal across different executions of
-    /// your program. Do not save hash values to use during a future execution.
-    ///
-    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
-    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
-    ///   The compiler provides an implementation for `hashValue` for you.
-    public var hashValue: Int { get }
-}
-
-extension HingeState : Hashable {
-}
-
-extension HingeState : BitwiseCopyable {
 }
 
 public enum IntentURLAction {
@@ -963,7 +896,9 @@ final public class MockDevicePrivate : MWDATCore.DevicePrivate {
 
     final public let firmwareVersion: String?
 
-    public init(identifier: MWDATCore.DeviceIdentifier, name: String? = nil, connection: (any MWDATCore.AnyConnection)? = nil, linkState: MWDATCore.LinkState = .disconnected, deviceType: MWDATCore.DeviceType = .unknown, compatibility: MWDATCore.Compatibility = Compatibility.compatible, firmwareVersion: String? = nil)
+    final public let deviceUUID: UUID
+
+    public init(identifier: MWDATCore.DeviceIdentifier, name: String? = nil, connection: (any MWDATCore.AnyConnection)? = nil, linkState: MWDATCore.LinkState = .disconnected, deviceType: MWDATCore.DeviceType = .unknown, compatibility: MWDATCore.Compatibility = Compatibility.compatible, firmwareVersion: String? = nil, deviceUUID: UUID = UUID())
 
     final public func addLinkStateListener(_ listener: @escaping (MWDATCore.LinkState) -> Void) -> any MWDATCore.AnyListenerToken
 
@@ -1659,9 +1594,33 @@ extension RegistrationState : Sendable {
 extension RegistrationState : BitwiseCopyable {
 }
 
+/// A continuation type that guarantees safe single-resume semantics.
+///
+/// `SafeContinuation` ensures that:
+/// - The continuation can only be resumed **once** - subsequent `resume()` calls are safely ignored
+/// - All resume operations are thread-safe
+/// - **Orphan protection**: If the continuation is never resumed and is deallocated,
+///   it automatically resumes with `CancellationError` (for throwing continuations)
+///   to prevent runtime crashes
+///
+/// This is useful when bridging legacy callback-based APIs to async/await, especially
+/// when multiple code paths might complete the operation (success callback, timeout, error).
+///
+/// ## Usage
+///
+/// Use `withSafeThrowingContinuation` (or `withSafeContinuation` for non-throwing) to
+/// suspend the current task and receive a `SafeContinuation`. See those functions for
+/// detailed examples.
+///
+/// ## Thread Safety
+///
+/// All `resume` methods are thread-safe. When called concurrently, only the first
+/// caller actually resumes the async task. Subsequent callers' resume calls become no-ops.
 final public class SafeContinuation<T, E> : @unchecked Sendable where T : Sendable, E : Error {
 
     public init(_ continuation: UnsafeContinuation<T, E>)
+
+    @objc deinit
 
     final public func resume(with result: Result<T, E>)
 
@@ -1671,9 +1630,13 @@ final public class SafeContinuation<T, E> : @unchecked Sendable where T : Sendab
 
     final public func resume() where T == ()
 
+    /// Schedules automatic cancellation after a timeout.
+    ///
+    /// If the continuation hasn't been resumed by the timeout, it will be
+    /// resumed with a `CancellationError`.
+    ///
+    /// - Parameter timeout: The timeout interval in seconds. If `nil`, no timeout is set.
     final public func cancelAfter(timeout: TimeInterval?) where E == any Error
-
-    @objc deinit
 }
 
 /**
@@ -3051,8 +3014,67 @@ extension WearablesSDKStreamSessionEventType : Hashable {
 extension WearablesSDKStreamSessionEventType : RawRepresentable {
 }
 
+/// Suspends the current task and invokes the given closure with a `SafeContinuation`.
+///
+/// Use this function to bridge non-throwing callback-based APIs to async/await when you need
+/// the safety guarantee that the continuation will only be resumed once, even if
+/// multiple code paths might attempt to resume it.
+///
+/// ## Example
+///
+/// ```swift
+/// // Bridge a legacy callback API that doesn't throw
+/// func waitForNotification() async -> String {
+///     await withSafeContinuation { continuation in
+///         // Register for callback - can't use await here because it uses callbacks
+///         NotificationCenter.default.addObserver(forName: .myNotification, object: nil, queue: nil) { notification in
+///             let value = notification.userInfo?["key"] as? String ?? ""
+///             continuation.resume(returning: value)
+///         }
+///     }
+/// }
+/// ```
+///
+/// - Parameter body: A closure that receives the safe continuation. The closure must
+///                   arrange for the continuation to be resumed exactly once, though
+///                   additional resume calls are safely ignored.
+/// - Returns: The value passed to `continuation.resume(returning:)`.
 @inlinable public func withSafeContinuation<T>(isolation: isolated (any Actor)? = #isolation, _ body: (MWDATCore.SafeContinuation<T, Never>) -> Void) async -> sending T where T : Sendable
 
+/// Suspends the current task and invokes the given closure with a throwing `SafeContinuation`.
+///
+/// Use this function to bridge callback-based APIs to async/await when:
+/// - The legacy API uses callbacks/closures instead of async/await
+/// - Multiple code paths might race to complete the operation (success, error, timeout)
+///
+/// The `SafeContinuation` ensures that only the first `resume()` call takes effect;
+/// subsequent calls are safely ignored.
+///
+/// ## Example
+///
+/// ```swift
+/// // Bridge a legacy callback API with timeout protection
+/// func requestPermission() async throws -> Bool {
+///     try await withSafeThrowingContinuation(timeout: 5.0) { continuation in
+///         // Call legacy API - can't use await here because it uses callbacks
+///         LegacyPermissionService.request { granted in
+///             continuation.resume(returning: granted)
+///         } onError: { error in
+///             continuation.resume(throwing: error)
+///         }
+///         // If neither callback fires within 5 seconds, timeout resumes with CancellationError
+///     }
+/// }
+/// ```
+///
+/// - Parameters:
+///   - timeout: Optional timeout in seconds. If set and the continuation hasn't been
+///              resumed by then, it will be resumed with `CancellationError`.
+///   - body: A closure that receives the safe continuation. The closure must
+///           arrange for the continuation to be resumed, though additional
+///           resume calls are safely ignored.
+/// - Returns: The value passed to `continuation.resume(returning:)`.
+/// - Throws: The error passed to `continuation.resume(throwing:)`, or `CancellationError` on timeout.
 @inlinable public func withSafeThrowingContinuation<T>(isolation: isolated (any Actor)? = #isolation, timeout: TimeInterval? = nil, _ body: (MWDATCore.SafeContinuation<T, any Error>) -> Void) async throws -> sending T where T : Sendable
 
 @objc extension NSNotification {
