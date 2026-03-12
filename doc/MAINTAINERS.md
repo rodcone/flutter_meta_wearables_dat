@@ -25,15 +25,7 @@ Update the binaries in the plugin's internal structure:
 2. Delete the existing `.xcframework` folders
 3. Paste the new versions you extracted
 
-### 3. Verify Installation
-
-Verify the frameworks were replaced successfully:
-
-- Check that all three `.xcframework` folders exist in `ios/Frameworks/`
-- Verify the file sizes and modification dates are recent
-- Test the build to ensure everything links correctly
-
-### 4. Sync Example App
+### 3. Sync Example App
 
 Force the example app to recognize the updated files:
 

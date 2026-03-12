@@ -28,7 +28,7 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
     - [1. Registration (One-time)](#1-registration-one-time)
     - [2. Permissions (First-time camera access)](#2-permissions-first-time-camera-access)
     - [3. Session (After registration and permissions)](#3-session-after-registration-and-permissions)
-    - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
+      - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
   - [Troubleshooting](#troubleshooting)
   - [Example app](#example-app)
   - [Contributing](#contributing)
@@ -306,13 +306,13 @@ void stopFrameProcessing() => _frameTimer?.cancel();
 
 If you run into issues, try these steps first:
 
-- **Update Meta AI app** — Make sure you have the latest version of the Meta AI app installed on your phone.
-- **Update Glasses in Meta AI app** — In the Meta AI app, check for and install any available firmware updates for your glasses.
-- **Verify installation** — Ensure you have followed all installation steps above, including configuration in your code and in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter).
+- **Update Meta AI app and glasses firmware**: Ensure you have the latest version of the Meta AI app installed on your phone, and within the app, check for and install any available firmware updates for your glasses. [See version dependencies](https://wearables.developer.meta.com/docs/version-dependencies).
+- **Verify installation**: Ensure you have followed all installation steps above, including configuration in your code and in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter).
 - **Restart your glasses** — If the glasses don't connect or the stream doesn't start, try restarting them:
   1. Switch the power button to off.
   2. Press and hold the capture button, then slide the power switch on.
   3. Release the capture button when the LED turns red (don't wait until the LED turns white).
+- **From official docs**: See [Known Issues](https://wearables.developer.meta.com/docs/knownissues), [FAQ](https://developers.meta.com/wearables/faq/) and [Report a bug](https://wearables.developer.meta.com/devcenter/feedback/).
 
 Common issues:
 - **Registration deep link not returning** — If registration opens the Meta AI app but the callback does not return to your app, verify that your URL scheme matches the one registered in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter). On iOS, ensure `CFBundleURLSchemes` in `Info.plist` (and `AppLinkURLScheme` in the `MWDAT` dict) use the same scheme. On Android, ensure the `data android:scheme` in your activity's intent-filter matches that scheme.

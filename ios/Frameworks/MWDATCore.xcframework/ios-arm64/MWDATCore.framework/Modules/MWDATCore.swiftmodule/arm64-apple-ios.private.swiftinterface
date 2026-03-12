@@ -1,7 +1,7 @@
 // swift-interface-format-version: 1.0
-// swift-compiler-version: Apple Swift version 6.2 (swiftlang-6.2.0.19.9 clang-1700.3.19.1)
+// swift-compiler-version: Apple Swift version 6.2.3 (swiftlang-6.2.3.3.21 clang-1700.6.3.2)
 // swift-module-flags: -target arm64-apple-ios15.2 -enable-objc-interop -enable-library-evolution -swift-version 6 -Osize -module-name MWDATCore
-// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.2
+// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.2.3
 import CoreBluetooth
 import CryptoKit
 import Foundation
@@ -173,9 +173,30 @@ public enum PermissionStatus : Swift.Sendable {
     get
   }
 }
+public enum Compatibility : Swift.CaseIterable, Swift.Sendable {
+  case undefined
+  case compatible
+  case deviceUpdateRequired
+  case sdkUpdateRequired
+  public var displayString: Swift.String {
+    get
+  }
+  public static func == (a: MWDATCore.Compatibility, b: MWDATCore.Compatibility) -> Swift.Bool
+  public typealias AllCases = [MWDATCore.Compatibility]
+  nonisolated public static var allCases: [MWDATCore.Compatibility] {
+    get
+  }
+  public func hash(into hasher: inout Swift.Hasher)
+  public var hashValue: Swift.Int {
+    get
+  }
+}
 @_hasMissingDesignatedInitializers final public class Device : Swift.Sendable {
   final public let identifier: MWDATCore.DeviceIdentifier
   final public var name: Swift.String {
+    get
+  }
+  final public var deviceUUID: Foundation.UUID {
     get
   }
   final public func nameOrId() -> Swift.String
@@ -219,20 +240,6 @@ final public class AutoDeviceSelector : MWDATCore.DeviceSelector {
   #endif
   public init(wearables: any MWDATCore.WearablesInterface)
   @objc deinit
-}
-@frozen public enum HingeState : Swift.Equatable, Swift.Sendable {
-  case open
-  case closed
-  public static func == (a: MWDATCore.HingeState, b: MWDATCore.HingeState) -> Swift.Bool
-  public func hash(into hasher: inout Swift.Hasher)
-  public var hashValue: Swift.Int {
-    get
-  }
-}
-public struct DeviceState : Swift.Equatable, Swift.Sendable {
-  public let batteryLevel: Swift.Int
-  public let hingeState: MWDATCore.HingeState
-  public static func == (a: MWDATCore.DeviceState, b: MWDATCore.DeviceState) -> Swift.Bool
 }
 @_hasMissingDesignatedInitializers final public class DeviceStateSession : Swift.Sendable {
   final public var state: MWDATCore.SessionState {
@@ -947,24 +954,6 @@ final public class DeviceManagerImpl : MWDATCore.DeviceManager {
   public init(deviceProvider: any MWDATCore.DeviceProvider)
   @objc deinit
 }
-public enum Compatibility : Swift.CaseIterable, Swift.Sendable {
-  case undefined
-  case compatible
-  case deviceUpdateRequired
-  case sdkUpdateRequired
-  public var displayString: Swift.String {
-    get
-  }
-  public static func == (a: MWDATCore.Compatibility, b: MWDATCore.Compatibility) -> Swift.Bool
-  public typealias AllCases = [MWDATCore.Compatibility]
-  nonisolated public static var allCases: [MWDATCore.Compatibility] {
-    get
-  }
-  public func hash(into hasher: inout Swift.Hasher)
-  public var hashValue: Swift.Int {
-    get
-  }
-}
 public protocol DevicePrivate : Swift.Sendable {
   var identifier: MWDATCore.DeviceIdentifier { get }
   #if compiler(>=5.3) && $NonescapableTypes
@@ -979,6 +968,7 @@ public protocol DevicePrivate : Swift.Sendable {
   #if compiler(>=5.3) && $NonescapableTypes
   var firmwareVersion: Swift.String? { get }
   #endif
+  var deviceUUID: Foundation.UUID { get }
   func addLinkStateListener(_ listener: @escaping @Sendable (MWDATCore.LinkState) -> Swift.Void) -> any MWDATCore.AnyListenerToken
   func addCompatibilityListener(_ listener: @escaping @Sendable (MWDATCore.Compatibility) -> Swift.Void) -> any MWDATCore.AnyListenerToken
 }
@@ -1007,8 +997,9 @@ final public class MockDevicePrivate : MWDATCore.DevicePrivate {
   final public let deviceType: MWDATCore.DeviceType
   final public let compatibility: MWDATCore.Compatibility
   final public let firmwareVersion: Swift.String?
+  final public let deviceUUID: Foundation.UUID
   #if compiler(>=5.3) && $NonescapableTypes
-  public init(identifier: MWDATCore.DeviceIdentifier, name: Swift.String? = nil, connection: (any MWDATCore.AnyConnection)? = nil, linkState: MWDATCore.LinkState = .disconnected, deviceType: MWDATCore.DeviceType = .unknown, compatibility: MWDATCore.Compatibility = Compatibility.compatible, firmwareVersion: Swift.String? = nil)
+  public init(identifier: MWDATCore.DeviceIdentifier, name: Swift.String? = nil, connection: (any MWDATCore.AnyConnection)? = nil, linkState: MWDATCore.LinkState = .disconnected, deviceType: MWDATCore.DeviceType = .unknown, compatibility: MWDATCore.Compatibility = Compatibility.compatible, firmwareVersion: Swift.String? = nil, deviceUUID: Foundation.UUID = UUID())
   #endif
   final public func addLinkStateListener(_ listener: @escaping (MWDATCore.LinkState) -> Swift.Void) -> any MWDATCore.AnyListenerToken
   final public func addCompatibilityListener(_ listener: @escaping (MWDATCore.Compatibility) -> Swift.Void) -> any MWDATCore.AnyListenerToken
@@ -1111,6 +1102,7 @@ final public class ListenerStore<T> : MWDATCore.Announcer, @unchecked Swift.Send
 }
 final public class SafeContinuation<T, E> : @unchecked Swift.Sendable where T : Swift.Sendable, E : Swift.Error {
   public init(_ continuation: _Concurrency.UnsafeContinuation<T, E>)
+  @objc deinit
   #if compiler(>=5.3) && $NonescapableTypes
   final public func resume(with result: Swift.Result<T, E>)
   #endif
@@ -1120,7 +1112,6 @@ final public class SafeContinuation<T, E> : @unchecked Swift.Sendable where T : 
   #if compiler(>=5.3) && $NonescapableTypes
   final public func cancelAfter(timeout: Foundation.TimeInterval?) where E == any Swift.Error
   #endif
-  @objc deinit
 }
 #if compiler(>=5.3) && $NonescapableTypes
 #if compiler(>=5.3) && $SendingArgsAndResults
@@ -1225,8 +1216,8 @@ extension MWDATCore.SessionState : Swift.Equatable {}
 extension MWDATCore.SessionState : Swift.Hashable {}
 extension MWDATCore.SessionState : Swift.RawRepresentable {}
 extension MWDATCore.SessionState : Swift.BitwiseCopyable {}
-extension MWDATCore.HingeState : Swift.Hashable {}
-extension MWDATCore.HingeState : Swift.BitwiseCopyable {}
+extension MWDATCore.Compatibility : Swift.Equatable {}
+extension MWDATCore.Compatibility : Swift.Hashable {}
 extension MWDATCore.ObjC_Permission : Swift.Equatable {}
 extension MWDATCore.ObjC_Permission : Swift.Hashable {}
 extension MWDATCore.ObjC_Permission : Swift.RawRepresentable {}
@@ -1274,8 +1265,6 @@ extension MWDATCore.DATAttestationStatus : Swift.Hashable {}
 extension MWDATCore.DATAttestationStatus : Swift.RawRepresentable {}
 extension MWDATCore.ConfigurationError : Swift.Equatable {}
 extension MWDATCore.ConfigurationError : Swift.Hashable {}
-extension MWDATCore.Compatibility : Swift.Equatable {}
-extension MWDATCore.Compatibility : Swift.Hashable {}
 extension MWDATCore.IntentURLAction : Swift.Equatable {}
 extension MWDATCore.IntentURLAction : Swift.Hashable {}
 extension MWDATCore.SharedURLParamKeys : Swift.Equatable {}
