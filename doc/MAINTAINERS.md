@@ -33,6 +33,15 @@ Force the example app to recognize the updated files:
 2. Update Pods: Run `pod update` (not just `pod install`) to re-link the local vendored files
 3. Clean Build: Open Xcode and perform a Clean Build Folder (`Cmd+Shift+K`)
 
+### 4. Implement API Changes
+
+Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Swift and Dart) to adopt new features and fix any issues introduced by the update.
+
+### 5. Test Build
+
+- Clean build: `cd example && flutter build ios --release --no-codesign`
+- Run the example app on a device or simulator to verify everything works with the new version
+
 ## Android
 
 The Android implementation uses Maven dependencies from GitHub Packages. Follow these steps to update the DAT version.
@@ -52,25 +61,21 @@ ext.mwdat_version = "0.3.0"  # Update to the latest version
 
 The `mwdat-core`, `mwdat-camera`, and `mwdat-mockdevice` dependencies all use this variable.
 
-### 3. Verify Repository Access
 
-Ensure the GitHub Packages repository is properly configured in `example/android/settings.gradle.kts`:
-
-- Verify the repository URL is correct: `https://maven.pkg.github.com/facebook/meta-wearables-dat-android`
-- Ensure authentication is set up via `GITHUB_TOKEN` environment variable or `github_token` in `local.properties`
-- The token must have `read:packages` scope
-
-### 4. Sync Dependencies
+### 3. Sync Dependencies
 
 1. Navigate to the example's Android folder: `cd example/android`
 2. Sync Gradle: Run `./gradlew build --refresh-dependencies` or use Android Studio's "Sync Project with Gradle Files"
 3. Verify the new dependencies are resolved correctly
 
+### 4. Implement API Changes
+
+Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Kotlin and Dart) to adopt new features and fix any issues introduced by the update.
+
 ### 5. Test Build
 
 - Clean build: `./gradlew clean build`
-- Test the example app to ensure everything works with the new version
-- Check for any breaking changes in the DAT release notes
+- Run the example app to ensure everything works with the new version
 
 ## Update Documentation
 
