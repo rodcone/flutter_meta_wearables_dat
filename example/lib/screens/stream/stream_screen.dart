@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart'
@@ -77,6 +78,55 @@ class _StreamScreenState extends State<StreamScreen> {
                       ),
                     ),
             ),
+            // Error banner at the top
+            if (streamProvider.lastError != null)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: SafeArea(
+                  child: Container(
+                    margin: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade900.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          streamProvider.lastError!.isThermalCritical
+                              ? Icons.thermostat
+                              : Icons.error_outline,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            streamProvider.lastError!.message,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: streamProvider.dismissError,
+                          child: const Icon(
+                            Icons.close,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             // Controls overlay at the bottom
             Positioned(
               bottom: 24,
@@ -86,6 +136,20 @@ class _StreamScreenState extends State<StreamScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Session state label
+                    if (streamProvider.sessionState != null &&
+                        streamProvider.sessionState != StreamSessionState.streaming &&
+                        streamProvider.sessionState != StreamSessionState.stopped)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 5),
+                        child: Text(
+                          _sessionStateLabel(streamProvider.sessionState!),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.white.withOpacity(0.7),
+                          ),
+                        ),
+                      ),
                     // Show "Waiting for an active device" message when no device is available
                     // Always render it but control visibility with opacity (like native sample app)
                     Opacity(
@@ -112,14 +176,6 @@ class _StreamScreenState extends State<StreamScreen> {
                         ),
                       ),
                     ),
-                    // FPS and quality settings (only when not streaming)
-                    if (!streamProvider.isStreaming)
-                      _StreamSettingsRow(
-                        fps: streamProvider.fps,
-                        highQuality: streamProvider.highQuality,
-                        onFpsChanged: streamProvider.setFps,
-                        onHighQualityChanged: streamProvider.setHighQuality,
-                      ),
                     // Show Start button only when not streaming
                     if (!streamProvider.isStreaming)
                       MetaButton.text(
@@ -134,10 +190,7 @@ class _StreamScreenState extends State<StreamScreen> {
                               .ensureCameraPermission();
                           if (!hasPermission || !context.mounted) return;
 
-                          await streamProvider.startStreamSession(
-                            fps: streamProvider.fps,
-                            streamQuality: streamProvider.streamQuality,
-                          );
+                          await streamProvider.startStreamSession();
                         },
                       ),
                     // Show Stop button only when streaming
@@ -197,124 +250,14 @@ class _StreamScreenState extends State<StreamScreen> {
   }
 }
 
-class _StreamSettingsRow extends StatelessWidget {
-  final double fps;
-  final bool highQuality;
-  final ValueChanged<double> onFpsChanged;
-  final ValueChanged<bool> onHighQualityChanged;
-
-  const _StreamSettingsRow({
-    required this.fps,
-    required this.highQuality,
-    required this.onFpsChanged,
-    required this.onHighQualityChanged,
-  });
-
-  static const List<(double, IconData)> _fpsOptions = [
-    (30.0, Icons.thirty_fps_select),
-    (60.0, Icons.sixty_fps_select),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12, left: 50, right: 50),
-      child: Row(
-        children: [
-          // FPS selection
-          ..._fpsOptions.map(
-            (option) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: _FpsIconButton(
-                fps: option.$1,
-                icon: option.$2,
-                selected: fps == option.$1,
-                onTap: () => onFpsChanged(option.$1),
-              ),
-            ),
-          ),
-          const Spacer(),
-          // Quality toggle (high = filled, medium = outlined)
-          _QualityIconButton(
-            highQuality: highQuality,
-            onTap: () => onHighQualityChanged(!highQuality),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FpsIconButton extends StatelessWidget {
-  final double fps;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _FpsIconButton({
-    required this.fps,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? Colors.white : Colors.white.withOpacity(0.5);
-    return Tooltip(
-      message: '${fps.toInt()} fps',
-      child: Material(
-        color: selected
-            ? Colors.white.withOpacity(0.15)
-            : Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Icon(icon, size: 24, color: color),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _QualityIconButton extends StatelessWidget {
-  final bool highQuality;
-  final VoidCallback onTap;
-
-  const _QualityIconButton({
-    required this.highQuality,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = highQuality ? Colors.white : Colors.white.withOpacity(0.5);
-    return Tooltip(
-      message: highQuality ? 'High quality' : 'Medium quality',
-      child: Material(
-        color: highQuality
-            ? Colors.white.withOpacity(0.15)
-            : Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Icon(
-              highQuality ? Icons.high_quality : Icons.high_quality_outlined,
-              size: 24,
-              color: color,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+String _sessionStateLabel(StreamSessionState state) {
+  return switch (state) {
+    StreamSessionState.stopping => 'Stopping...',
+    StreamSessionState.waitingForDevice => 'Waiting for device...',
+    StreamSessionState.starting => 'Starting...',
+    StreamSessionState.paused => 'Paused',
+    _ => '',
+  };
 }
 
 /// Renders the video stream using Flutter's Texture API (zero-copy).

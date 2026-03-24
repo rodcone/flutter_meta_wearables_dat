@@ -99,6 +99,7 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     String? deviceUUID, {
     double fps = 30.0,
     StreamQuality streamQuality = StreamQuality.high,
+    VideoCodec videoCodec = VideoCodec.raw,
   }) {
     throw UnimplementedError('startStreamSession() has not been implemented.');
   }
@@ -107,7 +108,10 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     throw UnimplementedError('stopStreamSession() has not been implemented.');
   }
 
-  Future<CapturedPhoto> capturePhoto(String? deviceUUID) {
+  Future<CapturedPhoto> capturePhoto(
+    String? deviceUUID, {
+    PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
+  }) {
     throw UnimplementedError('capturePhoto() has not been implemented.');
   }
 
@@ -120,6 +124,18 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
   Stream<RegistrationState> registrationStateStream() {
     throw UnimplementedError(
       'registrationStateStream() has not been implemented.',
+    );
+  }
+
+  Stream<StreamSessionState> streamSessionStateStream() {
+    throw UnimplementedError(
+      'streamSessionStateStream() has not been implemented.',
+    );
+  }
+
+  Stream<StreamSessionError> streamSessionErrorStream() {
+    throw UnimplementedError(
+      'streamSessionErrorStream() has not been implemented.',
     );
   }
 

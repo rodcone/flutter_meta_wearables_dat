@@ -5,6 +5,7 @@ import MWDATCamera
 import MWDATMockDevice
 import AVFoundation
 import CoreMedia
+import VideoToolbox
 
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Single stream session state (only one session at a time)
@@ -16,8 +17,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var lastFrameSendTime: Date?
   private var pixelBufferTexture: PixelBufferTexture?
   private var textureId: Int64?
+  private var currentVideoCodec: MWDATCamera.VideoCodec = .raw
+  private var decompressionSession: VTDecompressionSession?
   // Texture registry
   private var textureRegistry: FlutterTextureRegistry?
+  // Stream session event handlers
+  private var streamStateHandler = StreamSessionStateStreamHandler()
+  private var streamErrorHandler = StreamSessionErrorStreamHandler()
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: registrar.messenger())
@@ -30,6 +36,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // Event channel for active device availability updates
     let activeDeviceChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/active_device", binaryMessenger: registrar.messenger())
     activeDeviceChannel.setStreamHandler(ActiveDeviceStreamHandler())
+    // Event channels for stream session state and errors
+    let streamStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/stream_session_state", binaryMessenger: registrar.messenger())
+    streamStateChannel.setStreamHandler(instance.streamStateHandler)
+    let streamErrorChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/stream_session_errors", binaryMessenger: registrar.messenger())
+    streamErrorChannel.setStreamHandler(instance.streamErrorHandler)
 
     Task { @MainActor in
       try? Wearables.configure()
@@ -260,6 +271,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       await token.cancel()
       errorListenerToken = nil
     }
+    // Disconnect event handlers
+    streamStateHandler.session = nil
+    streamErrorHandler.session = nil
     if let session = streamSession {
       await session.stop()
       streamSession = nil
@@ -269,6 +283,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       NSLog("[MWDAT] Unregistered texture \(texId)")
       textureId = nil
       pixelBufferTexture = nil
+    }
+    if let session = decompressionSession {
+      VTDecompressionSessionInvalidate(session)
+      decompressionSession = nil
     }
     frameCounter = 0
     lastFrameSendTime = nil
@@ -291,9 +309,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       timeSinceLastFrame = 0
     }
 
-    // Extract CVPixelBuffer directly from CMSampleBuffer — zero conversion cost
-    guard let pixelBuffer = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer) else {
-      NSLog("[MWDAT] CMSampleBufferGetImageBuffer returned nil")
+    // Get pixel buffer: direct extraction for raw, decode for hvc1
+    let pixelBuffer: CVPixelBuffer?
+    if currentVideoCodec == .raw {
+      pixelBuffer = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer)
+    } else {
+      pixelBuffer = decodeCompressedFrame(videoFrame.sampleBuffer)
+    }
+
+    guard let pixelBuffer else {
+      NSLog("[MWDAT] Could not obtain pixel buffer from video frame")
       return
     }
 
@@ -314,6 +339,66 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let actualFPS = 1.0 / timeSinceLastFrame
       NSLog("[MWDAT] \(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
     }
+  }
+
+  // MARK: - HEVC Decompression (for hvc1 codec)
+
+  /// Creates a VTDecompressionSession for decoding HEVC frames to BGRA pixel buffers.
+  private func setupDecompressionSession(formatDescription: CMFormatDescription) {
+    let attrs: [String: Any] = [
+      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+    ]
+    var session: VTDecompressionSession?
+    let status = VTDecompressionSessionCreate(
+      allocator: kCFAllocatorDefault,
+      formatDescription: formatDescription,
+      decoderSpecification: nil,
+      imageBufferAttributes: attrs as CFDictionary,
+      outputCallback: nil,
+      decompressionSessionOut: &session
+    )
+    if status == noErr, let session {
+      decompressionSession = session
+      NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding")
+    } else {
+      NSLog("[MWDAT] Failed to create VTDecompressionSession: \(status)")
+    }
+  }
+
+  /// Decodes a compressed CMSampleBuffer (HEVC) to a CVPixelBuffer.
+  private func decodeCompressedFrame(_ sampleBuffer: CMSampleBuffer) -> CVPixelBuffer? {
+    guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+      return nil
+    }
+
+    // Lazily create decompression session on first frame
+    if decompressionSession == nil {
+      setupDecompressionSession(formatDescription: formatDescription)
+    }
+
+    guard let session = decompressionSession else { return nil }
+
+    var outputBuffer: CVPixelBuffer?
+    var flagOut: VTDecodeInfoFlags = []
+
+    let status = VTDecompressionSessionDecodeFrame(
+      session,
+      sampleBuffer: sampleBuffer,
+      flags: [],  // synchronous decode
+      infoFlagsOut: &flagOut,
+      outputHandler: { decodeStatus, _, imageBuffer, _, _ in
+        if decodeStatus == noErr {
+          outputBuffer = imageBuffer
+        }
+      }
+    )
+
+    if status != noErr {
+      NSLog("[MWDAT] VTDecompressionSession decode error: \(status)")
+      return nil
+    }
+
+    return outputBuffer
   }
 
   func setMockCameraFeed(call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -427,6 +512,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // Get FPS parameter (default to 30.0 if not provided)
     let fps = (args["fps"] as? Double) ?? 30.0
     let streamQuality = Self.parseStreamQuality(args["streamQuality"] as? String)
+    let videoCodecStr = args["videoCodec"] as? String ?? "raw"
+    let videoCodec: MWDATCamera.VideoCodec = (videoCodecStr == "hvc1") ? .hvc1 : .raw
 
     // deviceUUID is optional - if not provided, use AutoDeviceSelector
     let uuidString = args["deviceUUID"] as? String
@@ -460,6 +547,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       pixelBufferTexture = texture
       textureId = texId
       currentTargetFPS = fps
+      currentVideoCodec = videoCodec
       frameCounter = 0
       lastFrameSendTime = nil
       NSLog("[MWDAT] Registered texture \(texId)")
@@ -467,7 +555,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // Create a new StreamSession
       let fpsValue = UInt(max(1, Int(fps.rounded())))
       let streamConfig = StreamSessionConfig(
-        videoCodec: .raw,
+        videoCodec: videoCodec,
         resolution: Self.resolution(for: streamQuality),
         frameRate: fpsValue
       )
@@ -481,8 +569,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         NSLog("[MWDAT] StreamSession error: \(error)")
       }
 
-      // Store the session
+      // Store the session and connect event handlers
       streamSession = session
+      streamStateHandler.session = session
+      streamErrorHandler.session = session
 
       // Subscribe to video frames — push CVPixelBuffer directly, no encoding
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
@@ -520,6 +610,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   func capturePhoto(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let args = call.arguments as? [String: Any]
+    let formatStr = args?["format"] as? String ?? "jpeg"
+    let captureFormat: MWDATCamera.PhotoCaptureFormat = (formatStr == "heic") ? .heic : .jpeg
+
     Task { @MainActor in
       guard let streamSession else {
         result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
@@ -542,7 +636,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         result(payload)
       }
 
-      let accepted = streamSession.capturePhoto(format: .jpeg)
+      let accepted = streamSession.capturePhoto(format: captureFormat)
       if !accepted, !didRespond {
         didRespond = true
         Task { await listenerToken?.cancel() }

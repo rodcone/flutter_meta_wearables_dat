@@ -46,6 +46,8 @@ PODS:
   - share_plus (0.0.1):
     - Flutter
   - SwiftyGif (5.4.5)
+  - url_launcher_ios (0.0.1):
+    - Flutter
 
 DEPENDENCIES:
   - app_links (from `.symlinks/plugins/app_links/ios`)
@@ -54,6 +56,7 @@ DEPENDENCIES:
   - flutter_meta_wearables_dat (from `.symlinks/plugins/flutter_meta_wearables_dat/ios`)
   - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
   - share_plus (from `.symlinks/plugins/share_plus/ios`)
+  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
 
 SPEC REPOS:
   https://github.com/CocoaPods/Specs.git:
@@ -75,6 +78,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/image_picker_ios/ios"
   share_plus:
     :path: ".symlinks/plugins/share_plus/ios"
+  url_launcher_ios:
+    :path: ".symlinks/plugins/url_launcher_ios/ios"
 
 SPEC CHECKSUMS:
   app_links: 3dbc685f76b1693c66a6d9dd1e9ab6f73d97dc0a
@@ -87,6 +92,7 @@ SPEC CHECKSUMS:
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
   SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
+  url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
 
 PODFILE CHECKSUM: 4080366ca9c98393d81485449011afe5ec4d0c86
 

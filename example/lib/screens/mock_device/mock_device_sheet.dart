@@ -4,6 +4,7 @@ import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provide
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart'
     as stream_providers;
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/meta_button.dart';
+import 'package:flutter_meta_wearables_dat_example/shared/widgets/sheet_handle_bar.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
@@ -13,16 +14,17 @@ class MockDeviceSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FractionallySizedBox(
-      heightFactor: 0.9,
+      heightFactor: 0.85,
       widthFactor: 1,
       alignment: Alignment.topCenter,
       child: Padding(
-        padding: const EdgeInsets.all(15),
+        padding: const EdgeInsets.only(left: 25, right: 25, bottom: 100),
         child: Consumer2<MockDeviceProvider, stream_providers.StreamSessionProvider>(
           builder: (context, mockDeviceProvider, streamProvider, child) {
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                const SheetHandleBar(),
                 Card(
                   color: Colors.white,
                   child: Padding(
