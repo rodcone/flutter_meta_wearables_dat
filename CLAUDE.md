@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Flutter plugin providing a bridge to Meta's Wearables Device Access Toolkit (DAT) for integration with Meta AI Glasses (RayBan Meta). Supports iOS (17.0+) and Android (API 29+).
+Flutter plugin providing a bridge to Meta's Wearables Device Access Toolkit (DAT) for integration with Meta AI Glasses (Ray-Ban Meta). Supports iOS (17.0+) and Android (API 29+).
 
 ## Common Commands
 
@@ -87,3 +87,14 @@ Uses `very_good_analysis` package. Suppressed rules: `document_ignores`, `lines_
 
 ## API Reference (Important to read, it's official and updated)
 Fetch https://wearables.developer.meta.com/llms.txt?full=true for the Wearables DAT SDK API reference.
+
+## Consumer Agent Files
+
+The `agent/` directory contains AI assistant configuration files for **developers using this plugin** (not maintainers). These are installed into consumer projects via `./install-skills.sh`.
+
+- `AGENTS.md` — Universal AI reference (works with 20+ AI tools)
+- `agent/claude/` — Claude Code skills, commands, rules
+- `agent/cursor/rules/` — Cursor IDE rules (.mdc files)
+- `agent/github/` — GitHub Copilot instructions
+
+See [AI-Assisted Development](https://wearables.developer.meta.com/docs/ai-assisted) for Meta's approach.

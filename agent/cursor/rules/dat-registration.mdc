@@ -1,0 +1,24 @@
+---
+description: DAT registration flow — startRegistration, handleUrl deep link callback, registration state monitoring, disconnect
+globs: "**/*registration*.dart,**/*deep*link*.dart"
+---
+
+# DAT Registration
+
+## Flow
+1. Subscribe to `MetaWearablesDat.registrationStateStream()` BEFORE starting
+2. Call `MetaWearablesDat.startRegistration()` — opens Meta AI app
+3. User confirms in Meta AI — redirects back via deep link
+4. Handle callback: `MetaWearablesDat.handleUrl(uri.toString())`
+5. Call `MetaWearablesDat.restartActiveDeviceMonitoring()` after returning from Meta AI (critical on Android)
+
+## RegistrationState
+`unavailable(0)`, `available(1)`, `registering(2)`, `registered(3)`
+
+## Disconnect
+`MetaWearablesDat.disconnect()` — also opens Meta AI, handle deep link callback the same way.
+
+## Error handling
+Catch `PlatformException` with code `REGISTRATION_ERROR`. Details may contain: 0=alreadyRegistered, 1=configurationInvalid, 2=metaAINotInstalled, 3=networkUnavailable.
+
+See `example/lib/providers/device_provider.dart` for canonical pattern.

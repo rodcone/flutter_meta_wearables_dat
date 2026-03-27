@@ -1,0 +1,29 @@
+---
+description: MockDeviceKit for DAT development — simulating Meta glasses without physical hardware
+globs: "**/*mock*.dart"
+---
+
+# DAT Mock Device
+
+## Create and control
+```dart
+final uuid = await MetaWearablesDat.pairMockRayBanMeta();
+await MetaWearablesDat.mockDevicePowerOn(uuid!);
+await MetaWearablesDat.mockDeviceDon(uuid); // Required for streaming
+```
+
+## Mock camera feed
+```dart
+await MetaWearablesDat.setMockCameraFeed(uuid, videoPath); // H.265/HEVC only
+await MetaWearablesDat.setMockCapturedImage(uuid, imagePath);
+```
+
+## Stream with mock device
+Pass specific `deviceUUID` (not null): `startStreamSession(uuid, fps: 24)`
+
+## Cleanup
+```dart
+await MetaWearablesDat.unpairMockRayBanMeta(uuid);
+```
+
+See `example/lib/providers/mock_device_provider.dart` for canonical pattern.

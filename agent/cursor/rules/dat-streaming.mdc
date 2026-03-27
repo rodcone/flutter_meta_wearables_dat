@@ -1,0 +1,39 @@
+---
+description: DAT camera streaming — stream sessions, Texture widget rendering, session state/error monitoring, photo capture, raw frame capture for ML
+globs: "**/*stream*.dart,**/*video*.dart,**/*camera*.dart,**/*texture*.dart"
+---
+
+# DAT Streaming
+
+## Start session
+```dart
+final textureId = await MetaWearablesDat.startStreamSession(
+  null, // null = AutoDeviceSelector
+  fps: 24,
+  streamQuality: StreamQuality.low,
+  videoCodec: VideoCodec.raw,
+);
+// Render: Texture(textureId: textureId)
+```
+
+## Subscribe to state/errors BEFORE starting
+- `streamSessionStateStream()` — stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
+- `streamSessionErrorStream()` — `isThermalCritical`, `isHingesClosed`, `isPermissionDenied`
+
+## Codecs
+- `VideoCodec.raw` — iOS & Android, foreground only
+- `VideoCodec.hvc1` — iOS only, foreground + background. Ignored on Android.
+
+## Quality: low (360x640), medium (504x896), high (720x1280). FPS: 2, 7, 15, 24, 30.
+
+## Photo capture
+```dart
+final photo = await MetaWearablesDat.capturePhoto(null, format: PhotoCaptureFormat.jpeg);
+```
+
+## Frame capture for ML
+```dart
+final frame = await MetaWearablesDat.captureStreamFrame(textureId); // ~3.7MB RGBA
+```
+
+See `example/lib/providers/stream_provider.dart` for canonical pattern.

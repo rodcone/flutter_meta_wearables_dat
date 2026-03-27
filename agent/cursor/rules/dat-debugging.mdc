@@ -1,0 +1,21 @@
+---
+description: Diagnosing common DAT integration issues — registration failures, stream problems, platform gotchas
+---
+
+# DAT Debugging
+
+## Common issues
+- **Registration deep link not returning**: URL scheme mismatch between iOS/Android config and Developer Center. Check `CFBundleURLSchemes` (iOS), `<data android:scheme>` (Android).
+- **Stream not starting**: Check `streamSessionStateStream()` state + `streamSessionErrorStream()` errors.
+- **Android: permissions fail silently**: MainActivity must extend `FlutterFragmentActivity`, not `FlutterActivity`.
+- **Android: dependency resolution fails**: Set `GITHUB_TOKEN` env var or `github_token` in `local.properties`.
+- **Android: device not discovered**: `requestAndroidPermissions()` must be called and granted before any DAT call.
+- **thermalCritical error**: Device overheating, streaming pauses automatically.
+- **hingesClosed error**: User folded the glasses.
+
+## Glasses restart
+1. Power switch OFF → Hold capture button → Power switch ON → Release when LED turns red
+
+## Links
+- [Known Issues](https://wearables.developer.meta.com/docs/knownissues)
+- [Version Dependencies](https://wearables.developer.meta.com/docs/version-dependencies)

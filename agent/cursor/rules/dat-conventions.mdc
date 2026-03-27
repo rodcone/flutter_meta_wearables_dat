@@ -1,0 +1,30 @@
+---
+description: Coding conventions for flutter_meta_wearables_dat — API patterns, lifecycle order, error handling
+---
+
+# DAT Flutter Conventions
+
+## API
+- Use `MetaWearablesDat` static methods — never instantiate.
+- Single import: `import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';`
+- All operations are async — always await.
+
+## Lifecycle order
+`requestAndroidPermissions()` → `startRegistration()` + `handleUrl()` → `restartActiveDeviceMonitoring()` → `requestCameraPermission()` → `startStreamSession()`
+
+## Streams
+- Subscribe BEFORE starting the operation they monitor.
+- Cancel all subscriptions in `dispose()`.
+- `registrationStateStream()`, `activeDeviceStream()`, `streamSessionStateStream()`, `streamSessionErrorStream()`
+
+## Video
+- `startStreamSession()` returns `textureId` → render with `Texture(textureId: id)`.
+- Never decode frames manually for display.
+- Pass `null` as deviceUUID for real devices (AutoDeviceSelector), specific UUID only for mock devices.
+
+## Deep links
+- Use `app_links` package. Forward every URI to `MetaWearablesDat.handleUrl(uri.toString())`.
+
+## Platform
+- `VideoCodec.hvc1` is iOS-only. On Android falls back to raw.
+- `FlutterFragmentActivity` required on Android (not `FlutterActivity`).
