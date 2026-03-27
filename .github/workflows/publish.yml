@@ -30,7 +30,7 @@ jobs:
           fi
 
       - run: dart analyze --fatal-infos
-      - run: flutter test
+      - run: if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
       - run: dart pub publish --force
 
   github-release:

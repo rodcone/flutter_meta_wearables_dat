@@ -26,7 +26,7 @@ jobs:
         with:
           channel: stable
       - run: flutter pub get
-      - run: flutter test
+      - run: if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
 
   dry-run:
     runs-on: ubuntu-latest
