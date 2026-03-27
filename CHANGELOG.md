@@ -1,14 +1,13 @@
+## 0.2.1
+* Add AI coding agent configs (`AGENTS.md`, Claude Code, Cursor, Copilot) with `install-skills.sh` installer.
+
 ## 0.2.0
-* **BREAKING**: Update to DAT SDK 0.5.0 (iOS & Android).
-* Add `VideoCodec` enum — choose between `raw` (default, foreground-only) and `hvc1` (compressed HEVC, works in background, iOS only).
-* Add `videoCodec` parameter to `startStreamSession()`.
-* Add `streamSessionStateStream()` — observe stream session state changes (stopped, streaming, paused, etc.).
-* Add `streamSessionErrorStream()` — receive stream errors including `thermalCritical` for device overheating.
-* Add `StreamSessionState` enum and `StreamSessionError` class.
-* Add `PhotoCaptureFormat` enum — choose between `heic` and `jpeg` when capturing photos.
-* Add `format` parameter to `capturePhoto()` (default: `jpeg`).
-* **Android**: Add typed `CaptureError` handling for photo capture failures (DeviceDisconnected, NotStreaming, CaptureInProgress, CaptureFailed).
-* High resolution streaming (720x1280) now works reliably on both platforms.
+* **BREAKING**: Update to DAT SDK 0.5.0 on iOS and Android.
+* `startStreamSession()` gains `videoCodec` and new `VideoCodec`: `raw` (default, foreground-only) or `hvc1` (compressed HEVC, background-friendly, iOS only).
+* New `streamSessionStateStream()` and `streamSessionErrorStream()` to observe session lifecycle (stopped, streaming, paused, …) and errors such as thermal limits; adds `StreamSessionState` and `StreamSessionError`.
+* `capturePhoto()` gains `format` and new `PhotoCaptureFormat`: `heic` or `jpeg` (default `jpeg`).
+* **Android**: Photo capture failures use typed `CaptureError` (e.g. DeviceDisconnected, NotStreaming, CaptureInProgress, CaptureFailed).
+* High-resolution streaming at 720×1280 works reliably on both platforms.
 
 ## 0.1.2
 * Add `captureStreamFrame` method.

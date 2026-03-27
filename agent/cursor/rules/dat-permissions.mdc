@@ -1,0 +1,22 @@
+---
+description: DAT permission handling — Android runtime permissions (Bluetooth/Internet) and DAT camera permissions via Meta AI app
+globs: "**/*permission*.dart"
+---
+
+# DAT Permissions
+
+## Order (critical)
+1. `requestAndroidPermissions()` — Android only, gates SDK init. No-op on iOS.
+2. `startRegistration()` + `handleUrl()` — one-time registration
+3. `requestCameraPermission()` — shows Meta AI permission sheet
+
+## Camera permission
+```dart
+final granted = await MetaWearablesDat.requestCameraPermission();
+// Throws CameraPermissionException on error
+// .isDeviceDisconnected, .isPermissionDenied, .isInternalError
+```
+
+Check status: `getCameraPermissionStatus()` returns `bool`.
+
+See `example/lib/providers/device_provider.dart` for canonical pattern.

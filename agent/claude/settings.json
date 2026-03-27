@@ -1,0 +1,10 @@
+{
+  "skills": {
+    "skills/getting-started.md": "Adding flutter_meta_wearables_dat to a Flutter project, configuring iOS Info.plist and Android AndroidManifest/Gradle/MainActivity",
+    "skills/registration-deeplinks.md": "DAT registration flow with Meta AI app, deep link callbacks via app_links, and registration state monitoring",
+    "skills/camera-streaming.md": "Starting stream sessions, rendering video with Flutter Texture widget, session state/error monitoring, photo capture, raw frame capture for ML",
+    "skills/permissions.md": "Android runtime permissions (Bluetooth/Internet), DAT camera permissions, permission lifecycle and error handling",
+    "skills/mock-device-testing.md": "MockDeviceKit for developing and testing DAT integrations without physical Meta glasses",
+    "skills/debugging.md": "Diagnosing common DAT integration issues: registration failures, stream problems, platform-specific gotchas"
+  }
+}

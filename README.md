@@ -29,6 +29,7 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
     - [2. Permissions (First-time camera access)](#2-permissions-first-time-camera-access)
     - [3. Session (After registration and permissions)](#3-session-after-registration-and-permissions)
       - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
+  - [AI Assistant Integration](#ai-assistant-integration)
   - [Troubleshooting](#troubleshooting)
   - [Example app](#example-app)
   - [Contributing](#contributing)
@@ -341,6 +342,24 @@ void stopFrameProcessing() => _frameTimer?.cancel();
 > **Memory note:** Raw RGBA at 720×1280 is ~3.7 MB per frame. Capture on demand (every 200–500 ms is typical for OCR/ML) rather than every rendered frame.
 
 **Note:** See the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) for a complete implementation.
+
+## AI Assistant Integration
+
+This plugin includes configuration files for AI coding assistants (Claude Code, Cursor, GitHub Copilot). Install them to give your AI assistant full context on DAT integration patterns:
+
+```bash
+# One-liner — installs all tools
+curl -sL https://raw.githubusercontent.com/rodcone/flutter_meta_wearables_dat/main/install-skills.sh | bash
+
+# Or install specific tools only
+curl -sL https://raw.githubusercontent.com/rodcone/flutter_meta_wearables_dat/main/install-skills.sh | bash -s claude
+curl -sL https://raw.githubusercontent.com/rodcone/flutter_meta_wearables_dat/main/install-skills.sh | bash -s cursor
+
+# Or from cloned repo
+./install-skills.sh all
+```
+
+Your AI assistant will auto-discover the config when you open the project. See also: [AI-Assisted Development](https://wearables.developer.meta.com/docs/ai-assisted)
 
 ## Troubleshooting
 
