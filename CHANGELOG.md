@@ -1,13 +1,14 @@
 ## 0.2.0
-* **BREAKING**: Update to DAT SDK 0.5.0 (iOS).
-* Add `VideoCodec` enum — choose between `raw` (default, foreground-only) and `hvc1` (compressed HEVC, works in background).
+* **BREAKING**: Update to DAT SDK 0.5.0 (iOS & Android).
+* Add `VideoCodec` enum — choose between `raw` (default, foreground-only) and `hvc1` (compressed HEVC, works in background, iOS only).
 * Add `videoCodec` parameter to `startStreamSession()`.
 * Add `streamSessionStateStream()` — observe stream session state changes (stopped, streaming, paused, etc.).
 * Add `streamSessionErrorStream()` — receive stream errors including `thermalCritical` for device overheating.
 * Add `StreamSessionState` enum and `StreamSessionError` class.
 * Add `PhotoCaptureFormat` enum — choose between `heic` and `jpeg` when capturing photos.
 * Add `format` parameter to `capturePhoto()` (default: `jpeg`).
-* High resolution streaming (720x1280) now works reliably.
+* **Android**: Add typed `CaptureError` handling for photo capture failures (DeviceDisconnected, NotStreaming, CaptureInProgress, CaptureFailed).
+* High resolution streaming (720x1280) now works reliably on both platforms.
 
 ## 0.1.2
 * Add `captureStreamFrame` method.

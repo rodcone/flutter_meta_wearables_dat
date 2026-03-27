@@ -335,7 +335,7 @@ class _CodecSelector extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             _CodecChip(
-              label: 'HVC1',
+              label: 'HVC1 ${hvc1Supported ? '' : '(iOS only)'}',
               selected: videoCodec == VideoCodec.hvc1,
               enabled: hvc1Supported && enabled,
               tooltip: hvc1Supported

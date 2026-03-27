@@ -249,24 +249,64 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - Once registered and permissions are granted, start a streaming session
 - Call `MetaWearablesDat.startStreamSession(deviceUUID)` — returns a `textureId`
 - Render the live video feed using Flutter's `Texture` widget with the returned ID
+- Monitor session state via `MetaWearablesDat.streamSessionStateStream()`
+- Monitor errors via `MetaWearablesDat.streamSessionErrorStream()`
 - Call `MetaWearablesDat.stopStreamSession(deviceUUID)` to end the session
 
 ```dart
 // Start streaming — returns a texture ID for zero-copy rendering
 final textureId = await MetaWearablesDat.startStreamSession(
   deviceUUID,
-  fps: 30,
-  streamQuality: StreamQuality.high,
+  fps: 24,
+  streamQuality: StreamQuality.low,
+  videoCodec: VideoCodec.raw, // or VideoCodec.hvc1 (iOS only, supports background streaming)
 );
 
 // Render the live video feed
 Texture(textureId: textureId);
+
+// Monitor session state
+MetaWearablesDat.streamSessionStateStream().listen((state) {
+  // StreamSessionState: stopped, waitingForDevice, starting, streaming, paused, stopping
+  print('Session state: $state');
+});
+
+// Monitor errors (e.g., thermalCritical, hingesClosed, permissionDenied)
+MetaWearablesDat.streamSessionErrorStream().listen((error) {
+  print('Session error: ${error.code} — ${error.message}');
+  if (error.isThermalCritical) {
+    // Device overheating — streaming paused automatically
+  }
+});
+
+// Capture a photo during streaming
+final photo = await MetaWearablesDat.capturePhoto(
+  deviceUUID,
+  format: PhotoCaptureFormat.jpeg, // or PhotoCaptureFormat.heic
+);
 
 // Stop streaming when done
 await MetaWearablesDat.stopStreamSession(deviceUUID);
 ```
 
 Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
+
+#### Video codecs
+
+| Codec | Platform | Description |
+|-------|----------|-------------|
+| `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. Foreground only — frame delivery stops when app is backgrounded. Default. |
+| `VideoCodec.hvc1` | iOS only | Compressed HEVC frames. Works in both foreground and background. On iOS, frames are decoded via VideoToolbox's hardware HEVC decoder. Ignored on Android. |
+
+#### Stream quality
+
+| Quality | Resolution |
+|---------|-----------|
+| `StreamQuality.low` | 360 x 640 |
+| `StreamQuality.medium` | 504 x 896 |
+| `StreamQuality.high` | 720 x 1280 |
+
+Valid FPS values: 2, 7, 15, 24, 30.
 
 #### Accessing raw frame bytes
 

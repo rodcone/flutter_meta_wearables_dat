@@ -51,19 +51,20 @@ All three Dart files in `lib/` form the plugin's public API. `MetaWearablesDat` 
 
 - **Method channel** `flutter_meta_wearables_dat` — request/response calls (registration, permissions, streaming control, mock device)
 - **Event channels:**
-  - `flutter_meta_wearables_dat/video_frames` — JPEG-encoded video frame bytes (Uint8List)
   - `flutter_meta_wearables_dat/registration_state` — registration state int values
   - `flutter_meta_wearables_dat/active_device` — boolean device availability
+  - `flutter_meta_wearables_dat/stream_session_state` — stream session state int values (stopping=0, stopped=1, waitingForDevice=2, starting=3, streaming=4, paused=5)
+  - `flutter_meta_wearables_dat/stream_session_errors` — error maps with `code` and `message` keys
 
 ### Native Implementations
 
-**iOS** (`ios/Classes/MetaWearablesDatPlugin.swift`): Uses vendored xcframeworks in `ios/Frameworks/` (MWDATCore, MWDATCamera, MWDATMockDevice). Stream sessions are stored per device UUID with per-device FPS throttling. Frames encoded as JPEG (quality 0.85).
+**iOS** (`ios/Classes/MetaWearablesDatPlugin.swift`): Uses vendored xcframeworks in `ios/Frameworks/` (MWDATCore, MWDATCamera, MWDATMockDevice). Supports two video codecs: `raw` (CVPixelBuffer via `CMSampleBufferGetImageBuffer`) and `hvc1` (compressed HEVC decoded via `VTDecompressionSession` to BGRA pixel buffers). Zero-copy rendering via Flutter Texture API. Stream session state and errors are forwarded to Dart via dedicated event channel handlers (`StreamSessionStateStreamHandler`, `StreamSessionErrorStreamHandler`).
 
-**Android** (`android/src/main/kotlin/io/rodcone/flutter_meta_wearables_dat/MetaWearablesDatPlugin.kt`): Uses Maven dependencies from GitHub Packages (version controlled via `ext.mwdat_version` in `android/build.gradle`). I420→NV21→JPEG frame conversion on Default dispatcher. Permission handling uses `startActivityForResult` with `PluginRegistry.ActivityResultListener` for the DAT permission contract, and `ActivityCompat.requestPermissions` with `RequestPermissionsResultListener` for Android runtime permissions (Bluetooth, Internet). A single shared `AutoDeviceSelector` instance is used across device monitoring and stream sessions (mirrors the reference app pattern). **Important:** SDK initialization (`Wearables.initialize()`) is deferred until after Bluetooth permissions are granted — this is critical for device discovery to work. MainActivity must extend `FlutterFragmentActivity`.
+**Android** (`android/src/main/kotlin/io/rodcone/flutter_meta_wearables_dat/MetaWearablesDatPlugin.kt`): Uses Maven dependencies from GitHub Packages (version controlled via `ext.mwdat_version` in `android/build.gradle`). I420→ARGB frame conversion via `FrameProcessor` rendered directly to SurfaceTexture (zero-copy). Only `raw` codec is supported (Android SDK limitation). Permission handling uses `startActivityForResult` with `PluginRegistry.ActivityResultListener` for the DAT permission contract, and `ActivityCompat.requestPermissions` with `RequestPermissionsResultListener` for Android runtime permissions (Bluetooth, Internet). A single shared `AutoDeviceSelector` instance is used across device monitoring and stream sessions (mirrors the reference app pattern). Stream session state forwarded via `StreamSessionStateStreamHandler`; errors emitted programmatically via `StreamSessionErrorStreamHandler` (Android SDK has no native error publisher). Photo capture uses `DatResult<PhotoData, CaptureError>` with typed error handling. **Important:** SDK initialization (`Wearables.initialize()`) is deferred until after Bluetooth permissions are granted — this is critical for device discovery to work. MainActivity must extend `FlutterFragmentActivity`.
 
 ### Integration Lifecycle
 
-Four-phase flow: **Android Permissions** (`requestAndroidPermissions()` — Bluetooth/Internet, no-op on iOS) → **Registration** (`startRegistration()` + deep link `handleUrl()`) → **Camera Permission** (`requestCameraPermission()`) → **Streaming** (`startStreamSession()` with video frames via event channel). On Android, `requestAndroidPermissions()` must be called first as it gates SDK initialization.
+Four-phase flow: **Android Permissions** (`requestAndroidPermissions()` — Bluetooth/Internet, no-op on iOS) → **Registration** (`startRegistration()` + deep link `handleUrl()`) → **Camera Permission** (`requestCameraPermission()`) → **Streaming** (`startStreamSession()` returns a texture ID for zero-copy rendering via Flutter's `Texture` widget; session state and errors monitored via dedicated event channels). On Android, `requestAndroidPermissions()` must be called first as it gates SDK initialization.
 
 ### Example App
 

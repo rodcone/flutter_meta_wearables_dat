@@ -72,6 +72,14 @@ The `mwdat-core`, `mwdat-camera`, and `mwdat-mockdevice` dependencies all use th
 
 Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Kotlin and Dart) to adopt new features and fix any issues introduced by the update.
 
+Key Android-specific implementation files:
+- `MetaWearablesDatPlugin.kt` — main plugin with method/event channel handling
+- `FrameProcessor.kt` — I420→ARGB frame conversion and FPS throttling
+- `ActiveDeviceStreamHandler.kt` — active device event channel
+- `RegistrationStateStreamHandler.kt` — registration state event channel
+- `StreamSessionStateStreamHandler.kt` — stream session state event channel (maps `StreamSessionState` enum to int)
+- `StreamSessionErrorStreamHandler.kt` — stream session error event channel (programmable sink, Android SDK has no native error publisher)
+
 ### 5. Test Build
 
 - Clean build: `./gradlew clean build`
