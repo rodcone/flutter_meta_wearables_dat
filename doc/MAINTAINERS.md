@@ -25,21 +25,22 @@ Update the binaries in the plugin's internal structure:
 2. Delete the existing `.xcframework` folders
 3. Paste the new versions you extracted
 
-### 3. Verify Installation
-
-Verify the frameworks were replaced successfully:
-
-- Check that all three `.xcframework` folders exist in `ios/Frameworks/`
-- Verify the file sizes and modification dates are recent
-- Test the build to ensure everything links correctly
-
-### 4. Sync Example App
+### 3. Sync Example App
 
 Force the example app to recognize the updated files:
 
 1. Navigate to the example's iOS folder: `cd example/ios`
 2. Update Pods: Run `pod update` (not just `pod install`) to re-link the local vendored files
 3. Clean Build: Open Xcode and perform a Clean Build Folder (`Cmd+Shift+K`)
+
+### 4. Implement API Changes
+
+Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Swift and Dart) to adopt new features and fix any issues introduced by the update.
+
+### 5. Test Build
+
+- Clean build: `cd example && flutter build ios --release --no-codesign`
+- Run the example app on a device or simulator to verify everything works with the new version
 
 ## Android
 
@@ -60,25 +61,29 @@ ext.mwdat_version = "0.3.0"  # Update to the latest version
 
 The `mwdat-core`, `mwdat-camera`, and `mwdat-mockdevice` dependencies all use this variable.
 
-### 3. Verify Repository Access
 
-Ensure the GitHub Packages repository is properly configured in `example/android/settings.gradle.kts`:
-
-- Verify the repository URL is correct: `https://maven.pkg.github.com/facebook/meta-wearables-dat-android`
-- Ensure authentication is set up via `GITHUB_TOKEN` environment variable or `github_token` in `local.properties`
-- The token must have `read:packages` scope
-
-### 4. Sync Dependencies
+### 3. Sync Dependencies
 
 1. Navigate to the example's Android folder: `cd example/android`
 2. Sync Gradle: Run `./gradlew build --refresh-dependencies` or use Android Studio's "Sync Project with Gradle Files"
 3. Verify the new dependencies are resolved correctly
 
+### 4. Implement API Changes
+
+Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Kotlin and Dart) to adopt new features and fix any issues introduced by the update.
+
+Key Android-specific implementation files:
+- `MetaWearablesDatPlugin.kt` — main plugin with method/event channel handling
+- `FrameProcessor.kt` — I420→ARGB frame conversion and FPS throttling
+- `ActiveDeviceStreamHandler.kt` — active device event channel
+- `RegistrationStateStreamHandler.kt` — registration state event channel
+- `StreamSessionStateStreamHandler.kt` — stream session state event channel (maps `StreamSessionState` enum to int)
+- `StreamSessionErrorStreamHandler.kt` — stream session error event channel (programmable sink, Android SDK has no native error publisher)
+
 ### 5. Test Build
 
 - Clean build: `./gradlew clean build`
-- Test the example app to ensure everything works with the new version
-- Check for any breaking changes in the DAT release notes
+- Run the example app to ensure everything works with the new version
 
 ## Update Documentation
 

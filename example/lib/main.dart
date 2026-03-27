@@ -9,6 +9,7 @@ import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provide
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/home/home_screen.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/mock_device/mock_device_sheet.dart';
+import 'package:flutter_meta_wearables_dat_example/screens/settings/settings_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/stream/stream_screen.dart';
 import 'package:provider/provider.dart';
 
@@ -102,46 +103,57 @@ class _MyAppState extends State<MyApp> {
       child: MaterialApp(
         navigatorKey: navigatorKey,
         home: Builder(
-          builder: (context) => Consumer<DeviceProvider>(
-            builder: (context, deviceProvider, _) => Scaffold(
+          builder: (context) =>
+              Consumer2<DeviceProvider, StreamSessionProvider>(
+            builder: (context, deviceProvider, streamProvider, _) => Scaffold(
               floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
-              floatingActionButton: Padding(
-                padding: const EdgeInsets.only(top: 8, right: 5),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (deviceProvider.isRegistered)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 5),
-                        child: FloatingActionButton.small(
-                          heroTag: 'disconnect',
-                          backgroundColor: Colors.red.shade700,
-                          tooltip: 'Disconnect glasses',
-                          onPressed: () => deviceProvider.disconnect(),
-                          child: const Icon(
-                            Icons.link_off,
-                            color: Colors.white,
+              floatingActionButton: streamProvider.isStreaming
+                  ? null
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 8, right: 5),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (deviceProvider.isRegistered)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 5),
+                              child: FloatingActionButton.small(
+                                heroTag: 'settings',
+                                backgroundColor: Colors.blueAccent,
+                                tooltip: 'Settings',
+                                onPressed: () {
+                                  HapticFeedback.lightImpact();
+                                  showModalBottomSheet<void>(
+                                    isScrollControlled: true,
+                                    context: context,
+                                    builder: (ctx) => const SettingsSheet(),
+                                  );
+                                },
+                                child: const Icon(
+                                  Icons.settings,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          FloatingActionButton.small(
+                            heroTag: 'mock_device',
+                            backgroundColor: Colors.blueAccent,
+                            tooltip: 'Mock device',
+                            onPressed: () {
+                              HapticFeedback.lightImpact();
+                              showModalBottomSheet<void>(
+                                isScrollControlled: true,
+                                context: context,
+                                builder: (ctx) => const MockDeviceSheet(),
+                              );
+                            },
+                            child:
+                                const Icon(Icons.bug_report, color: Colors.white),
                           ),
-                        ),
+                        ],
                       ),
-                    FloatingActionButton.small(
-                      heroTag: 'mock_device',
-                      backgroundColor: Colors.blue,
-                      tooltip: 'Mock device',
-                      onPressed: () {
-                        HapticFeedback.lightImpact();
-                        showModalBottomSheet<void>(
-                          isScrollControlled: true,
-                          context: context,
-                          builder: (ctx) => const MockDeviceSheet(),
-                        );
-                      },
-                      child: const Icon(Icons.bug_report, color: Colors.white),
                     ),
-                  ],
-                ),
-              ),
               body:
                   Consumer3<
                     DeviceProvider,

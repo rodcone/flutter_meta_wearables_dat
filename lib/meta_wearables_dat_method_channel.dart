@@ -23,6 +23,18 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     'flutter_meta_wearables_dat/active_device',
   );
 
+  /// The event channel used to receive stream session state updates.
+  @visibleForTesting
+  final streamSessionStateEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/stream_session_state',
+  );
+
+  /// The event channel used to receive stream session errors.
+  @visibleForTesting
+  final streamSessionErrorEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/stream_session_errors',
+  );
+
   @override
   Future<String?> pairMockRayBanMeta() async {
     final deviceUUID = await methodChannel.invokeMethod<String>(
@@ -173,10 +185,12 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     String? deviceUUID, {
     double fps = 30.0,
     StreamQuality streamQuality = StreamQuality.high,
+    VideoCodec videoCodec = VideoCodec.raw,
   }) async {
     final args = <String, dynamic>{
       'fps': fps,
       'streamQuality': streamQuality.value,
+      'videoCodec': videoCodec.value,
     };
     if (deviceUUID != null) {
       args['deviceUUID'] = deviceUUID;
@@ -208,8 +222,13 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
-  Future<CapturedPhoto> capturePhoto(String? deviceUUID) async {
-    final args = <String, dynamic>{};
+  Future<CapturedPhoto> capturePhoto(
+    String? deviceUUID, {
+    PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
+  }) async {
+    final args = <String, dynamic>{
+      'format': format.value,
+    };
     if (deviceUUID != null) {
       args['deviceUUID'] = deviceUUID;
     }
@@ -224,14 +243,14 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
       );
     }
     final bytes = result['bytes'] as Uint8List?;
-    final format = result['format'] as String?;
-    if (bytes == null || format == null) {
+    final resultFormat = result['format'] as String?;
+    if (bytes == null || resultFormat == null) {
       throw PlatformException(
         code: 'CAPTURE_PHOTO_FAILED',
         message: 'Invalid photo data returned from platform.',
       );
     }
-    return CapturedPhoto(bytes: bytes, format: format);
+    return CapturedPhoto(bytes: bytes, format: resultFormat);
   }
 
   @override
@@ -244,6 +263,26 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   Stream<RegistrationState> registrationStateStream() {
     return eventChannel.receiveBroadcastStream().map(
       (dynamic event) => RegistrationState.fromInt(event as int),
+    );
+  }
+
+  @override
+  Stream<StreamSessionState> streamSessionStateStream() {
+    return streamSessionStateEventChannel.receiveBroadcastStream().map(
+      (dynamic event) => StreamSessionState.fromInt(event as int),
+    );
+  }
+
+  @override
+  Stream<StreamSessionError> streamSessionErrorStream() {
+    return streamSessionErrorEventChannel.receiveBroadcastStream().map(
+      (dynamic event) {
+        final map = Map<String, dynamic>.from(event as Map);
+        return StreamSessionError(
+          code: map['code'] as String,
+          message: map['message'] as String,
+        );
+      },
     );
   }
 

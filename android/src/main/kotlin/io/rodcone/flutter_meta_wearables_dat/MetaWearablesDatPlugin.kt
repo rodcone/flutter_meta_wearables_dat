@@ -10,6 +10,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.meta.wearable.dat.camera.StreamSession
 import com.meta.wearable.dat.camera.startStreamSession
+import com.meta.wearable.dat.camera.types.CaptureError
 import com.meta.wearable.dat.camera.types.PhotoData
 import com.meta.wearable.dat.camera.types.StreamConfiguration
 import com.meta.wearable.dat.camera.types.VideoQuality
@@ -74,11 +75,15 @@ class MetaWearablesDatPlugin :
     private lateinit var channel: MethodChannel
     private lateinit var activeDeviceChannel: EventChannel
     private lateinit var registrationStateChannel: EventChannel
+    private lateinit var streamSessionStateChannel: EventChannel
+    private lateinit var streamSessionErrorChannel: EventChannel
     private var application: Application? = null
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private var activeDeviceStreamHandler: ActiveDeviceStreamHandler? = null
     private var registrationStateStreamHandler: RegistrationStateStreamHandler? = null
+    private var streamSessionStateStreamHandler: StreamSessionStateStreamHandler? = null
+    private var streamSessionErrorStreamHandler: StreamSessionErrorStreamHandler? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // Gate SDK initialization until BT permissions are granted (mirrors reference app).
@@ -136,6 +141,22 @@ class MetaWearablesDatPlugin :
                 )
         registrationStateChannel.setStreamHandler(registrationStateStreamHandler)
 
+        streamSessionStateChannel =
+                EventChannel(
+                        flutterPluginBinding.binaryMessenger,
+                        "flutter_meta_wearables_dat/stream_session_state"
+                )
+        streamSessionStateStreamHandler = StreamSessionStateStreamHandler()
+        streamSessionStateChannel.setStreamHandler(streamSessionStateStreamHandler)
+
+        streamSessionErrorChannel =
+                EventChannel(
+                        flutterPluginBinding.binaryMessenger,
+                        "flutter_meta_wearables_dat/stream_session_errors"
+                )
+        streamSessionErrorStreamHandler = StreamSessionErrorStreamHandler()
+        streamSessionErrorChannel.setStreamHandler(streamSessionErrorStreamHandler)
+
         textureRegistry = flutterPluginBinding.textureRegistry
 
         val context = flutterPluginBinding.applicationContext
@@ -181,6 +202,12 @@ class MetaWearablesDatPlugin :
         registrationStateChannel.setStreamHandler(null)
         registrationStateStreamHandler?.dispose()
         registrationStateStreamHandler = null
+        streamSessionStateChannel.setStreamHandler(null)
+        streamSessionStateStreamHandler?.dispose()
+        streamSessionStateStreamHandler = null
+        streamSessionErrorChannel.setStreamHandler(null)
+        streamSessionErrorStreamHandler?.dispose()
+        streamSessionErrorStreamHandler = null
 
         // Clean up stream session
         cleanupSession()
@@ -594,8 +621,13 @@ class MetaWearablesDatPlugin :
         val args = call.arguments as? Map<*, *>
         val fps = (args?.get("fps") as? Double) ?: 30.0
         val streamQuality = parseStreamQuality(args?.get("streamQuality") as? String)
+        val videoCodec = args?.get("videoCodec") as? String
         val deviceUUID = args?.get("deviceUUID") as? String
         val key = deviceUUID ?: "auto"
+
+        if (videoCodec != null && videoCodec != "raw") {
+            Log.d(TAG, "videoCodec '$videoCodec' ignored on Android (only raw I420 supported)")
+        }
 
         if (streamSession != null) {
             val entry = textureEntry
@@ -637,6 +669,8 @@ class MetaWearablesDatPlugin :
                                 StreamConfiguration(videoQuality = streamQuality, fps.toInt())
                         )
                 streamSession = session
+                streamSessionStateStreamHandler?.session = session
+                streamSessionErrorStreamHandler?.session = session
 
                 // Subscribe to video frames — render I420 → ARGB bitmap → SurfaceTexture
                 videoJob = scope.launch(Dispatchers.Default) {
@@ -685,6 +719,12 @@ class MetaWearablesDatPlugin :
             return
         }
 
+        val args = call.arguments as? Map<*, *>
+        val format = args?.get("format") as? String
+        if (format != null) {
+            Log.d(TAG, "capturePhoto format '$format' received (device decides actual format on Android)")
+        }
+
         scope.launch {
             try {
                 val photoResult = session.capturePhoto()
@@ -713,13 +753,16 @@ class MetaWearablesDatPlugin :
                                     }
                             result.success(response)
                         }
-                        .onFailure { error ->
-                            Log.e(TAG, "Photo capture failed", error)
-                            result.error(
-                                    "CAPTURE_PHOTO_FAILED",
-                                    error.message ?: "Photo capture failed.",
-                                    null
-                            )
+                        .onFailure { error, _ ->
+                            val errorCode = when (error) {
+                                is CaptureError.DeviceDisconnected -> "deviceDisconnected"
+                                is CaptureError.NotStreaming -> "notStreaming"
+                                is CaptureError.CaptureInProgress -> "captureInProgress"
+                                is CaptureError.CaptureFailed -> "captureFailed"
+                            }
+                            Log.e(TAG, "Photo capture failed: $errorCode - ${error.description}")
+                            streamSessionErrorStreamHandler?.sendError(errorCode, error.description)
+                            result.error("CAPTURE_PHOTO_FAILED", error.description, errorCode)
                         }
             } catch (e: Exception) {
                 Log.e(TAG, "Photo capture exception", e)
@@ -733,6 +776,8 @@ class MetaWearablesDatPlugin :
         videoJob = null
         stateJob?.cancel()
         stateJob = null
+        streamSessionStateStreamHandler?.session = null
+        streamSessionErrorStreamHandler?.session = null
         streamSession?.close()
         streamSession = null
         sessionKey = null

@@ -4,25 +4,6 @@ import Foundation
 import MWDATCore
 import UIKit
 
-/// Errors that can occur during media decoding operations.
-public enum DecoderError : Error {
-
-    /// Internal unexpected error.
-    case unexpected
-
-    /// Operation was cancelled.
-    case cancelled
-
-    /// Sample buffer has an invalid format description.
-    case invalidFormat
-
-    /// Error creating decompression session.
-    case configurationError(OSStatus)
-
-    /// Couldn't decode a frame.
-    case decodingFailed(OSStatus)
-}
-
 /// Supported formats for capturing photos from Meta Wearables devices.
 public enum PhotoCaptureFormat : Sendable {
 
@@ -90,25 +71,25 @@ public struct PhotoData : Sendable {
 
 /// A class for managing media streaming sessions with Meta Wearables devices.
 /// Handles video streaming, photo capture, and provides real-time state updates.
-@MainActor final public class StreamSession {
+final public class StreamSession : Sendable {
 
     /// The configuration used for this streaming session.
-    @MainActor final public let streamSessionConfig: MWDATCamera.StreamSessionConfig
+    final public let streamSessionConfig: MWDATCamera.StreamSessionConfig
 
     /// The current state of the streaming session.
-    @MainActor final public var state: MWDATCamera.StreamSessionState { get }
+    final public var state: MWDATCamera.StreamSessionState { get }
 
     /// Publisher for streaming session state changes.
-    @MainActor final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.StreamSessionState> { get }
+    final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.StreamSessionState> { get }
 
     /// Publisher for video frames received from the streaming session.
-    @MainActor final public var videoFramePublisher: any MWDATCore.Announcer<MWDATCamera.VideoFrame> { get }
+    final public var videoFramePublisher: any MWDATCore.Announcer<MWDATCamera.VideoFrame> { get }
 
     /// Publisher for photo data captured during the streaming session.
-    @MainActor final public var photoDataPublisher: any MWDATCore.Announcer<MWDATCamera.PhotoData> { get }
+    final public var photoDataPublisher: any MWDATCore.Announcer<MWDATCamera.PhotoData> { get }
 
     /// Publisher for errors that occur during the streaming session.
-    @MainActor final public var errorPublisher: any MWDATCore.Announcer<MWDATCamera.StreamSessionError> { get }
+    final public var errorPublisher: any MWDATCore.Announcer<MWDATCamera.StreamSessionError> { get }
 
     @objc deinit
 
@@ -117,7 +98,7 @@ public struct PhotoData : Sendable {
     /// The session is created in `.stopped` state. Call ``start()`` to begin streaming.
     /// Uses the default ``StreamSessionConfig`` configuration.
     /// - Parameter deviceSelector: The device selector that determines which device to stream from. The selector's `activeDevice` can be nil initially.
-    @MainActor public convenience init(deviceSelector: any MWDATCore.DeviceSelector)
+    public convenience init(deviceSelector: any MWDATCore.DeviceSelector)
 
     /// Creates a streaming session with custom configuration.
     ///
@@ -125,7 +106,7 @@ public struct PhotoData : Sendable {
     /// - Parameters:
     ///   - streamSessionConfig: Configuration specifying resolution, frame rate, and codec settings.
     ///   - deviceSelector: The device selector that determines which device to stream from.
-    @MainActor public convenience init(streamSessionConfig: MWDATCamera.StreamSessionConfig, deviceSelector: any MWDATCore.DeviceSelector)
+    public convenience init(streamSessionConfig: MWDATCamera.StreamSessionConfig, deviceSelector: any MWDATCore.DeviceSelector)
 
     /// Starts video streaming from the device.
     ///
@@ -147,14 +128,14 @@ public struct PhotoData : Sendable {
     /// - ``StreamSessionError/permissionDenied``
     /// - ``StreamSessionError/hingesClosed``
     /// - ``StreamSessionError/internalError``
-    @MainActor final public func start() async
+    final public func start() async
 
     /// Stops video streaming and releases all resources.
     ///
     /// Shuts down the streaming pipeline and transitions to `.stopped` state.
     ///
     /// State transitions: Any state -> `.stopping` -> `.stopped`
-    @MainActor final public func stop() async
+    final public func stop() async
 
     /// Captures a still photo during streaming.
     ///
@@ -166,15 +147,12 @@ public struct PhotoData : Sendable {
     /// - Returns: `true` if the capture request was accepted, `false` if no device session is
     ///   active, a capture is already in progress, or the underlying capture request fails.
     @discardableResult
-    @MainActor final public func capturePhoto(format: MWDATCamera.PhotoCaptureFormat) -> Bool
-}
-
-extension StreamSession : Sendable {
+    final public func capturePhoto(format: MWDATCamera.PhotoCaptureFormat) -> Bool
 }
 
 /// Configuration for a media streaming session with a Meta Wearables device.
 /// Defines video codec, resolution, frame delivery strategy, and target frame rate.
-public struct StreamSessionConfig {
+public struct StreamSessionConfig : Sendable {
 
     /// The video codec to use for streaming.
     public let videoCodec: MWDATCamera.VideoCodec
@@ -215,14 +193,14 @@ public enum StreamSessionError : Error, Equatable {
     /// Video streaming encountered an error.
     case videoStreamingError
 
-    /// Audio streaming encountered an error.
-    case audioStreamingError
-
     /// Camera permission was denied.
     case permissionDenied
 
     /// The device hinges were closed during streaming.
     case hingesClosed
+
+    /// The device thermal state has reached a critical level that may affect streaming performance.
+    case thermalCritical
 
     /// Returns a Boolean value indicating whether two values are equal.
     ///
@@ -236,7 +214,7 @@ public enum StreamSessionError : Error, Equatable {
 }
 
 /// Represents the current state of a media streaming session with a Meta Wearables device.
-@frozen public enum StreamSessionState {
+@frozen public enum StreamSessionState : Sendable {
 
     /// The session is in the process of stopping.
     case stopping
@@ -300,14 +278,11 @@ extension StreamSessionState : Equatable {
 extension StreamSessionState : Hashable {
 }
 
-extension StreamSessionState : Sendable {
-}
-
 extension StreamSessionState : BitwiseCopyable {
 }
 
 /// Valid Live Streaming resolutions. We are using 9:16 aspect ratio.
-public enum StreamingResolution : CaseIterable {
+public enum StreamingResolution : Sendable, CaseIterable {
 
     /// High resolution streaming at 720x1280 pixels.
     case high
@@ -372,10 +347,18 @@ extension StreamingResolution : Hashable {
 }
 
 /// Specifies the video codec to use for streaming.
-public enum VideoCodec {
+public enum VideoCodec : Sendable {
 
-    /// Raw decompressed video frames.
+    /// Raw decompressed video frames (420v YUV pixel buffers).
+    /// - Note: Video frames are only delivered while the app is in the foreground.
+    ///   When the app enters background, frame delivery stops. Use ``hvc1`` if you
+    ///   need to receive frames while backgrounded.
     case raw
+
+    /// Compressed HEVC video frames (hvc1).
+    /// Frames are delivered as compressed `CMSampleBuffer`s without decoding,
+    /// in both foreground and background.
+    case hvc1
 
     /// Returns a Boolean value indicating whether two values are equal.
     ///
@@ -442,7 +425,7 @@ public struct VideoFrame : Sendable {
 }
 
 /// Represents the width and height of a video frame in pixels.
-public struct VideoFrameSize {
+public struct VideoFrameSize : Sendable {
 
     /// The width of the video frame in pixels.
     public let width: UInt

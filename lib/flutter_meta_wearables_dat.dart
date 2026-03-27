@@ -33,6 +33,22 @@ enum RegistrationState {
   }
 }
 
+/// Video codec to use for streaming.
+enum VideoCodec {
+  /// Raw decompressed video frames (foreground only).
+  /// When the app enters background, frame delivery stops.
+  raw('raw'),
+
+  /// Compressed HEVC video frames (hvc1).
+  /// Frames are delivered in both foreground and background.
+  hvc1('hvc1');
+
+  const VideoCodec(this.value);
+
+  /// String value sent over the platform channel.
+  final String value;
+}
+
 /// Supported streaming quality levels.
 enum StreamQuality {
   /// High quality stream (best image quality, highest bandwidth/CPU).
@@ -45,6 +61,81 @@ enum StreamQuality {
   low('low');
 
   const StreamQuality(this.value);
+
+  /// String value sent over the platform channel.
+  final String value;
+}
+
+/// Represents the current state of a stream session.
+enum StreamSessionState {
+  /// The session is in the process of stopping.
+  stopping(0),
+
+  /// The session is completely stopped.
+  stopped(1),
+
+  /// The session is waiting for a device to become available.
+  waitingForDevice(2),
+
+  /// The session is in the process of starting.
+  starting(3),
+
+  /// The session is actively streaming.
+  streaming(4),
+
+  /// The session is temporarily paused.
+  paused(5);
+
+  const StreamSessionState(this.value);
+
+  /// The integer value of the state.
+  final int value;
+
+  /// Converts an integer value to a stream session state.
+  static StreamSessionState fromInt(int value) {
+    return StreamSessionState.values.firstWhere(
+      (state) => state.value == value,
+      orElse: () => StreamSessionState.stopped,
+    );
+  }
+}
+
+/// Represents an error that occurred during a stream session.
+class StreamSessionError {
+  /// The error code identifying the type of error.
+  ///
+  /// Known codes: `internalError`, `deviceNotFound`, `deviceNotConnected`,
+  /// `timeout`, `videoStreamingError`, `permissionDenied`, `hingesClosed`,
+  /// `thermalCritical`.
+  final String code;
+
+  /// A human-readable description of the error.
+  final String message;
+
+  const StreamSessionError({required this.code, required this.message});
+
+  /// Returns true if the device's thermal state has reached a critical level.
+  bool get isThermalCritical => code == 'thermalCritical';
+
+  /// Returns true if the device hinges were closed.
+  bool get isHingesClosed => code == 'hingesClosed';
+
+  /// Returns true if camera permission was denied.
+  bool get isPermissionDenied => code == 'permissionDenied';
+
+  @override
+  String toString() => 'StreamSessionError($code): $message';
+}
+
+/// Supported photo capture formats.
+enum PhotoCaptureFormat {
+  /// HEIC format — better compression than JPEG.
+  heic('heic'),
+
+  /// JPEG format — widely supported.
+  jpeg('jpeg');
+
+  const PhotoCaptureFormat(this.value);
 
   /// String value sent over the platform channel.
   final String value;
@@ -237,14 +328,16 @@ class MetaWearablesDat {
     String? deviceUUID, {
     double fps = 30.0,
     StreamQuality streamQuality = StreamQuality.high,
+    VideoCodec videoCodec = VideoCodec.raw,
   }) {
     debugPrint(
-      '[MetaWearablesDAT] Starting stream session with device UUID: $deviceUUID, FPS: $fps, Stream quality: $streamQuality',
+      '[MetaWearablesDAT] Starting stream session with device UUID: $deviceUUID, FPS: $fps, Stream quality: $streamQuality, Video codec: $videoCodec',
     );
     return MetaWearablesDatPlatform.instance.startStreamSession(
       deviceUUID,
       fps: fps,
       streamQuality: streamQuality,
+      videoCodec: videoCodec,
     );
   }
 
@@ -254,11 +347,17 @@ class MetaWearablesDat {
   }
 
   /// Captures a photo from the active stream session.
-  static Future<CapturedPhoto> capturePhoto(String? deviceUUID) {
+  static Future<CapturedPhoto> capturePhoto(
+    String? deviceUUID, {
+    PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
+  }) {
     debugPrint(
-      '[MetaWearablesDAT] Capturing photo with device UUID: $deviceUUID',
+      '[MetaWearablesDAT] Capturing photo with device UUID: $deviceUUID, format: $format',
     );
-    return MetaWearablesDatPlatform.instance.capturePhoto(deviceUUID);
+    return MetaWearablesDatPlatform.instance.capturePhoto(
+      deviceUUID,
+      format: format,
+    );
   }
 
   /// Captures a single frame from an active stream session's Flutter texture.
@@ -315,6 +414,24 @@ class MetaWearablesDat {
     } finally {
       scene.dispose();
     }
+  }
+
+  /// Stream of stream session state changes.
+  ///
+  /// Emits state transitions such as `stopped`, `waitingForDevice`,
+  /// `streaming`, `paused`, etc. Subscribe to this stream to update your
+  /// UI based on the current session state.
+  static Stream<StreamSessionState> streamSessionStateStream() {
+    return MetaWearablesDatPlatform.instance.streamSessionStateStream();
+  }
+
+  /// Stream of stream session errors.
+  ///
+  /// Emits errors such as `thermalCritical` (device overheating),
+  /// `hingesClosed`, `permissionDenied`, etc. Subscribe to this stream
+  /// to handle errors during an active stream session.
+  static Stream<StreamSessionError> streamSessionErrorStream() {
+    return MetaWearablesDatPlatform.instance.streamSessionErrorStream();
   }
 
   /// Gets the current registration state.

@@ -28,7 +28,7 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
     - [1. Registration (One-time)](#1-registration-one-time)
     - [2. Permissions (First-time camera access)](#2-permissions-first-time-camera-access)
     - [3. Session (After registration and permissions)](#3-session-after-registration-and-permissions)
-    - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
+      - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
   - [Troubleshooting](#troubleshooting)
   - [Example app](#example-app)
   - [Contributing](#contributing)
@@ -249,24 +249,64 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - Once registered and permissions are granted, start a streaming session
 - Call `MetaWearablesDat.startStreamSession(deviceUUID)` — returns a `textureId`
 - Render the live video feed using Flutter's `Texture` widget with the returned ID
+- Monitor session state via `MetaWearablesDat.streamSessionStateStream()`
+- Monitor errors via `MetaWearablesDat.streamSessionErrorStream()`
 - Call `MetaWearablesDat.stopStreamSession(deviceUUID)` to end the session
 
 ```dart
 // Start streaming — returns a texture ID for zero-copy rendering
 final textureId = await MetaWearablesDat.startStreamSession(
   deviceUUID,
-  fps: 30,
-  streamQuality: StreamQuality.high,
+  fps: 24,
+  streamQuality: StreamQuality.low,
+  videoCodec: VideoCodec.raw, // or VideoCodec.hvc1 (iOS only, supports background streaming)
 );
 
 // Render the live video feed
 Texture(textureId: textureId);
+
+// Monitor session state
+MetaWearablesDat.streamSessionStateStream().listen((state) {
+  // StreamSessionState: stopped, waitingForDevice, starting, streaming, paused, stopping
+  print('Session state: $state');
+});
+
+// Monitor errors (e.g., thermalCritical, hingesClosed, permissionDenied)
+MetaWearablesDat.streamSessionErrorStream().listen((error) {
+  print('Session error: ${error.code} — ${error.message}');
+  if (error.isThermalCritical) {
+    // Device overheating — streaming paused automatically
+  }
+});
+
+// Capture a photo during streaming
+final photo = await MetaWearablesDat.capturePhoto(
+  deviceUUID,
+  format: PhotoCaptureFormat.jpeg, // or PhotoCaptureFormat.heic
+);
 
 // Stop streaming when done
 await MetaWearablesDat.stopStreamSession(deviceUUID);
 ```
 
 Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
+
+#### Video codecs
+
+| Codec | Platform | Description |
+|-------|----------|-------------|
+| `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. Foreground only — frame delivery stops when app is backgrounded. Default. |
+| `VideoCodec.hvc1` | iOS only | Compressed HEVC frames. Works in both foreground and background. On iOS, frames are decoded via VideoToolbox's hardware HEVC decoder. Ignored on Android. |
+
+#### Stream quality
+
+| Quality | Resolution |
+|---------|-----------|
+| `StreamQuality.low` | 360 x 640 |
+| `StreamQuality.medium` | 504 x 896 |
+| `StreamQuality.high` | 720 x 1280 |
+
+Valid FPS values: 2, 7, 15, 24, 30.
 
 #### Accessing raw frame bytes
 
@@ -306,13 +346,13 @@ void stopFrameProcessing() => _frameTimer?.cancel();
 
 If you run into issues, try these steps first:
 
-- **Update Meta AI app** — Make sure you have the latest version of the Meta AI app installed on your phone.
-- **Update Glasses in Meta AI app** — In the Meta AI app, check for and install any available firmware updates for your glasses.
-- **Verify installation** — Ensure you have followed all installation steps above, including configuration in your code and in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter).
+- **Update Meta AI app and glasses firmware**: Ensure you have the latest version of the Meta AI app installed on your phone, and within the app, check for and install any available firmware updates for your glasses. [See version dependencies](https://wearables.developer.meta.com/docs/version-dependencies).
+- **Verify installation**: Ensure you have followed all installation steps above, including configuration in your code and in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter).
 - **Restart your glasses** — If the glasses don't connect or the stream doesn't start, try restarting them:
   1. Switch the power button to off.
   2. Press and hold the capture button, then slide the power switch on.
   3. Release the capture button when the LED turns red (don't wait until the LED turns white).
+- **From official docs**: See [Known Issues](https://wearables.developer.meta.com/docs/knownissues), [FAQ](https://developers.meta.com/wearables/faq/) and [Report a bug](https://wearables.developer.meta.com/devcenter/feedback/).
 
 Common issues:
 - **Registration deep link not returning** — If registration opens the Meta AI app but the callback does not return to your app, verify that your URL scheme matches the one registered in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter). On iOS, ensure `CFBundleURLSchemes` in `Info.plist` (and `AppLinkURLScheme` in the `MWDAT` dict) use the same scheme. On Android, ensure the `data android:scheme` in your activity's intent-filter matches that scheme.
