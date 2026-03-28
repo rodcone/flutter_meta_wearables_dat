@@ -723,7 +723,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         }
     }
 
-    private static func resolution(forquality _: StreamQuality) -> StreamingResolution {
+    private static func resolution(for quality: StreamQuality) -> StreamingResolution {
         switch quality {
         case .high:
             return .high
