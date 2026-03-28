@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
 import 'package:flutter_meta_wearables_dat/meta_wearables_dat_platform_interface.dart';
@@ -141,22 +140,6 @@ enum PhotoCaptureFormat {
   final String value;
 }
 
-/// Supported pixel formats for captured stream frames.
-///
-/// These map to Flutter's [ui.ImageByteFormat] values internally.
-enum FrameFormat {
-  /// Raw RGBA pixel data (4 bytes per pixel, pre-multiplied alpha).
-  /// Best for ML inference and image processing pipelines.
-  rawRgba,
-
-  /// Raw RGBA pixel data with straight (non-pre-multiplied) alpha.
-  rawStraightRgba,
-
-  /// PNG-encoded image data.
-  /// Larger than raw formats but widely compatible.
-  png,
-}
-
 /// Exception thrown when a camera permission request fails.
 class CameraPermissionException implements Exception {
   /// The error code from the native SDK.
@@ -200,38 +183,6 @@ class CapturedPhoto {
   String get fileExtension => format == 'heic' ? 'heic' : 'jpg';
 
   String get mimeType => format == 'heic' ? 'image/heic' : 'image/jpeg';
-}
-
-/// A single video frame captured from an active stream session's Flutter
-/// texture.
-///
-/// [CapturedFrame] is captured silently on the Dart side by rasterizing the
-/// Flutter texture. The pixel data is suitable for OCR, ML inference, or any
-/// image processing that needs raw frame access.
-class CapturedFrame {
-  /// The raw pixel data of the captured frame.
-  ///
-  /// The encoding depends on the [format] used during capture:
-  /// - [FrameFormat.rawRgba] / [FrameFormat.rawStraightRgba]: 4 bytes per
-  ///   pixel (R, G, B, A), total size = [width] * [height] * 4.
-  /// - [FrameFormat.png]: PNG-encoded image data.
-  final Uint8List bytes;
-
-  /// The width of the captured frame in pixels.
-  final int width;
-
-  /// The height of the captured frame in pixels.
-  final int height;
-
-  /// The pixel format of [bytes].
-  final FrameFormat format;
-
-  const CapturedFrame({
-    required this.bytes,
-    required this.width,
-    required this.height,
-    required this.format,
-  });
 }
 
 /// The main class for the Meta Wearables DAT.
@@ -324,6 +275,10 @@ class MetaWearablesDat {
   /// Returns a texture ID for rendering via the Flutter `Texture` widget.
   /// Video frames are pushed directly from native to the GPU — no encoding,
   /// no byte copying, no Dart-side decoding.
+  ///
+  /// Note: These frames do not update when your app is backgrounded.
+  /// Use [captureStreamFrame] to get JPEG-encoded frame data that works
+  /// in both foreground and background.
   static Future<int> startStreamSession(
     String? deviceUUID, {
     double fps = 30.0,
@@ -360,60 +315,32 @@ class MetaWearablesDat {
     );
   }
 
-  /// Captures a single frame from an active stream session's Flutter texture.
+  /// Captures a single JPEG-encoded frame from the active stream session.
   ///
-  /// This is a **Dart-side** operation that rasterizes the texture identified
-  /// by [textureId] (returned by [startStreamSession]) into pixel data.
-  /// No native code is invoked and the capture is near-instantaneous.
+  /// Reads the latest pixel buffer directly from native memory and encodes
+  /// it as JPEG. Unlike the Flutter `Texture` widget, the native pixel
+  /// buffer remains accessible across background/foreground transitions.
   ///
-  /// Use this when you need raw frame bytes for OCR, ML inference, computer
-  /// vision, or any processing that requires direct pixel access.
+  /// [quality] controls JPEG compression (1–100). Lower values produce
+  /// smaller files at the cost of image fidelity. Defaults to 70.
   ///
-  /// **Note:** Raw RGBA at the default 720x1280 resolution is ~3.7 MB per
-  /// frame. This method is intended for on-demand captures (e.g., every
-  /// 200-500 ms), not continuous per-frame processing.
+  /// Returns a `Uint8List` containing JPEG image data suitable for network
+  /// transmission, on-device ML inference, or display via `Image.memory()`.
   ///
-  /// Returns a [CapturedFrame] containing the pixel data, or `null` if the
-  /// capture failed (e.g., texture not available).
-  static Future<CapturedFrame?> captureStreamFrame(
-    int textureId, {
-    int width = 720,
-    int height = 1280,
-    FrameFormat format = FrameFormat.rawRgba,
-  }) async {
-    final builder = ui.SceneBuilder()
-      ..addTexture(
-        textureId,
-        width: width.toDouble(),
-        height: height.toDouble(),
-        freeze: true,
-        filterQuality: ui.FilterQuality.high,
+  /// Returns `null` if no stream session is active or no frame is available.
+  ///
+  /// Throws [ArgumentError] if [quality] is outside the 1–100 range.
+  static Future<Uint8List?> captureStreamFrame({int quality = 70}) {
+    if (quality < 1 || quality > 100) {
+      throw ArgumentError.value(
+        quality,
+        'quality',
+        'Must be between 1 and 100',
       );
-    final scene = builder.build();
-    try {
-      final image = await scene.toImage(width, height);
-      try {
-        final imageByteFormat = switch (format) {
-          FrameFormat.rawRgba => ui.ImageByteFormat.rawRgba,
-          FrameFormat.rawStraightRgba => ui.ImageByteFormat.rawStraightRgba,
-          FrameFormat.png => ui.ImageByteFormat.png,
-        };
-        final byteData = await image.toByteData(
-          format: imageByteFormat,
-        );
-        if (byteData == null) return null;
-        return CapturedFrame(
-          bytes: byteData.buffer.asUint8List(),
-          width: width,
-          height: height,
-          format: format,
-        );
-      } finally {
-        image.dispose();
-      }
-    } finally {
-      scene.dispose();
     }
+    return MetaWearablesDatPlatform.instance.captureStreamFrame(
+      quality: quality,
+    );
   }
 
   /// Stream of stream session state changes.
@@ -436,16 +363,16 @@ class MetaWearablesDat {
 
   /// Gets the current registration state.
   static Future<RegistrationState> getRegistrationState() async {
-    final registrationState = await MetaWearablesDatPlatform.instance
-        .getRegistrationState();
+    final registrationState =
+        await MetaWearablesDatPlatform.instance.getRegistrationState();
     debugPrint('[MetaWearablesDAT] Registration state: $registrationState');
     return registrationState;
   }
 
   /// Stream of registration state changes.
   static Stream<RegistrationState> registrationStateStream() {
-    final registrationStateStream = MetaWearablesDatPlatform.instance
-        .registrationStateStream();
+    final registrationStateStream =
+        MetaWearablesDatPlatform.instance.registrationStateStream();
     return registrationStateStream;
   }
 

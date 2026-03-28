@@ -48,28 +48,28 @@ import kotlinx.coroutines.sync.withLock
 
 /** MetaWearablesDatPlugin */
 class MetaWearablesDatPlugin :
-        FlutterPlugin,
-        MethodCallHandler,
-        ActivityAware,
-        PluginRegistry.ActivityResultListener,
-        PluginRegistry.RequestPermissionsResultListener {
+    FlutterPlugin,
+    MethodCallHandler,
+    ActivityAware,
+    PluginRegistry.ActivityResultListener,
+    PluginRegistry.RequestPermissionsResultListener {
 
     companion object {
         private const val TAG = "MetaWearablesDat"
         private const val PERMISSION_REQUEST_CODE = 48291
         private const val BT_PERMISSION_REQUEST_CODE = 48292
         private val REQUIRED_PERMISSIONS: Array<String> =
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    arrayOf(
-                            android.Manifest.permission.BLUETOOTH_CONNECT,
-                            android.Manifest.permission.INTERNET,
-                    )
-                } else {
-                    arrayOf(
-                            android.Manifest.permission.BLUETOOTH,
-                            android.Manifest.permission.INTERNET,
-                    )
-                }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                arrayOf(
+                    android.Manifest.permission.BLUETOOTH_CONNECT,
+                    android.Manifest.permission.INTERNET,
+                )
+            } else {
+                arrayOf(
+                    android.Manifest.permission.BLUETOOTH,
+                    android.Manifest.permission.INTERNET,
+                )
+            }
     }
 
     private lateinit var channel: MethodChannel
@@ -77,6 +77,7 @@ class MetaWearablesDatPlugin :
     private lateinit var registrationStateChannel: EventChannel
     private lateinit var streamSessionStateChannel: EventChannel
     private lateinit var streamSessionErrorChannel: EventChannel
+
     private var application: Application? = null
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
@@ -84,6 +85,7 @@ class MetaWearablesDatPlugin :
     private var registrationStateStreamHandler: RegistrationStateStreamHandler? = null
     private var streamSessionStateStreamHandler: StreamSessionStateStreamHandler? = null
     private var streamSessionErrorStreamHandler: StreamSessionErrorStreamHandler? = null
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // Gate SDK initialization until BT permissions are granted (mirrors reference app).
@@ -116,46 +118,47 @@ class MetaWearablesDatPlugin :
         channel.setMethodCallHandler(this)
 
         activeDeviceChannel =
-                EventChannel(
-                        flutterPluginBinding.binaryMessenger,
-                        "flutter_meta_wearables_dat/active_device"
-                )
+            EventChannel(
+                flutterPluginBinding.binaryMessenger,
+                "flutter_meta_wearables_dat/active_device"
+            )
         activeDeviceStreamHandler =
-                ActiveDeviceStreamHandler(
-                        deviceSelector,
-                        { btPermissionsGranted },
-                        { ensureWearablesInitialized() },
-                )
+            ActiveDeviceStreamHandler(
+                deviceSelector,
+                { btPermissionsGranted },
+                { ensureWearablesInitialized() },
+            )
         activeDeviceChannel.setStreamHandler(activeDeviceStreamHandler)
 
         registrationStateChannel =
-                EventChannel(
-                        flutterPluginBinding.binaryMessenger,
-                        "flutter_meta_wearables_dat/registration_state"
-                )
+            EventChannel(
+                flutterPluginBinding.binaryMessenger,
+                "flutter_meta_wearables_dat/registration_state"
+            )
         registrationStateStreamHandler =
-                RegistrationStateStreamHandler(
-                        { btPermissionsGranted },
-                        { ensureWearablesInitialized() },
-                        ::mapRegistrationState,
-                )
+            RegistrationStateStreamHandler(
+                { btPermissionsGranted },
+                { ensureWearablesInitialized() },
+                ::mapRegistrationState,
+            )
         registrationStateChannel.setStreamHandler(registrationStateStreamHandler)
 
         streamSessionStateChannel =
-                EventChannel(
-                        flutterPluginBinding.binaryMessenger,
-                        "flutter_meta_wearables_dat/stream_session_state"
-                )
+            EventChannel(
+                flutterPluginBinding.binaryMessenger,
+                "flutter_meta_wearables_dat/stream_session_state"
+            )
         streamSessionStateStreamHandler = StreamSessionStateStreamHandler()
         streamSessionStateChannel.setStreamHandler(streamSessionStateStreamHandler)
 
         streamSessionErrorChannel =
-                EventChannel(
-                        flutterPluginBinding.binaryMessenger,
-                        "flutter_meta_wearables_dat/stream_session_errors"
-                )
+            EventChannel(
+                flutterPluginBinding.binaryMessenger,
+                "flutter_meta_wearables_dat/stream_session_errors"
+            )
         streamSessionErrorStreamHandler = StreamSessionErrorStreamHandler()
         streamSessionErrorChannel.setStreamHandler(streamSessionErrorStreamHandler)
+
 
         textureRegistry = flutterPluginBinding.textureRegistry
 
@@ -180,16 +183,19 @@ class MetaWearablesDatPlugin :
             "pairMockRayBanMeta" -> pairMockRayBanMeta(result)
             "unpairMockRayBanMeta" -> unpairMockRayBanMeta(call, result)
             "mockDevicePowerOn", "mockDevicePowerOff", "mockDeviceDon", "mockDeviceDoff" ->
-                    mockDeviceAction(call, result)
+                mockDeviceAction(call, result)
+
             "setMockCameraFeed" -> setMockCameraFeed(call, result)
             "setMockCapturedImage" -> setMockCapturedImage(call, result)
             "restartActiveDeviceMonitoring" -> {
                 activeDeviceStreamHandler?.restartMonitoring()
                 result.success(true)
             }
+
             "startStreamSession" -> startStreamSession(call, result)
             "stopStreamSession" -> stopStreamSession(call, result)
             "capturePhoto" -> capturePhoto(call, result)
+            "captureStreamFrame" -> captureStreamFrame(call, result)
             else -> result.notImplemented()
         }
     }
@@ -264,16 +270,16 @@ class MetaWearablesDatPlugin :
     // region RequestPermissionsResultListener
 
     override fun onRequestPermissionsResult(
-            requestCode: Int,
-            permissions: Array<out String>,
-            grantResults: IntArray
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
     ): Boolean {
         if (requestCode != BT_PERMISSION_REQUEST_CODE) return false
         val pendingResult = btPermissionResult ?: return false
         btPermissionResult = null
         val allGranted =
-                grantResults.isNotEmpty() &&
-                        grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            grantResults.isNotEmpty() &&
+                    grantResults.all { it == PackageManager.PERMISSION_GRANTED }
         if (allGranted) {
             // Initialize SDK now that BT permissions are granted (mirrors reference app pattern)
             btPermissionsGranted = true
@@ -298,17 +304,17 @@ class MetaWearablesDatPlugin :
         val act = activity
         if (act == null) {
             result.error(
-                    "PERMISSION_ERROR",
-                    "Activity is not available. Ensure the app is in the foreground.",
-                    null
+                "PERMISSION_ERROR",
+                "Activity is not available. Ensure the app is in the foreground.",
+                null
             )
             return
         }
 
         val missingPermissions =
-                REQUIRED_PERMISSIONS.filter {
-                    ContextCompat.checkSelfPermission(act, it) != PackageManager.PERMISSION_GRANTED
-                }
+            REQUIRED_PERMISSIONS.filter {
+                ContextCompat.checkSelfPermission(act, it) != PackageManager.PERMISSION_GRANTED
+            }
 
         if (missingPermissions.isEmpty()) {
             // Permissions already granted — initialize SDK and start monitoring
@@ -322,9 +328,9 @@ class MetaWearablesDatPlugin :
 
         btPermissionResult = result
         ActivityCompat.requestPermissions(
-                act,
-                missingPermissions.toTypedArray(),
-                BT_PERMISSION_REQUEST_CODE,
+            act,
+            missingPermissions.toTypedArray(),
+            BT_PERMISSION_REQUEST_CODE,
         )
     }
 
@@ -336,9 +342,9 @@ class MetaWearablesDatPlugin :
                 result.success(status == PermissionStatus.Granted)
             } catch (e: Exception) {
                 result.error(
-                        "PERMISSION_ERROR",
-                        e.message ?: "Failed to check camera permission status.",
-                        null
+                    "PERMISSION_ERROR",
+                    e.message ?: "Failed to check camera permission status.",
+                    null
                 )
             }
         }
@@ -374,27 +380,27 @@ class MetaWearablesDatPlugin :
                     val act = activity
                     if (act == null) {
                         result.error(
-                                "PERMISSION_ERROR",
-                                "Activity is not available. Ensure the app is in the foreground.",
-                                null
+                            "PERMISSION_ERROR",
+                            "Activity is not available. Ensure the app is in the foreground.",
+                            null
                         )
                         return@withLock
                     }
 
                     val permissionStatus =
-                            suspendCancellableCoroutine<PermissionStatus> { continuation ->
-                                permissionContinuation = continuation
-                                continuation.invokeOnCancellation { permissionContinuation = null }
-                                val intent = permissionContract.createIntent(act, Permission.CAMERA)
-                                act.startActivityForResult(intent, PERMISSION_REQUEST_CODE)
-                            }
+                        suspendCancellableCoroutine<PermissionStatus> { continuation ->
+                            permissionContinuation = continuation
+                            continuation.invokeOnCancellation { permissionContinuation = null }
+                            val intent = permissionContract.createIntent(act, Permission.CAMERA)
+                            act.startActivityForResult(intent, PERMISSION_REQUEST_CODE)
+                        }
 
                     result.success(permissionStatus == PermissionStatus.Granted)
                 } catch (e: Exception) {
                     result.error(
-                            "PERMISSION_ERROR",
-                            e.message ?: "Failed to request permission.",
-                            null
+                        "PERMISSION_ERROR",
+                        e.message ?: "Failed to request permission.",
+                        null
                     )
                 }
             }
@@ -409,9 +415,9 @@ class MetaWearablesDatPlugin :
         val act = activity
         if (act == null) {
             result.error(
-                    "REGISTRATION_ERROR",
-                    "Activity is not available. Ensure the app is in the foreground.",
-                    null
+                "REGISTRATION_ERROR",
+                "Activity is not available. Ensure the app is in the foreground.",
+                null
             )
             return
         }
@@ -428,9 +434,9 @@ class MetaWearablesDatPlugin :
         val act = activity
         if (act == null) {
             result.error(
-                    "UNREGISTRATION_ERROR",
-                    "Activity is not available. Ensure the app is in the foreground.",
-                    null
+                "UNREGISTRATION_ERROR",
+                "Activity is not available. Ensure the app is in the foreground.",
+                null
             )
             return
         }
@@ -440,9 +446,9 @@ class MetaWearablesDatPlugin :
             result.success(true)
         } catch (e: Exception) {
             result.error(
-                    "UNREGISTRATION_ERROR",
-                    e.message ?: "Failed to start unregistration.",
-                    null
+                "UNREGISTRATION_ERROR",
+                e.message ?: "Failed to start unregistration.",
+                null
             )
         }
     }
@@ -460,9 +466,9 @@ class MetaWearablesDatPlugin :
                 result.success(mapRegistrationState(state))
             } catch (e: Exception) {
                 result.error(
-                        "REGISTRATION_ERROR",
-                        e.message ?: "Failed to fetch registration state.",
-                        null
+                    "REGISTRATION_ERROR",
+                    e.message ?: "Failed to fetch registration state.",
+                    null
                 )
             }
         }
@@ -634,7 +640,11 @@ class MetaWearablesDatPlugin :
             if (entry != null) {
                 result.success(entry.id())
             } else {
-                result.error("TEXTURE_REGISTRATION_FAILED", "No texture registered for session $key", null)
+                result.error(
+                    "TEXTURE_REGISTRATION_FAILED",
+                    "No texture registered for session $key",
+                    null
+                )
             }
             return
         }
@@ -649,7 +659,11 @@ class MetaWearablesDatPlugin :
                 // Register a Flutter texture for zero-copy rendering
                 val registry = textureRegistry
                 if (registry == null) {
-                    result.error("TEXTURE_REGISTRATION_FAILED", "TextureRegistry is not available.", null)
+                    result.error(
+                        "TEXTURE_REGISTRATION_FAILED",
+                        "TextureRegistry is not available.",
+                        null
+                    )
                     return@launch
                 }
                 val entry = registry.createSurfaceTexture()
@@ -663,32 +677,36 @@ class MetaWearablesDatPlugin :
                 Log.d(TAG, "Registered texture $textureId for session $key")
 
                 val session =
-                        Wearables.startStreamSession(
-                                app,
-                                deviceSelector,
-                                StreamConfiguration(videoQuality = streamQuality, fps.toInt())
-                        )
+                    Wearables.startStreamSession(
+                        app,
+                        deviceSelector,
+                        StreamConfiguration(videoQuality = streamQuality, fps.toInt())
+                    )
                 streamSession = session
                 streamSessionStateStreamHandler?.session = session
                 streamSessionErrorStreamHandler?.session = session
-
                 // Subscribe to video frames — render I420 → ARGB bitmap → SurfaceTexture
                 videoJob = scope.launch(Dispatchers.Default) {
                     session.videoStream.collect { videoFrame ->
                         // Update SurfaceTexture buffer size if frame dimensions change
-                        if (frameProcessor.needsBufferSizeUpdate(videoFrame.width, videoFrame.height)) {
-                            entry.surfaceTexture().setDefaultBufferSize(videoFrame.width, videoFrame.height)
+                        if (frameProcessor.needsBufferSizeUpdate(
+                                videoFrame.width,
+                                videoFrame.height
+                            )
+                        ) {
+                            entry.surfaceTexture()
+                                .setDefaultBufferSize(videoFrame.width, videoFrame.height)
                         }
                         frameProcessor.processFrame(videoFrame, surface)
                     }
                 }
 
                 stateJob =
-                        scope.launch {
-                            session.state.collect { state ->
-                                Log.d(TAG, "StreamSession [$key] state: $state")
-                            }
+                    scope.launch {
+                        session.state.collect { state ->
+                            Log.d(TAG, "StreamSession [$key] state: $state")
                         }
+                    }
 
                 result.success(textureId)
             } catch (e: Exception) {
@@ -722,53 +740,65 @@ class MetaWearablesDatPlugin :
         val args = call.arguments as? Map<*, *>
         val format = args?.get("format") as? String
         if (format != null) {
-            Log.d(TAG, "capturePhoto format '$format' received (device decides actual format on Android)")
+            Log.d(
+                TAG,
+                "capturePhoto format '$format' received (device decides actual format on Android)"
+            )
         }
 
         scope.launch {
             try {
                 val photoResult = session.capturePhoto()
                 photoResult
-                        .onSuccess { photoData ->
-                            val response: Map<String, Any> =
-                                    when (photoData) {
-                                        is PhotoData.Bitmap -> {
-                                            val stream = ByteArrayOutputStream()
-                                            photoData.bitmap.compress(
-                                                    android.graphics.Bitmap.CompressFormat.JPEG,
-                                                    85,
-                                                    stream
-                                            )
-                                            mapOf(
-                                                    "bytes" to stream.toByteArray(),
-                                                    "format" to "jpeg"
-                                            )
-                                        }
-                                        is PhotoData.HEIC -> {
-                                            val buffer = photoData.data
-                                            val bytes = ByteArray(buffer.remaining())
-                                            buffer.get(bytes)
-                                            mapOf("bytes" to bytes, "format" to "heic")
-                                        }
-                                    }
-                            result.success(response)
-                        }
-                        .onFailure { error, _ ->
-                            val errorCode = when (error) {
-                                is CaptureError.DeviceDisconnected -> "deviceDisconnected"
-                                is CaptureError.NotStreaming -> "notStreaming"
-                                is CaptureError.CaptureInProgress -> "captureInProgress"
-                                is CaptureError.CaptureFailed -> "captureFailed"
+                    .onSuccess { photoData ->
+                        val response: Map<String, Any> =
+                            when (photoData) {
+                                is PhotoData.Bitmap -> {
+                                    val stream = ByteArrayOutputStream()
+                                    photoData.bitmap.compress(
+                                        android.graphics.Bitmap.CompressFormat.JPEG,
+                                        85,
+                                        stream
+                                    )
+                                    mapOf(
+                                        "bytes" to stream.toByteArray(),
+                                        "format" to "jpeg"
+                                    )
+                                }
+
+                                is PhotoData.HEIC -> {
+                                    val buffer = photoData.data
+                                    val bytes = ByteArray(buffer.remaining())
+                                    buffer.get(bytes)
+                                    mapOf("bytes" to bytes, "format" to "heic")
+                                }
                             }
-                            Log.e(TAG, "Photo capture failed: $errorCode - ${error.description}")
-                            streamSessionErrorStreamHandler?.sendError(errorCode, error.description)
-                            result.error("CAPTURE_PHOTO_FAILED", error.description, errorCode)
+                        result.success(response)
+                    }
+                    .onFailure { error, _ ->
+                        val errorCode = when (error) {
+                            is CaptureError.DeviceDisconnected -> "deviceDisconnected"
+                            is CaptureError.NotStreaming -> "notStreaming"
+                            is CaptureError.CaptureInProgress -> "captureInProgress"
+                            is CaptureError.CaptureFailed -> "captureFailed"
                         }
+                        Log.e(TAG, "Photo capture failed: $errorCode - ${error.description}")
+                        streamSessionErrorStreamHandler?.sendError(errorCode, error.description)
+                        result.error("CAPTURE_PHOTO_FAILED", error.description, errorCode)
+                    }
             } catch (e: Exception) {
                 Log.e(TAG, "Photo capture exception", e)
                 result.error("CAPTURE_PHOTO_FAILED", e.message ?: "Photo capture failed.", null)
             }
         }
+    }
+
+    private fun captureStreamFrame(call: MethodCall, result: Result) {
+        val args = call.arguments as? Map<*, *>
+        val quality = ((args?.get("quality") as? Int) ?: 70).coerceIn(1, 100)
+        val bytes = frameProcessor.copyAsJpegBytes(quality)
+
+        result.success(bytes)
     }
 
     private fun cleanupSession() {
@@ -804,7 +834,7 @@ class MetaWearablesDatPlugin :
     }
 
     private fun mapRegistrationState(
-            state: com.meta.wearable.dat.core.types.RegistrationState
+        state: com.meta.wearable.dat.core.types.RegistrationState
     ): Int {
         return when (state) {
             is com.meta.wearable.dat.core.types.RegistrationState.Unavailable -> 0

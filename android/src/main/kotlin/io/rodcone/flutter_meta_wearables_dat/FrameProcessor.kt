@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.util.Log
 import android.view.Surface
 import com.meta.wearable.dat.camera.types.VideoFrame
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 
 /**
@@ -75,9 +76,9 @@ internal class FrameProcessor {
         if (frameCount % 30 == 0 && lastTime != null) {
             val actualFPS = 1_000_000_000.0 / (now - lastTime)
             Log.d(
-                    TAG,
-                    "Texture path — $frameCount frames, " +
-                            "target: $targetFPS, actual: ${"%.1f".format(actualFPS)} FPS"
+                TAG,
+                "Texture path — $frameCount frames, " +
+                        "target: $targetFPS, actual: ${"%.1f".format(actualFPS)} FPS"
             )
         }
     }
@@ -88,6 +89,15 @@ internal class FrameProcessor {
     fun needsBufferSizeUpdate(width: Int, height: Int): Boolean {
         val bmp = reusableBitmap
         return bmp == null || bmp.width != width || bmp.height != height
+    }
+
+    @Synchronized
+    fun copyAsJpegBytes(quality: Int = 70): ByteArray? {
+        val bmp = reusableBitmap ?: return null
+        val stream = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+
+        return stream.toByteArray()
     }
 
     fun release() {
@@ -104,7 +114,12 @@ internal class FrameProcessor {
      * Uses BT.601 full-range coefficients with fixed-point integer math (scaled by 1024).
      * Reuses byte/pixel arrays across frames to avoid per-frame GC pressure.
      */
-    private fun convertI420toArgbBitmap(buffer: ByteBuffer, width: Int, height: Int, bitmap: Bitmap) {
+    private fun convertI420toArgbBitmap(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        bitmap: Bitmap
+    ) {
         val dataSize = buffer.remaining()
         var byteArray = reusableByteArray
         if (byteArray == null || byteArray.size < dataSize) {

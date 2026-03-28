@@ -262,15 +262,15 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   @override
   Stream<RegistrationState> registrationStateStream() {
     return eventChannel.receiveBroadcastStream().map(
-      (dynamic event) => RegistrationState.fromInt(event as int),
-    );
+          (dynamic event) => RegistrationState.fromInt(event as int),
+        );
   }
 
   @override
   Stream<StreamSessionState> streamSessionStateStream() {
     return streamSessionStateEventChannel.receiveBroadcastStream().map(
-      (dynamic event) => StreamSessionState.fromInt(event as int),
-    );
+          (dynamic event) => StreamSessionState.fromInt(event as int),
+        );
   }
 
   @override
@@ -289,8 +289,8 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   @override
   Stream<bool> activeDeviceStream() {
     return activeDeviceEventChannel.receiveBroadcastStream().map(
-      (dynamic event) => event as bool,
-    );
+          (dynamic event) => event as bool,
+        );
   }
 
   @override
@@ -299,5 +299,15 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
       'restartActiveDeviceMonitoring',
     );
     return ok ?? false;
+  }
+
+  @override
+  Future<Uint8List?> captureStreamFrame({int quality = 70}) async {
+    final bytes = await methodChannel.invokeMethod<Uint8List>(
+      'captureStreamFrame',
+      {'quality': quality},
+    );
+
+    return bytes;
   }
 }
