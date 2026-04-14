@@ -314,24 +314,24 @@ Valid FPS values: 2, 7, 15, 24, 30.
 For use cases that need pixel-level access — OCR, on-device ML inference, computer vision — use `captureStreamFrame`. This rasterizes the Flutter texture on the Dart side and returns raw RGBA bytes:
 
 ```dart
-import 'dart:async';
-
 // After startStreamSession returns a textureId...
-Timer? _frameTimer;
+bool _processing = false;
 
-void startFrameProcessing(int textureId) {
-  _frameTimer = Timer.periodic(const Duration(milliseconds: 400), (_) async {
+Future<void> startFrameProcessing(int textureId) async {
+  _processing = true;
+  while (_processing) {
     final frame = await MetaWearablesDat.captureStreamFrame(textureId);
-    if (frame == null) return;
-
-    // frame.bytes is raw RGBA — feed directly to ML Kit, Vision, etc.
-    // frame.width  → 720
-    // frame.height → 1280
-    await runOcr(frame.bytes, frame.width, frame.height);
-  });
+    if (frame != null) {
+      // frame.bytes is raw RGBA — feed directly to ML Kit, Vision, etc.
+      // frame.width  → 720
+      // frame.height → 1280
+      await runOcr(frame.bytes, frame.width, frame.height);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+  }
 }
 
-void stopFrameProcessing() => _frameTimer?.cancel();
+void stopFrameProcessing() => _processing = false;
 ```
 
 **Parameters:**
