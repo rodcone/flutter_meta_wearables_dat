@@ -19,6 +19,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var textureId: Int64?
   private var currentVideoCodec: MWDATCamera.VideoCodec = .raw
   private var decompressionSession: VTDecompressionSession?
+  // Background/foreground state — gates frame processing and decoder lifecycle
+  private var isInBackground: Bool = false
   // Texture registry
   private var textureRegistry: FlutterTextureRegistry?
   // Stream session event handlers
@@ -30,6 +32,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let instance = MetaWearablesDatPlugin()
     instance.textureRegistry = registrar.textures()
     registrar.addMethodCallDelegate(instance, channel: channel)
+    // Receive applicationDidEnterBackground / applicationWillEnterForeground
+    // callbacks so we can safely manage the hvc1 HEVC decoder across app
+    // lifecycle transitions (iOS forbids GPU access from backgrounded apps).
+    registrar.addApplicationDelegate(instance)
     // Event channel for registration state updates
     let registrationStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/registration_state", binaryMessenger: registrar.messenger())
     registrationStateChannel.setStreamHandler(RegistrationStateStreamHandler())
@@ -292,10 +298,42 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     lastFrameSendTime = nil
   }
 
+  // MARK: - App Lifecycle (background safety for hvc1 codec)
+  //
+  // iOS forbids GPU access from backgrounded apps. The Meta DAT SDK keeps
+  // delivering hvc1 CMSampleBuffers in background (CPU-only CMBlockBuffer),
+  // but decoding them via VTDecompressionSession produces GPU-backed
+  // CVPixelBuffers — which is unsafe while backgrounded.
+  //
+  // Strategy: invalidate the decoder on background, skip frame processing
+  // while backgrounded, let the lazy-init path in decodeCompressedFrame()
+  // recreate the decoder on the first frame after foregrounding. The
+  // underlying StreamSession stays alive throughout.
+
+  public func applicationDidEnterBackground(_ application: UIApplication) {
+    isInBackground = true
+    if let session = decompressionSession {
+      VTDecompressionSessionInvalidate(session)
+      decompressionSession = nil
+      NSLog("[MWDAT] VTDecompressionSession invalidated (app entered background)")
+    }
+  }
+
+  public func applicationWillEnterForeground(_ application: UIApplication) {
+    isInBackground = false
+    NSLog("[MWDAT] App entering foreground — HEVC decoding will resume on next frame")
+  }
+
   // MARK: - Frame Processing (zero-copy via Texture API)
   /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
   /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
   private func processAndSendFrame(_ videoFrame: VideoFrame) {
+    // Skip frame processing while backgrounded. iOS forbids GPU access in
+    // background and the Flutter raster thread is suspended — decoding and
+    // texture updates are both pointless. The underlying StreamSession stays
+    // alive; frames are silently dropped. Applies to both raw and hvc1.
+    guard !isInBackground else { return }
+
     let now = Date()
     let minInterval = 1.0 / currentTargetFPS
 

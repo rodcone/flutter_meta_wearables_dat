@@ -36,7 +36,15 @@ Texture(textureId: textureId)
 | Codec | Platform | Description |
 |-------|----------|-------------|
 | `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. Foreground only. Default. |
-| `VideoCodec.hvc1` | iOS only | Compressed HEVC. Foreground + background streaming. Ignored on Android. |
+| `VideoCodec.hvc1` | iOS only | Compressed HEVC. Stream session survives app backgrounding — HEVC decoder auto-paused on background, auto-resumed on foreground. Ignored on Android. |
+
+## Background behavior (iOS, `hvc1` only)
+
+With `VideoCodec.hvc1` on iOS, the plugin auto-manages the HEVC decoder lifecycle across app backgrounding. The underlying `StreamSession` stays alive, and rendering resumes instantly on foreground return (last frame stays visible, no flicker).
+
+**Do NOT** stop/restart the stream session on app lifecycle changes — it's unnecessary and adds reconnection latency. To react to lifecycle changes in UI (e.g., overlay), use Flutter's standard `WidgetsBindingObserver.didChangeAppLifecycleState`.
+
+Not supported: Android (no `hvc1`), `VideoCodec.raw` (SDK stops delivering frames in background). `captureStreamFrame` returns `null` while backgrounded — pause frame-capture loops on `AppLifecycleState.paused`.
 
 ## Stream quality (resolution)
 

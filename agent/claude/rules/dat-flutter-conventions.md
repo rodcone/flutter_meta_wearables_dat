@@ -46,5 +46,7 @@ This order is critical — calling methods out of order will fail:
 ## Platform awareness
 
 - `VideoCodec.hvc1` is iOS-only (supports background streaming). On Android it falls back to `raw`.
+- With `VideoCodec.hvc1` on iOS, the plugin auto-manages the HEVC decoder lifecycle across backgrounding. Do NOT stop/restart the stream session on app lifecycle changes — it's unnecessary and adds reconnection latency. Use `WidgetsBindingObserver` only if your UI needs to react.
+- `captureStreamFrame` returns `null` while the app is backgrounded (requires GPU access). Pause frame-capture loops on `AppLifecycleState.paused`.
 - `PhotoCaptureFormat` selection works on iOS. On Android, the device determines the format.
 - `FlutterFragmentActivity` is required on Android (not `FlutterActivity`).

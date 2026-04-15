@@ -297,7 +297,28 @@ Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTextu
 | Codec | Platform | Description |
 |-------|----------|-------------|
 | `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. Foreground only — frame delivery stops when app is backgrounded. Default. |
-| `VideoCodec.hvc1` | iOS only | Compressed HEVC frames. Works in both foreground and background. On iOS, frames are decoded via VideoToolbox's hardware HEVC decoder. Ignored on Android. |
+| `VideoCodec.hvc1` | iOS only | Compressed HEVC frames. Stream session stays alive across app backgrounding — HEVC decoder is safely paused on background and auto-resumed on foreground. iOS-only; ignored on Android. |
+
+#### Background behavior (iOS, `hvc1` only)
+
+With `VideoCodec.hvc1` on iOS, the stream session survives app backgrounding. You don't need to stop/restart it when the user switches apps — rendering resumes instantly when you return.
+
+**How it works:**
+
+- The Meta DAT SDK keeps delivering compressed HEVC frames in the background (they're pure `CMBlockBuffer` CPU data — no GPU involvement).
+- When the app enters background, the plugin invalidates the hardware HEVC decoder (iOS forbids GPU access from backgrounded apps) and silently drops incoming frames.
+- The underlying `StreamSession` is **never stopped** — no reconnection latency.
+- When the app returns to foreground, the decoder is lazily recreated on the first frame. The last rendered frame stays visible during the transition, so there's no flicker.
+
+**What you need to do:** nothing. It's automatic. You just need the Info.plist entries already documented in [Setup → iOS](#ios) (`bluetooth-peripheral`, `external-accessory`).
+
+If you want to react to lifecycle changes in Dart (e.g., hide a UI element, pause an ML loop), use Flutter's standard `WidgetsBindingObserver.didChangeAppLifecycleState`.
+
+**Not covered:**
+
+- `VideoCodec.raw` — the SDK itself stops delivering frames when backgrounded, so there's nothing to manage. If you need background streaming, you must use `hvc1`.
+- Android — no `hvc1` support in the Android DAT SDK; raw frames stop in background there too. Background streaming on Android is not currently supported.
+- `captureStreamFrame` — rasterizes via the Flutter engine, which also needs GPU access. It will return `null` while the app is backgrounded. If you run a periodic frame-capture loop (OCR, ML), pause it on `AppLifecycleState.paused` and resume on `AppLifecycleState.resumed`.
 
 #### Stream quality
 

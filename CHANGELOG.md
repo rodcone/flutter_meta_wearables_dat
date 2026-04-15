@@ -1,3 +1,6 @@
+## 0.2.2
+* **iOS**: Safely manage `VTDecompressionSession` across app lifecycle when using `VideoCodec.hvc1`. The hardware HEVC decoder is now invalidated on app background entry (required by iOS — GPU access is forbidden while backgrounded) and recreated lazily on foreground return. The underlying `StreamSession` stays alive throughout; rendering resumes instantly without flicker when the app returns to foreground.
+
 ## 0.2.1
 * Add AI coding agent configs (`AGENTS.md`, Claude Code, Cursor, Copilot) with `install-skills.sh` installer.
 

@@ -345,6 +345,12 @@ final photo = await MetaWearablesDat.capturePhoto(null);
 await MetaWearablesDat.stopStreamSession(null);
 ```
 
+### Background streaming (iOS, `hvc1` only)
+
+With `VideoCodec.hvc1` on iOS, the stream session survives app backgrounding — the plugin auto-manages the HEVC decoder lifecycle. No developer action required; do NOT stop/restart the stream session on app lifecycle changes. The underlying `StreamSession` stays alive, rendering resumes instantly on foreground return, and the last frame is preserved so there's no flicker.
+
+Not supported: Android (no `hvc1`), `VideoCodec.raw` (SDK stops frame delivery on background). `captureStreamFrame` returns `null` while backgrounded — pause any frame-capture loops on `AppLifecycleState.paused` using Flutter's `WidgetsBindingObserver`.
+
 ### Raw frame capture for ML/OCR
 
 ```dart
@@ -364,7 +370,7 @@ final frame = await MetaWearablesDat.captureStreamFrame(
 | Feature | iOS | Android |
 |---------|-----|---------|
 | Video codec `raw` | Yes | Yes |
-| Video codec `hvc1` | Yes (background streaming) | No (ignored, falls back to raw) |
+| Video codec `hvc1` | Yes — survives backgrounding (decoder auto-paused, session stays alive) | No (ignored, falls back to raw) |
 | `requestAndroidPermissions()` | No-op | Required before any DAT call |
 | `restartActiveDeviceMonitoring()` | No-op | Required after registration |
 | Photo format selection | HEIC or JPEG | Device-determined (param ignored) |
