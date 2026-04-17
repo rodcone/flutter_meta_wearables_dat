@@ -11,7 +11,7 @@ import 'package:flutter_meta_wearables_dat_example/shared/widgets/sheet_handle_b
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-const String _packageVersion = '0.2.1';
+const String _packageVersion = '0.2.2';
 const String _datVersion = '0.5.0';
 const String _pubDevUrl =
     'https://pub.dev/packages/flutter_meta_wearables_dat';
