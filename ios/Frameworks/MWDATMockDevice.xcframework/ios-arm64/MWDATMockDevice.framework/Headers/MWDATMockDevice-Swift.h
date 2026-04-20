@@ -319,11 +319,15 @@ SWIFT_CLASS_NAMED("ObjC_MockCameraKit")
 /// Set camera feed from a video file. Supported codecs: h.265
 /// \param fileURL URL of the file containing video stream
 ///
-- (void)setCameraFeedWithFileURL:(NSURL * _Nonnull)fileURL completionHandler:(void (^ _Nonnull)(void))completionHandler;
+- (void)setCameraFeedWithFileURL:(NSURL * _Nonnull)fileURL;
+/// Set the camera source to stream live from the phone’s camera.
+/// \param cameraFacing 0 for front camera, 1 for back camera.
+///
+- (void)setCameraFeedWithCameraFacing:(NSInteger)cameraFacing completionHandler:(void (^ _Nonnull)(void))completionHandler;
 /// Set captured image from an image file.
 /// \param fileURL URL of the file containing image
 ///
-- (void)setCapturedImageWithFileURL:(NSURL * _Nonnull)fileURL completionHandler:(void (^ _Nonnull)(void))completionHandler;
+- (void)setCapturedImageWithFileURL:(NSURL * _Nonnull)fileURL;
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
@@ -335,11 +339,11 @@ SWIFT_PROTOCOL_NAMED("ObjC_MockDevice")
 @property (nonatomic, readonly, copy) NSString * _Nonnull deviceIdentifier;
 /// Powers on the mock device.
 - (void)powerOn;
-/// / Powers off the mock device.
+/// Powers off the mock device.
 - (void)powerOff;
-/// / Simulates putting on (donning) the device.
+/// Simulates putting on (donning) the device.
 - (void)don;
-/// / Simulates taking off (doffing) the device.
+/// Simulates taking off (doffing) the device.
 - (void)doff;
 @end
 
@@ -348,6 +352,17 @@ SWIFT_CLASS_NAMED("ObjC_MockDeviceKit")
 @interface MWDATMockDeviceKit : NSObject
 SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly, strong) MWDATMockDeviceKit * _Nonnull sharedInstance;)
 + (MWDATMockDeviceKit * _Nonnull)sharedInstance SWIFT_WARN_UNUSED_RESULT;
+/// Whether MockDeviceKit is currently enabled.
+@property (nonatomic, readonly) BOOL isEnabled;
+/// Enables MockDeviceKit with the default configuration (initially registered).
+- (void)enable;
+/// Enables MockDeviceKit with the specified initial registration state.
+/// \param initiallyRegistered When <code>true</code>, enables in <code>.registered</code> state.
+/// When <code>false</code>, enables in <code>.unavailable</code> state, allowing <code>startRegistration()</code> to be tested.
+///
+- (void)enableWithInitiallyRegistered:(BOOL)initiallyRegistered;
+/// Disables MockDeviceKit and unpairs all devices.
+- (void)disable;
 /// All paired devices.
 @property (nonatomic, readonly, copy) NSArray<id <MockDevice>> * _Nonnull pairedDevices;
 /// Pair simulated RBM glasses
@@ -358,14 +373,22 @@ SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly, strong) MWDATMockDev
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
+@class MockDisplaylessGlassesServices;
 SWIFT_PROTOCOL_NAMED("ObjC_MockDisplaylessGlasses")
 @protocol MockDisplaylessGlasses <MockDevice>
 /// Simulates folding the glasses into a closed position.
 - (void)fold;
 /// Simulates unfolding the glasses into an open position.
 - (void)unfold;
-/// Get the suite for mocking the camera functionality.
-- (MockCameraKit * _Nonnull)getCameraKit SWIFT_WARN_UNUSED_RESULT;
+/// Container for accessing mock device service kits (camera, voice invocation, etc.).
+@property (nonatomic, readonly, strong) MockDisplaylessGlassesServices * _Nonnull services;
+@end
+
+SWIFT_CLASS_NAMED("ObjC_MockDisplaylessGlassesServices")
+@interface MockDisplaylessGlassesServices : NSObject
+@property (nonatomic, readonly, strong) MockCameraKit * _Nonnull camera;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
 SWIFT_PROTOCOL_NAMED("ObjC_MockRaybanMeta")
