@@ -64,6 +64,11 @@ internal class ActiveDeviceStreamHandler(
 
         job?.cancel()
         val selector = deviceSelectorProvider()
+        // Seed the subscriber with the current active-device state. `activeDeviceFlow()`
+        // does not guarantee replaying the latest value to new collectors, so a device
+        // that was already active before Dart subscribed would otherwise leave the UI
+        // stuck on "waiting for an active device".
+        events.success(selector.activeDevice != null)
         job =
                 scope.launch {
                     selector.activeDeviceFlow().collect { device ->

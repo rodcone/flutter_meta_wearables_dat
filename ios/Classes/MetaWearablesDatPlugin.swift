@@ -57,7 +57,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     registrationStateChannel.setStreamHandler(RegistrationStateStreamHandler())
     // Event channel for active device availability updates
     let activeDeviceChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/active_device", binaryMessenger: registrar.messenger())
-    activeDeviceChannel.setStreamHandler(ActiveDeviceStreamHandler())
+    activeDeviceChannel.setStreamHandler(ActiveDeviceStreamHandler(deviceSelectorProvider: { [weak instance] in
+      // Fall back to a fresh selector only if the plugin has been torn down —
+      // in normal operation the shared instance is always used so the active
+      // device state is seeded without re-discovery.
+      instance?.deviceSelector ?? AutoDeviceSelector(wearables: Wearables.shared)
+    }))
     // Event channels for stream session state and errors
     let streamStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/stream_session_state", binaryMessenger: registrar.messenger())
     streamStateChannel.setStreamHandler(instance.streamStateHandler)
