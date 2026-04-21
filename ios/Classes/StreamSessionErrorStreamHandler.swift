@@ -2,10 +2,15 @@ import Flutter
 import MWDATCamera
 import MWDATCore
 
-/// Stream handler for stream session errors.
+/// Stream handler for stream-related errors (both `StreamSession` errors and
+/// the `DeviceSession` errors that gate the stream). They share the same
+/// Flutter event channel because the Dart side exposes a single
+/// `streamSessionErrorStream()` API — consumers don't need to care which
+/// layer produced the error.
 ///
-/// Set the `session` property when a stream session is created.
-/// Clear it when the session is torn down.
+/// Set `session` when a `StreamSession` is created; clear it on teardown.
+/// Pre-stream failures (createSession / DeviceSession.start / addStream
+/// throws) are forwarded via `sendError(code:message:)`.
 class StreamSessionErrorStreamHandler: NSObject, FlutterStreamHandler {
   /// The active stream session to observe. Setting this property
   /// re-subscribes to the session's error publisher.
@@ -26,6 +31,24 @@ class StreamSessionErrorStreamHandler: NSObject, FlutterStreamHandler {
     eventSink = nil
     cancelListener()
     return nil
+  }
+
+  /// Pushes a synthesised error onto the event channel. Used by the plugin
+  /// to surface errors that happen before a `StreamSession` exists (e.g.
+  /// `DeviceSession.start()` throwing `.noEligibleDevice`).
+  func sendError(code: String, message: String) {
+    guard let events = eventSink else { return }
+    Task { @MainActor in
+      events(["code": code, "message": message])
+    }
+  }
+
+  /// Maps a `DeviceSessionError` onto the Flutter channel. Matches the
+  /// naming used by the native enum so Dart consumers can reason about
+  /// failures uniformly across layers.
+  func send(deviceSessionError: DeviceSessionError) {
+    let (code, message) = Self.map(deviceSessionError: deviceSessionError)
+    sendError(code: code, message: message)
   }
 
   private func resubscribe() {
@@ -83,5 +106,26 @@ class StreamSessionErrorStreamHandler: NSObject, FlutterStreamHandler {
     }
 
     return ["code": code, "message": message]
+  }
+
+  private static func map(deviceSessionError error: DeviceSessionError) -> (String, String) {
+    switch error {
+    case .noEligibleDevice:
+      return ("noEligibleDevice", "No eligible device is available to start the session.")
+    case .sessionAlreadyStopped:
+      return ("sessionAlreadyStopped", "The device session has already been stopped.")
+    case .sessionAlreadyExists:
+      return ("sessionAlreadyExists", "A device session already exists for this device.")
+    case .sessionIdle:
+      return ("sessionIdle", "The device session has not been started yet.")
+    case .capabilityAlreadyActive:
+      return ("capabilityAlreadyActive", "A capability of this type is already attached to the session.")
+    case .capabilityNotFound:
+      return ("capabilityNotFound", "The requested capability is not attached to the session.")
+    case .unexpectedError(let description):
+      return ("unexpectedError", "Unexpected device session error: \(description)")
+    @unknown default:
+      return ("unknown", "An unknown device session error occurred.")
+    }
   }
 }

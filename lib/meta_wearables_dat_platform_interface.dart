@@ -27,6 +27,19 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     _instance = instance;
   }
 
+  Future<bool> configureMockDevices({
+    bool initiallyRegistered = true,
+    bool initialPermissionsGranted = true,
+  }) {
+    throw UnimplementedError(
+      'configureMockDevices() has not been implemented.',
+    );
+  }
+
+  Future<bool> disableMockDevices() {
+    throw UnimplementedError('disableMockDevices() has not been implemented.');
+  }
+
   Future<String?> pairMockRayBanMeta() {
     throw UnimplementedError('pairMockRayBanMeta() has not been implemented.');
   }
@@ -34,6 +47,22 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
   Future<bool> unpairMockRayBanMeta(String deviceUUID) {
     throw UnimplementedError(
       'unpairMockRayBanMeta() has not been implemented.',
+    );
+  }
+
+  Future<bool> setMockPermission(
+    Permission permission,
+    PermissionStatus status,
+  ) {
+    throw UnimplementedError('setMockPermission() has not been implemented.');
+  }
+
+  Future<bool> setMockPermissionRequestResult(
+    Permission permission,
+    PermissionStatus status,
+  ) {
+    throw UnimplementedError(
+      'setMockPermissionRequestResult() has not been implemented.',
     );
   }
 
@@ -85,6 +114,10 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
 
   Future<bool> setMockCameraFeed(String deviceUUID, String? videoPath) {
     throw UnimplementedError('setMockCameraFeed() has not been implemented.');
+  }
+
+  Future<bool> setMockCameraFacing(String deviceUUID, CameraFacing facing) {
+    throw UnimplementedError('setMockCameraFacing() has not been implemented.');
   }
 
   Future<bool> setMockCapturedImage(String deviceUUID, String? imagePath) {
@@ -142,6 +175,12 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
   Stream<bool> activeDeviceStream() {
     throw UnimplementedError(
       'activeDeviceStream() has not been implemented.',
+    );
+  }
+
+  Stream<VideoStreamSize> videoStreamSizeStream() {
+    throw UnimplementedError(
+      'videoStreamSizeStream() has not been implemented.',
     );
   }
 

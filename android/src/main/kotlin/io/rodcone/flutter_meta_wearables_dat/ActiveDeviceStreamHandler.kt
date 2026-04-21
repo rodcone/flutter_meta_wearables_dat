@@ -1,6 +1,5 @@
 package io.rodcone.flutter_meta_wearables_dat
 
-import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import io.flutter.plugin.common.EventChannel
 import kotlinx.coroutines.CoroutineScope
@@ -17,7 +16,7 @@ import kotlinx.coroutines.launch
  * Emits `true` when an active device is available, `false` otherwise.
  */
 internal class ActiveDeviceStreamHandler(
-        private val deviceSelector: DeviceSelector,
+        private val deviceSelectorProvider: () -> DeviceSelector,
         private val isInitialized: () -> Boolean,
         private val ensureInitialized: () -> Unit,
 ) : EventChannel.StreamHandler {
@@ -64,9 +63,10 @@ internal class ActiveDeviceStreamHandler(
         ensureInitialized()
 
         job?.cancel()
+        val selector = deviceSelectorProvider()
         job =
                 scope.launch {
-                    deviceSelector.activeDevice(Wearables.devices).collect { device ->
+                    selector.activeDeviceFlow().collect { device ->
                         events.success(device != null)
                     }
                 }

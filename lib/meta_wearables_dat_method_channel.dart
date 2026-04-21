@@ -35,6 +35,31 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     'flutter_meta_wearables_dat/stream_session_errors',
   );
 
+  /// The event channel used to receive video frame dimensions for the
+  /// active stream session.
+  @visibleForTesting
+  final videoStreamSizeEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/video_stream_size',
+  );
+
+  @override
+  Future<bool> configureMockDevices({
+    bool initiallyRegistered = true,
+    bool initialPermissionsGranted = true,
+  }) async {
+    final ok = await methodChannel.invokeMethod<bool>('configureMockDevices', {
+      'initiallyRegistered': initiallyRegistered,
+      'initialPermissionsGranted': initialPermissionsGranted,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> disableMockDevices() async {
+    final ok = await methodChannel.invokeMethod<bool>('disableMockDevices');
+    return ok ?? false;
+  }
+
   @override
   Future<String?> pairMockRayBanMeta() async {
     final deviceUUID = await methodChannel.invokeMethod<String>(
@@ -48,6 +73,30 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     final ok = await methodChannel.invokeMethod<bool>('unpairMockRayBanMeta', {
       'deviceUUID': deviceUUID,
     });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> setMockPermission(
+    Permission permission,
+    PermissionStatus status,
+  ) async {
+    final ok = await methodChannel.invokeMethod<bool>('setMockPermission', {
+      'permission': permission.value,
+      'status': status.value,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> setMockPermissionRequestResult(
+    Permission permission,
+    PermissionStatus status,
+  ) async {
+    final ok = await methodChannel.invokeMethod<bool>(
+      'setMockPermissionRequestResult',
+      {'permission': permission.value, 'status': status.value},
+    );
     return ok ?? false;
   }
 
@@ -164,6 +213,18 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     final ok = await methodChannel.invokeMethod<bool>('setMockCameraFeed', {
       'deviceUUID': deviceUUID,
       'videoPath': videoPath,
+    });
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> setMockCameraFacing(
+    String deviceUUID,
+    CameraFacing facing,
+  ) async {
+    final ok = await methodChannel.invokeMethod<bool>('setMockCameraFacing', {
+      'deviceUUID': deviceUUID,
+      'cameraFacing': facing.value,
     });
     return ok ?? false;
   }
@@ -290,6 +351,19 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   Stream<bool> activeDeviceStream() {
     return activeDeviceEventChannel.receiveBroadcastStream().map(
       (dynamic event) => event as bool,
+    );
+  }
+
+  @override
+  Stream<VideoStreamSize> videoStreamSizeStream() {
+    return videoStreamSizeEventChannel.receiveBroadcastStream().map(
+      (dynamic event) {
+        final map = Map<String, dynamic>.from(event as Map);
+        return VideoStreamSize(
+          width: (map['width'] as num).toInt(),
+          height: (map['height'] as num).toInt(),
+        );
+      },
     );
   }
 

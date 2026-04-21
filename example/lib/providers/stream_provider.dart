@@ -16,6 +16,8 @@ class StreamSessionProvider extends ChangeNotifier {
   StreamSubscription<bool>? _activeDeviceSubscription;
   StreamSubscription<StreamSessionState>? _sessionStateSubscription;
   StreamSubscription<StreamSessionError>? _sessionErrorSubscription;
+  StreamSubscription<VideoStreamSize>? _videoStreamSizeSubscription;
+  VideoStreamSize? _videoStreamSize;
   bool _hasActiveDevice = false;
   bool _isStreaming = false;
   double _fps = 24;
@@ -45,6 +47,7 @@ class StreamSessionProvider extends ChangeNotifier {
   bool get isLoadingVideo => _isLoadingVideo;
   bool get isLoadingImage => _isLoadingImage;
   int? get textureId => _textureId;
+  VideoStreamSize? get videoStreamSize => _videoStreamSize;
   bool get supportsHvc1 => Platform.isIOS;
 
   void _initializeActiveDeviceMonitoring() {
@@ -66,6 +69,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _activeDeviceSubscription?.cancel();
     _sessionStateSubscription?.cancel();
     _sessionErrorSubscription?.cancel();
+    _videoStreamSizeSubscription?.cancel();
     super.dispose();
   }
 
@@ -168,6 +172,19 @@ class StreamSessionProvider extends ChangeNotifier {
         },
       );
 
+      unawaited(_videoStreamSizeSubscription?.cancel());
+      _videoStreamSize = null;
+      _videoStreamSizeSubscription =
+          MetaWearablesDat.videoStreamSizeStream().listen(
+        (size) {
+          _videoStreamSize = size;
+          notifyListeners();
+        },
+        onError: (dynamic error) {
+          debugPrint('[MetaWearablesDAT] Video size stream error: $error');
+        },
+      );
+
       // Start the stream session - deviceUUID is optional (uses AutoDeviceSelector if null).
       // Returns a texture ID for zero-copy rendering via the Flutter Texture widget.
       _textureId = await MetaWearablesDat.startStreamSession(
@@ -194,9 +211,12 @@ class StreamSessionProvider extends ChangeNotifier {
       _sessionStateSubscription = null;
       unawaited(_sessionErrorSubscription?.cancel());
       _sessionErrorSubscription = null;
+      unawaited(_videoStreamSizeSubscription?.cancel());
+      _videoStreamSizeSubscription = null;
       _sessionState = null;
       _lastError = null;
       _textureId = null;
+      _videoStreamSize = null;
       _isStreaming = false;
       notifyListeners();
     } catch (e) {

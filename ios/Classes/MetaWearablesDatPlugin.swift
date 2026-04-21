@@ -8,7 +8,19 @@ import CoreMedia
 import VideoToolbox
 
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
-  // Single stream session state (only one session at a time)
+  // Device session (0.6.0): created lazily on first startStreamSession call
+  // using the shared AutoDeviceSelector. Kept alive across stream start/stop
+  // so toggling streaming is fast. Torn down only when the underlying device
+  // disappears or when the plugin is disabled.
+  private lazy var deviceSelector: AutoDeviceSelector = {
+    AutoDeviceSelector(wearables: Wearables.shared)
+  }()
+  private var deviceSession: DeviceSession?
+  private var deviceSessionStateTask: Task<Void, Never>?
+  private var deviceSessionErrorTask: Task<Void, Never>?
+  private var deviceAvailabilityTask: Task<Void, Never>?
+
+  // Stream session state (single session at a time)
   private var streamSession: StreamSession?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
   private var errorListenerToken: (any MWDATCore.AnyListenerToken)?
@@ -26,6 +38,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Stream session event handlers
   private var streamStateHandler = StreamSessionStateStreamHandler()
   private var streamErrorHandler = StreamSessionErrorStreamHandler()
+  private var videoStreamSizeHandler = VideoStreamSizeStreamHandler()
+
+  // Current mock device config. Applied whenever MockDeviceKit is enabled.
+  private var mockDeviceConfig: MockDeviceKitConfig = MockDeviceKitConfig()
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: registrar.messenger())
@@ -47,9 +63,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     streamStateChannel.setStreamHandler(instance.streamStateHandler)
     let streamErrorChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/stream_session_errors", binaryMessenger: registrar.messenger())
     streamErrorChannel.setStreamHandler(instance.streamErrorHandler)
+    // Event channel for video frame dimensions (used by Dart to drive AspectRatio).
+    let videoStreamSizeChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/video_stream_size", binaryMessenger: registrar.messenger())
+    videoStreamSizeChannel.setStreamHandler(instance.videoStreamSizeHandler)
 
     Task { @MainActor in
       try? Wearables.configure()
+      instance.startDeviceAvailabilityMonitoring()
     }
   }
 
@@ -93,6 +113,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         requestCameraPermission(result: result)
       case "setMockCameraFeed":
         setMockCameraFeed(call: call, result: result)
+      case "setMockCameraFacing":
+        setMockCameraFacing(call: call, result: result)
       case "setMockCapturedImage":
         setMockCapturedImage(call: call, result: result)
       case "startStreamSession":
@@ -103,13 +125,60 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         capturePhoto(call: call, result: result)
       case "getRegistrationState":
         getRegistrationState(result: result)
+      case "configureMockDevices":
+        configureMockDevices(call: call, result: result)
+      case "disableMockDevices":
+        disableMockDevices(result: result)
+      case "setMockPermission":
+        setMockPermission(call: call, result: result)
+      case "setMockPermissionRequestResult":
+        setMockPermissionRequestResult(call: call, result: result)
       default:
         result(FlutterMethodNotImplemented)
     }
   }
 
+  // MARK: - MockDeviceKit lifecycle (0.6.0)
+
+  private func ensureMockKitEnabled() {
+    if !MockDeviceKit.shared.isEnabled {
+      MockDeviceKit.shared.enable(config: mockDeviceConfig)
+    }
+  }
+
+  func configureMockDevices(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let args = call.arguments as? [String: Any]
+    let initiallyRegistered = (args?["initiallyRegistered"] as? Bool) ?? true
+    let initialPermissionsGranted = (args?["initialPermissionsGranted"] as? Bool) ?? true
+    mockDeviceConfig = MockDeviceKitConfig(
+      initiallyRegistered: initiallyRegistered,
+      initialPermissionsGranted: initialPermissionsGranted
+    )
+
+    Task { @MainActor in
+      // Re-enable to apply the new config (disable is a no-op when off).
+      await teardownDeviceSession()
+      if MockDeviceKit.shared.isEnabled {
+        MockDeviceKit.shared.disable()
+      }
+      MockDeviceKit.shared.enable(config: mockDeviceConfig)
+      result(true)
+    }
+  }
+
+  func disableMockDevices(result: @escaping FlutterResult) {
+    Task { @MainActor in
+      await teardownDeviceSession()
+      if MockDeviceKit.shared.isEnabled {
+        MockDeviceKit.shared.disable()
+      }
+      result(true)
+    }
+  }
+
   func pairMockRayBanMeta(result: @escaping FlutterResult) {
     Task { @MainActor in
+      ensureMockKitEnabled()
       let mockDevice = MockDeviceKit.shared.pairRaybanMeta()
       result(mockDevice.deviceIdentifier)
     }
@@ -127,8 +196,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return
       }
 
-      // Clean up active stream session if any
-      await cleanupSession()
+      // Clean up active session — unpairing the device invalidates it.
+      await teardownDeviceSession()
 
       MockDeviceKit.shared.unpairDevice(device)
       result(true)
@@ -151,6 +220,53 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       result(true)
     }
   }
+
+  // MARK: - Mock permissions (0.6.0)
+
+  private func parsePermission(_ raw: String?) -> MWDATCore.Permission? {
+    switch raw {
+    case "camera": return .camera
+    default: return nil
+    }
+  }
+
+  private func parsePermissionStatus(_ raw: String?) -> MWDATCore.PermissionStatus? {
+    switch raw {
+    case "granted": return .granted
+    case "denied": return .denied
+    default: return nil
+    }
+  }
+
+  func setMockPermission(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let args = call.arguments as? [String: Any],
+          let permission = parsePermission(args["permission"] as? String),
+          let status = parsePermissionStatus(args["status"] as? String) else {
+      result(FlutterError(code: "INVALID_ARGS", message: "permission/status missing or invalid", details: nil))
+      return
+    }
+    Task { @MainActor in
+      ensureMockKitEnabled()
+      MockDeviceKit.shared.permissions.set(permission, status)
+      result(true)
+    }
+  }
+
+  func setMockPermissionRequestResult(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let args = call.arguments as? [String: Any],
+          let permission = parsePermission(args["permission"] as? String),
+          let status = parsePermissionStatus(args["status"] as? String) else {
+      result(FlutterError(code: "INVALID_ARGS", message: "permission/status missing or invalid", details: nil))
+      return
+    }
+    Task { @MainActor in
+      ensureMockKitEnabled()
+      MockDeviceKit.shared.permissions.setRequestResult(permission, result: status)
+      result(true)
+    }
+  }
+
+  // MARK: - Permissions
 
   func requestCameraPermission(result: @escaping FlutterResult) {
     Task { @MainActor in
@@ -186,6 +302,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       }
     }
   }
+
+  // MARK: - Registration
 
   func startRegistration(result: @escaping FlutterResult) {
     Task { @MainActor in
@@ -264,11 +382,107 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
   }
 
-  // MARK: - Session Cleanup
+  // MARK: - Session Lifecycle
 
-  /// Single source of truth for tearing down the current stream session.
-  /// Safe to call even when no session is active.
-  private func cleanupSession() async {
+  /// Monitors `activeDeviceStream` and tears the DeviceSession down whenever
+  /// the active device becomes `nil`. Launched once in `register`.
+  @MainActor
+  private func startDeviceAvailabilityMonitoring() {
+    deviceAvailabilityTask?.cancel()
+    deviceAvailabilityTask = Task { [weak self] in
+      guard let self else { return }
+      for await deviceId in self.deviceSelector.activeDeviceStream() {
+        if deviceId == nil {
+          await self.teardownDeviceSession()
+        }
+      }
+    }
+  }
+
+  /// Returns a DeviceSession in `.started` state, creating one if needed.
+  /// Mirrors the pattern in Meta's CameraAccess sample (DeviceSessionManager).
+  @MainActor
+  private func ensureDeviceSessionStarted() async throws -> DeviceSession {
+    if let existing = deviceSession, existing.state == .started {
+      return existing
+    }
+
+    // Drop stale/stopped sessions — `.stopped` is terminal.
+    if let existing = deviceSession, existing.state == .stopped {
+      await teardownDeviceSession()
+    }
+
+    if deviceSession == nil {
+      let session = try Wearables.shared.createSession(deviceSelector: deviceSelector)
+      deviceSession = session
+      observeDeviceSession(session)
+      // Capture the state stream BEFORE start() so we don't miss transitions.
+      let stateStream = session.stateStream()
+      try session.start()
+
+      for await state in stateStream {
+        if state == .started {
+          return session
+        }
+        if state == .stopped {
+          // Terminal failure before ever reaching .started
+          deviceSession = nil
+          throw DeviceSessionError.noEligibleDevice
+        }
+      }
+      // Stream ended without reaching .started
+      deviceSession = nil
+      throw DeviceSessionError.unexpectedError(description: "Device session state stream ended before reaching .started")
+    }
+
+    // Session exists but not yet .started — wait for it.
+    guard let session = deviceSession else {
+      throw DeviceSessionError.noEligibleDevice
+    }
+    for await state in session.stateStream() {
+      if state == .started { return session }
+      if state == .stopped {
+        deviceSession = nil
+        throw DeviceSessionError.noEligibleDevice
+      }
+    }
+    throw DeviceSessionError.unexpectedError(description: "Device session state stream ended")
+  }
+
+  /// Observes the DeviceSession's state and error streams so we can react to
+  /// terminal failures and forward errors to Dart.
+  @MainActor
+  private func observeDeviceSession(_ session: DeviceSession) {
+    deviceSessionStateTask?.cancel()
+    deviceSessionStateTask = Task { [weak self] in
+      for await state in session.stateStream() {
+        guard let self else { return }
+        if state == .stopped {
+          // DeviceSession stopped externally — tear down associated stream
+          // and drop our reference. A fresh session is created on demand.
+          await self.teardownStreamOnly()
+          self.deviceSession = nil
+          self.deviceSessionStateTask?.cancel()
+          self.deviceSessionStateTask = nil
+          self.deviceSessionErrorTask?.cancel()
+          self.deviceSessionErrorTask = nil
+          return
+        }
+      }
+    }
+
+    deviceSessionErrorTask?.cancel()
+    deviceSessionErrorTask = Task { [weak self] in
+      for await error in session.errorStream() {
+        self?.streamErrorHandler.send(deviceSessionError: error)
+      }
+    }
+  }
+
+  /// Tears down the active stream but leaves the DeviceSession alive, so the
+  /// next `startStreamSession` is a fast `addStream` on the existing session.
+  @MainActor
+  private func teardownStreamOnly() async {
     if let token = videoListenerToken {
       await token.cancel()
       videoListenerToken = nil
@@ -277,7 +491,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       await token.cancel()
       errorListenerToken = nil
     }
-    // Disconnect event handlers
     streamStateHandler.session = nil
     streamErrorHandler.session = nil
     if let session = streamSession {
@@ -296,6 +509,23 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
     frameCounter = 0
     lastFrameSendTime = nil
+    videoStreamSizeHandler.reset()
+  }
+
+  /// Tears down both stream and DeviceSession. Used when the device
+  /// disconnects, when mock devices are disabled, or when a new mock
+  /// config is applied.
+  @MainActor
+  private func teardownDeviceSession() async {
+    await teardownStreamOnly()
+    deviceSessionStateTask?.cancel()
+    deviceSessionStateTask = nil
+    deviceSessionErrorTask?.cancel()
+    deviceSessionErrorTask = nil
+    if let session = deviceSession {
+      session.stop()
+      deviceSession = nil
+    }
   }
 
   // MARK: - App Lifecycle (background safety for hvc1 codec)
@@ -364,6 +594,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           let texId = textureId else {
       return
     }
+
+    // Surface the frame dimensions to Dart so it can set an AspectRatio.
+    let width = CVPixelBufferGetWidth(pixelBuffer)
+    let height = CVPixelBufferGetHeight(pixelBuffer)
+    videoStreamSizeHandler.send(width: width, height: height)
 
     // Swap the pixel buffer (lock-protected) and notify Flutter's rasteriser
     texture.latestPixelBuffer = pixelBuffer
@@ -439,6 +674,19 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     return outputBuffer
   }
 
+  // MARK: - Mock Camera Feed
+
+  private func mockCameraKit(for deviceUUID: String) -> (any MWDATMockDevice.MockCameraKit)? {
+    let devices = MockDeviceKit.shared.pairedDevices
+    guard let device = devices.first(where: { $0.deviceIdentifier == deviceUUID }) else {
+      return nil
+    }
+    guard let displayless = device as? any MWDATMockDevice.MockDisplaylessGlasses else {
+      return nil
+    }
+    return displayless.services.camera
+  }
+
   func setMockCameraFeed(call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard let args = call.arguments as? [String : Any],
           let uuidString = args["deviceUUID"] as? String else {
@@ -447,18 +695,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
 
     Task { @MainActor in
-      let devices = MockDeviceKit.shared.pairedDevices
-      guard let device = devices.first(where: { $0.deviceIdentifier == uuidString }) else {
-        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock device with uuid \(uuidString)", details: nil))
+      guard let cameraKit = mockCameraKit(for: uuidString) else {
+        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock camera device with uuid \(uuidString)", details: nil))
         return
       }
-
-      guard let mockDisplaylessGlasses = device as? any MWDATMockDevice.MockDisplaylessGlasses else {
-        result(FlutterError(code: "INVALID_DEVICE_TYPE", message: "Device does not support camera", details: nil))
-        return
-      }
-
-      let cameraKit = mockDisplaylessGlasses.getCameraKit()
 
       if let videoPath = args["videoPath"] as? String, !videoPath.isEmpty {
         let fileURL = URL(fileURLWithPath: videoPath)
@@ -501,11 +741,55 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           return
         }
 
-        await cameraKit.setCameraFeed(fileURL: fileURL)
+        cameraKit.setCameraFeed(fileURL: fileURL)
         result(true)
       } else {
         result(true)
       }
+    }
+  }
+
+  func setMockCameraFacing(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let args = call.arguments as? [String: Any],
+          let uuidString = args["deviceUUID"] as? String,
+          let facingRaw = args["cameraFacing"] as? String else {
+      result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID/cameraFacing missing", details: nil))
+      return
+    }
+
+    let facing: MWDATMockDevice.CameraFacing
+    switch facingRaw {
+    case "front": facing = .front
+    case "back":  facing = .back
+    default:
+      result(FlutterError(code: "INVALID_ARGS", message: "cameraFacing must be 'front' or 'back'", details: nil))
+      return
+    }
+
+    Task { @MainActor in
+      guard let cameraKit = mockCameraKit(for: uuidString) else {
+        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock camera device with uuid \(uuidString)", details: nil))
+        return
+      }
+      // MockDeviceKit opens the phone's camera to simulate the wearable feed.
+      // Prompt proactively so a denial surfaces as a clear error instead of a
+      // silent black feed when the stream starts.
+      let granted = await Self.ensureCameraAuthorization()
+      guard granted else {
+        result(FlutterError(code: "PERMISSION_DENIED", message: "Camera permission is required for the mock device feed.", details: nil))
+        return
+      }
+      await cameraKit.setCameraFeed(cameraFacing: facing)
+      result(true)
+    }
+  }
+
+  private static func ensureCameraAuthorization() async -> Bool {
+    switch AVCaptureDevice.authorizationStatus(for: .video) {
+    case .authorized: return true
+    case .notDetermined: return await AVCaptureDevice.requestAccess(for: .video)
+    case .denied, .restricted: return false
+    @unknown default: return false
     }
   }
 
@@ -517,22 +801,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
 
     Task { @MainActor in
-      let devices = MockDeviceKit.shared.pairedDevices
-      guard let device = devices.first(where: { $0.deviceIdentifier == uuidString }) else {
-        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock device with uuid \(uuidString)", details: nil))
+      guard let cameraKit = mockCameraKit(for: uuidString) else {
+        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock camera device with uuid \(uuidString)", details: nil))
         return
       }
-
-      guard let mockDisplaylessGlasses = device as? any MWDATMockDevice.MockDisplaylessGlasses else {
-        result(FlutterError(code: "INVALID_DEVICE_TYPE", message: "Device does not support camera", details: nil))
-        return
-      }
-
-      let cameraKit = mockDisplaylessGlasses.getCameraKit()
 
       if let imagePath = args["imagePath"] as? String, !imagePath.isEmpty {
         let fileURL = URL(fileURLWithPath: imagePath)
-        await cameraKit.setCapturedImage(fileURL: fileURL)
+        cameraKit.setCapturedImage(fileURL: fileURL)
         result(true)
       } else {
         // If imagePath is nil or empty, we could clear the image or just return success
@@ -541,31 +817,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
   }
 
+  // MARK: - Stream Session
+
   func startStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard let args = call.arguments as? [String : Any] else {
       result(FlutterError(code: "INVALID_ARGS", message: "arguments missing", details: nil))
       return
     }
 
-    // Get FPS parameter (default to 30.0 if not provided)
     let fps = (args["fps"] as? Double) ?? 30.0
     let streamQuality = Self.parseStreamQuality(args["streamQuality"] as? String)
     let videoCodecStr = args["videoCodec"] as? String ?? "raw"
     let videoCodec: MWDATCamera.VideoCodec = (videoCodecStr == "hvc1") ? .hvc1 : .raw
 
-    // deviceUUID is optional - if not provided, use AutoDeviceSelector
-    let uuidString = args["deviceUUID"] as? String
+    // `deviceUUID` is ignored in 0.6.0 — the plugin uses a single shared
+    // AutoDeviceSelector. The argument is kept for backward compatibility.
+    _ = args["deviceUUID"] as? String
 
     Task { @MainActor in
-      // Determine device selector
-      let deviceSelector: any DeviceSelector
-      if let uuidString = uuidString {
-        deviceSelector = SpecificDeviceSelector(device: uuidString)
-      } else {
-        deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
-      }
-
-      // Return existing texture if session is already active
+      // Return existing texture if stream is already active.
       if streamSession != nil {
         if let texId = textureId {
           result(texId)
@@ -575,11 +845,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return
       }
 
-      // Register a Flutter texture
       guard let registry = textureRegistry else {
         result(FlutterError(code: "TEXTURE_ERROR", message: "Texture registry not available", details: nil))
         return
       }
+
+      // 1. Ensure a started DeviceSession exists.
+      let deviceSession: DeviceSession
+      do {
+        deviceSession = try await ensureDeviceSessionStarted()
+      } catch let e as DeviceSessionError {
+        streamErrorHandler.send(deviceSessionError: e)
+        result(FlutterError(code: "DEVICE_SESSION_ERROR", message: "Could not start device session: \(e)", details: nil))
+        return
+      } catch {
+        result(FlutterError(code: "DEVICE_SESSION_ERROR", message: error.localizedDescription, details: nil))
+        return
+      }
+
+      // 2. Register the Flutter texture.
       let texture = PixelBufferTexture()
       let texId = registry.register(texture)
       pixelBufferTexture = texture
@@ -590,48 +874,50 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       lastFrameSendTime = nil
       NSLog("[MWDAT] Registered texture \(texId)")
 
-      // Create a new StreamSession
+      // 3. Add a StreamSession capability.
       let fpsValue = UInt(max(1, Int(fps.rounded())))
       let streamConfig = StreamSessionConfig(
         videoCodec: videoCodec,
         resolution: Self.resolution(for: streamQuality),
         frameRate: fpsValue
       )
-      let session = StreamSession(
-        streamSessionConfig: streamConfig,
-        deviceSelector: deviceSelector
-      )
 
-      // Observe errors
+      let stream: StreamSession?
+      do {
+        stream = try deviceSession.addStream(config: streamConfig)
+      } catch let e as DeviceSessionError {
+        streamErrorHandler.send(deviceSessionError: e)
+        await teardownStreamOnly()
+        result(FlutterError(code: "ADD_STREAM_ERROR", message: "Could not add stream capability: \(e)", details: nil))
+        return
+      } catch {
+        await teardownStreamOnly()
+        result(FlutterError(code: "ADD_STREAM_ERROR", message: error.localizedDescription, details: nil))
+        return
+      }
+
+      guard let session = stream else {
+        await teardownStreamOnly()
+        result(FlutterError(code: "ADD_STREAM_ERROR", message: "addStream returned nil — device session not in started state", details: nil))
+        return
+      }
+
+      // 4. Wire listeners.
       errorListenerToken = session.errorPublisher.listen { error in
         NSLog("[MWDAT] StreamSession error: \(error)")
       }
-
-      // Store the session and connect event handlers
-      streamSession = session
-      streamStateHandler.session = session
-      streamErrorHandler.session = session
-
-      // Subscribe to video frames — push CVPixelBuffer directly, no encoding
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         self.processAndSendFrame(videoFrame)
       }
 
-      // Start the session
-      do {
-        await session.start()
+      streamSession = session
+      streamStateHandler.session = session
+      streamErrorHandler.session = session
 
-        if uuidString == nil, let activeDevice = deviceSelector.activeDevice {
-          NSLog("[MWDAT] AutoDeviceSelector connected to device: \(activeDevice)")
-        }
-
-        result(texId)
-      } catch {
-        // Clean up on failure
-        await cleanupSession()
-        result(FlutterError(code: "STREAM_SESSION_ERROR", message: error.localizedDescription, details: nil))
-      }
+      // 5. Start streaming.
+      await session.start()
+      result(texId)
     }
   }
 
@@ -642,7 +928,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return
       }
 
-      await cleanupSession()
+      // Tear down the stream only — keep the DeviceSession alive so the next
+      // startStreamSession is a fast `addStream` rather than a full reconnect.
+      await teardownStreamOnly()
       result(true)
     }
   }

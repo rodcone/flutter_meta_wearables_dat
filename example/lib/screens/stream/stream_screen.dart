@@ -37,6 +37,7 @@ class _StreamScreenState extends State<StreamScreen> {
               child: streamProvider.isStreaming
                   ? _TextureStreamWidget(
                       textureId: streamProvider.textureId!,
+                      videoStreamSize: streamProvider.videoStreamSize,
                     )
                   : ColoredBox(
                       color: Colors.black,
@@ -263,23 +264,29 @@ String _sessionStateLabel(StreamSessionState state) {
 /// Renders the video stream using Flutter's Texture API (zero-copy).
 /// The native side pushes CVPixelBuffer / SurfaceTexture frames directly —
 /// no JPEG encoding, no byte copying, no Dart-side decoding.
+///
+/// The aspect ratio is driven by the native frame dimensions surfaced via
+/// `videoStreamSizeStream`. Until the first size arrives we fall back to a
+/// 9:16 portrait frame, which matches the Ray-Ban Meta's default stream
+/// orientation.
 class _TextureStreamWidget extends StatelessWidget {
   final int textureId;
+  final VideoStreamSize? videoStreamSize;
 
-  const _TextureStreamWidget({required this.textureId});
+  const _TextureStreamWidget({
+    required this.textureId,
+    required this.videoStreamSize,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final aspectRatio = videoStreamSize?.aspectRatio ?? 9 / 16;
     return ColoredBox(
       color: Colors.black,
-      child: SizedBox.expand(
-        child: FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: 720,
-            height: 1280,
-            child: Texture(textureId: textureId),
-          ),
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: aspectRatio,
+          child: Texture(textureId: textureId),
         ),
       ),
     );

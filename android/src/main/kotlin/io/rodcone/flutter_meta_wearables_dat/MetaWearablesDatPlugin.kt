@@ -8,8 +8,8 @@ import android.util.Log
 import android.view.Surface
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.meta.wearable.dat.camera.StreamSession
-import com.meta.wearable.dat.camera.startStreamSession
+import com.meta.wearable.dat.camera.Stream
+import com.meta.wearable.dat.camera.addStream
 import com.meta.wearable.dat.camera.types.CaptureError
 import com.meta.wearable.dat.camera.types.PhotoData
 import com.meta.wearable.dat.camera.types.StreamConfiguration
@@ -17,10 +17,13 @@ import com.meta.wearable.dat.camera.types.VideoQuality
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
+import com.meta.wearable.dat.core.session.DeviceSessionState
+import com.meta.wearable.dat.core.session.Session
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.mockdevice.MockDeviceKit
 import com.meta.wearable.dat.mockdevice.api.MockRaybanMeta
+import com.meta.wearable.dat.mockdevice.api.camera.CameraFacing
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -41,6 +44,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -58,6 +62,7 @@ class MetaWearablesDatPlugin :
         private const val TAG = "MetaWearablesDat"
         private const val PERMISSION_REQUEST_CODE = 48291
         private const val BT_PERMISSION_REQUEST_CODE = 48292
+        private const val MOCK_CAMERA_PERMISSION_REQUEST_CODE = 48293
         private val REQUIRED_PERMISSIONS: Array<String> =
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                     arrayOf(
@@ -77,6 +82,7 @@ class MetaWearablesDatPlugin :
     private lateinit var registrationStateChannel: EventChannel
     private lateinit var streamSessionStateChannel: EventChannel
     private lateinit var streamSessionErrorChannel: EventChannel
+    private lateinit var videoStreamSizeChannel: EventChannel
     private var application: Application? = null
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
@@ -84,6 +90,7 @@ class MetaWearablesDatPlugin :
     private var registrationStateStreamHandler: RegistrationStateStreamHandler? = null
     private var streamSessionStateStreamHandler: StreamSessionStateStreamHandler? = null
     private var streamSessionErrorStreamHandler: StreamSessionErrorStreamHandler? = null
+    private var videoStreamSizeStreamHandler: VideoStreamSizeStreamHandler? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // Gate SDK initialization until BT permissions are granted (mirrors reference app).
@@ -92,18 +99,34 @@ class MetaWearablesDatPlugin :
     // Permission request handling
     private var permissionContinuation: CancellableContinuation<PermissionStatus>? = null
     private val permissionMutex = Mutex()
-    private val permissionContract = Wearables.RequestPermissionContract()
+    // Lazy so it isn't constructed at plugin load — the 0.6.0 SDK types
+    // may touch `Wearables` internals and throw before `Wearables.initialize()`.
+    private val permissionContract by lazy { Wearables.RequestPermissionContract() }
     private var btPermissionResult: Result? = null
+
+    // Pending state for the Android runtime CAMERA permission, needed by
+    // MockDeviceKit when simulating the wearable feed from the phone camera.
+    private var pendingMockCameraFacingCall: MethodCall? = null
+    private var pendingMockCameraFacingResult: Result? = null
 
     // Single shared device selector — mirrors reference app's WearablesViewModel pattern.
     // One instance is shared across device monitoring and stream session creation.
-    private val deviceSelector: DeviceSelector = AutoDeviceSelector()
+    // Lazy init: constructing an `AutoDeviceSelector` before `Wearables.initialize()`
+    // crashes the plugin class load, which silently drops method-channel registration.
+    private val deviceSelector: DeviceSelector by lazy { AutoDeviceSelector() }
 
-    // Streaming state
-    private var streamSession: StreamSession? = null
+    // Streaming state — 0.6.0 splits what was one `StreamSession` into a
+    // `Session` (device lifecycle) and a `Stream` (a capability added to a
+    // started session). The `Session` is reused across stream start/stop
+    // toggles; it's only torn down when the device disappears or the plugin
+    // is disposed. See the plan for the internal state machine.
+    private var session: Session? = null
+    private var stream: Stream? = null
     private var sessionKey: String? = null
     private var videoJob: Job? = null
-    private var stateJob: Job? = null
+    private var streamStateJob: Job? = null
+    private var streamErrorJob: Job? = null
+    private var deviceAvailabilityJob: Job? = null
     // Texture API — renders I420 frames to a SurfaceTexture
     // instead of encoding to JPEG and copying bytes across the platform channel.
     private var textureRegistry: TextureRegistry? = null
@@ -122,7 +145,7 @@ class MetaWearablesDatPlugin :
                 )
         activeDeviceStreamHandler =
                 ActiveDeviceStreamHandler(
-                        deviceSelector,
+                        { deviceSelector },
                         { btPermissionsGranted },
                         { ensureWearablesInitialized() },
                 )
@@ -157,6 +180,14 @@ class MetaWearablesDatPlugin :
         streamSessionErrorStreamHandler = StreamSessionErrorStreamHandler()
         streamSessionErrorChannel.setStreamHandler(streamSessionErrorStreamHandler)
 
+        videoStreamSizeChannel =
+                EventChannel(
+                        flutterPluginBinding.binaryMessenger,
+                        "flutter_meta_wearables_dat/video_stream_size",
+                )
+        videoStreamSizeStreamHandler = VideoStreamSizeStreamHandler()
+        videoStreamSizeChannel.setStreamHandler(videoStreamSizeStreamHandler)
+
         textureRegistry = flutterPluginBinding.textureRegistry
 
         val context = flutterPluginBinding.applicationContext
@@ -177,12 +208,17 @@ class MetaWearablesDatPlugin :
             "getCameraPermissionStatus" -> getCameraPermissionStatus(result)
             "requestCameraPermission" -> requestCameraPermission(result)
             "handleUrl" -> handleUrl(call, result)
+            "configureMockDevices" -> configureMockDevices(call, result)
+            "disableMockDevices" -> disableMockDevices(result)
             "pairMockRayBanMeta" -> pairMockRayBanMeta(result)
             "unpairMockRayBanMeta" -> unpairMockRayBanMeta(call, result)
             "mockDevicePowerOn", "mockDevicePowerOff", "mockDeviceDon", "mockDeviceDoff" ->
                     mockDeviceAction(call, result)
             "setMockCameraFeed" -> setMockCameraFeed(call, result)
+            "setMockCameraFacing" -> setMockCameraFacing(call, result)
             "setMockCapturedImage" -> setMockCapturedImage(call, result)
+            "setMockPermission" -> result.notImplemented()
+            "setMockPermissionRequestResult" -> result.notImplemented()
             "restartActiveDeviceMonitoring" -> {
                 activeDeviceStreamHandler?.restartMonitoring()
                 result.success(true)
@@ -208,9 +244,12 @@ class MetaWearablesDatPlugin :
         streamSessionErrorChannel.setStreamHandler(null)
         streamSessionErrorStreamHandler?.dispose()
         streamSessionErrorStreamHandler = null
+        videoStreamSizeChannel.setStreamHandler(null)
+        videoStreamSizeStreamHandler?.dispose()
+        videoStreamSizeStreamHandler = null
 
-        // Clean up stream session
-        cleanupSession()
+        // Tear down any active session and stream
+        teardownSession()
 
         textureRegistry = null
         scope.cancel()
@@ -268,22 +307,46 @@ class MetaWearablesDatPlugin :
             permissions: Array<out String>,
             grantResults: IntArray
     ): Boolean {
-        if (requestCode != BT_PERMISSION_REQUEST_CODE) return false
-        val pendingResult = btPermissionResult ?: return false
-        btPermissionResult = null
-        val allGranted =
-                grantResults.isNotEmpty() &&
-                        grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-        if (allGranted) {
-            // Initialize SDK now that BT permissions are granted (mirrors reference app pattern)
-            btPermissionsGranted = true
-            ensureWearablesInitialized()
-            // Start monitoring now that SDK is properly initialized with permissions
-            registrationStateStreamHandler?.restartMonitoring()
-            activeDeviceStreamHandler?.restartMonitoring()
+        when (requestCode) {
+            BT_PERMISSION_REQUEST_CODE -> {
+                val pendingResult = btPermissionResult ?: return false
+                btPermissionResult = null
+                val allGranted =
+                        grantResults.isNotEmpty() &&
+                                grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+                if (allGranted) {
+                    // Initialize SDK now that BT permissions are granted (mirrors reference app pattern)
+                    btPermissionsGranted = true
+                    ensureWearablesInitialized()
+                    // Start monitoring now that SDK is properly initialized with permissions
+                    registrationStateStreamHandler?.restartMonitoring()
+                    activeDeviceStreamHandler?.restartMonitoring()
+                }
+                pendingResult.success(allGranted)
+                return true
+            }
+            MOCK_CAMERA_PERMISSION_REQUEST_CODE -> {
+                val pendingCall = pendingMockCameraFacingCall
+                val pendingResult = pendingMockCameraFacingResult
+                pendingMockCameraFacingCall = null
+                pendingMockCameraFacingResult = null
+                if (pendingCall == null || pendingResult == null) return false
+                val granted =
+                        grantResults.isNotEmpty() &&
+                                grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+                if (!granted) {
+                    pendingResult.error(
+                            "PERMISSION_DENIED",
+                            "CAMERA permission is required for mock device camera feed.",
+                            null,
+                    )
+                    return true
+                }
+                applyMockCameraFacing(pendingCall, pendingResult)
+                return true
+            }
+            else -> return false
         }
-        pendingResult.success(allGranted)
-        return true
     }
 
     // endregion
@@ -472,6 +535,65 @@ class MetaWearablesDatPlugin :
 
     // region Mock Device
 
+    private var mockKitEnabled = false
+
+    private fun ensureMockKitEnabled() {
+        if (mockKitEnabled) return
+        val app = application ?: return
+        MockDeviceKit.getInstance(app).enable()
+        mockKitEnabled = true
+    }
+
+    private fun configureMockDevices(call: MethodCall, result: Result) {
+        val app = application
+        if (app == null) {
+            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
+            return
+        }
+        val initiallyRegistered =
+                (call.argument<Boolean>("initiallyRegistered")) ?: true
+        val initialPermissionsGranted =
+                (call.argument<Boolean>("initialPermissionsGranted")) ?: true
+        if (!initiallyRegistered || !initialPermissionsGranted) {
+            Log.w(
+                    TAG,
+                    "configureMockDevices: initiallyRegistered/initialPermissionsGranted " +
+                            "overrides are not yet supported on Android; enabling MockDeviceKit " +
+                            "with default settings."
+            )
+        }
+        try {
+            val kit = MockDeviceKit.getInstance(app)
+            if (mockKitEnabled) {
+                kit.disable()
+                mockKitEnabled = false
+            }
+            kit.enable()
+            mockKitEnabled = true
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to configure mock devices", null)
+        }
+    }
+
+    private fun disableMockDevices(result: Result) {
+        val app = application
+        if (app == null) {
+            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
+            return
+        }
+        try {
+            teardownSession()
+            if (mockKitEnabled) {
+                MockDeviceKit.getInstance(app).disable()
+                mockKitEnabled = false
+            }
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to disable mock devices", null)
+        }
+    }
+
     private fun pairMockRayBanMeta(result: Result) {
         val app = application
         if (app == null) {
@@ -479,6 +601,7 @@ class MetaWearablesDatPlugin :
             return
         }
         try {
+            ensureMockKitEnabled()
             val mockDevice = MockDeviceKit.getInstance(app).pairRaybanMeta()
             result.success(mockDevice.deviceIdentifier.toString())
         } catch (e: Exception) {
@@ -501,6 +624,7 @@ class MetaWearablesDatPlugin :
             val kit = MockDeviceKit.getInstance(app)
             val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
             if (device != null) {
+                teardownSession()
                 kit.unpairDevice(device)
                 result.success(true)
             } else {
@@ -558,7 +682,14 @@ class MetaWearablesDatPlugin :
             val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
             if (device is MockRaybanMeta) {
                 if (videoPath != null) {
-                    device.getCameraKit().setCameraFeed(android.net.Uri.parse(videoPath))
+                    val uri = android.net.Uri.parse(videoPath)
+                    // MockDeviceKit extracts raw NAL units from the file without
+                    // honoring the container's rotation metadata, so phone-recorded
+                    // portrait videos arrive as native-landscape frames. Read the
+                    // rotation here so the FrameProcessor can compensate when
+                    // rendering to the Flutter texture.
+                    frameProcessor.setRotation(readVideoRotationDegrees(app, uri))
+                    device.services.camera.setCameraFeed(uri)
                 }
                 result.success(true)
             } else {
@@ -566,6 +697,119 @@ class MetaWearablesDatPlugin :
             }
         } catch (e: Exception) {
             result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to set camera feed", null)
+        }
+    }
+
+    private fun readVideoRotationDegrees(context: android.content.Context, uri: android.net.Uri): Int {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            retriever
+                    .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                    ?.toIntOrNull()
+                    ?: 0
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read video rotation metadata for $uri", e)
+            0
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun setMockCameraFacing(call: MethodCall, result: Result) {
+        val app = application
+        if (app == null) {
+            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
+            return
+        }
+        val deviceId = call.argument<String>("deviceUUID")
+        val facingRaw = call.argument<String>("cameraFacing")
+        if (deviceId == null) {
+            result.error("INVALID_ARGS", "deviceUUID is missing", null)
+            return
+        }
+        if (facingRaw?.lowercase() !in setOf("front", "back")) {
+            result.error("INVALID_ARGS", "cameraFacing must be 'front' or 'back'", null)
+            return
+        }
+
+        // MockDeviceKit reads from the phone's physical camera to simulate the
+        // wearable feed, so the Android runtime CAMERA permission must be granted.
+        if (ContextCompat.checkSelfPermission(app, android.Manifest.permission.CAMERA) !=
+                        PackageManager.PERMISSION_GRANTED
+        ) {
+            val act = activity
+            if (act == null) {
+                result.error(
+                        "PERMISSION_ERROR",
+                        "Activity is not available to request CAMERA permission.",
+                        null,
+                )
+                return
+            }
+            if (pendingMockCameraFacingResult != null) {
+                result.error(
+                        "PERMISSION_ERROR",
+                        "A CAMERA permission request is already in progress.",
+                        null,
+                )
+                return
+            }
+            pendingMockCameraFacingCall = call
+            pendingMockCameraFacingResult = result
+            ActivityCompat.requestPermissions(
+                    act,
+                    arrayOf(android.Manifest.permission.CAMERA),
+                    MOCK_CAMERA_PERMISSION_REQUEST_CODE,
+            )
+            return
+        }
+
+        applyMockCameraFacing(call, result)
+    }
+
+    private fun applyMockCameraFacing(call: MethodCall, result: Result) {
+        val app = application
+        if (app == null) {
+            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
+            return
+        }
+        val deviceId = call.argument<String>("deviceUUID")
+        val facingRaw = call.argument<String>("cameraFacing")
+        if (deviceId == null) {
+            result.error("INVALID_ARGS", "deviceUUID is missing", null)
+            return
+        }
+        val facing =
+                when (facingRaw?.lowercase()) {
+                    "front" -> CameraFacing.FRONT
+                    "back" -> CameraFacing.BACK
+                    else -> {
+                        result.error(
+                                "INVALID_ARGS",
+                                "cameraFacing must be 'front' or 'back'",
+                                null,
+                        )
+                        return
+                    }
+                }
+        try {
+            val kit = MockDeviceKit.getInstance(app)
+            val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
+            if (device is MockRaybanMeta) {
+                // Physical camera frames are already oriented correctly by the
+                // SDK's internal CameraFrameRotator — clear any rotation left
+                // over from a previous video-feed session.
+                frameProcessor.setRotation(0)
+                device.services.camera.setCameraFeed(facing)
+                result.success(true)
+            } else {
+                result.error("INVALID_DEVICE", "Device is not a mock glasses device", null)
+            }
+        } catch (e: Exception) {
+            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to set camera facing", null)
         }
     }
 
@@ -586,7 +830,7 @@ class MetaWearablesDatPlugin :
             val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
             if (device is MockRaybanMeta) {
                 if (imagePath != null) {
-                    device.getCameraKit().setCapturedImage(android.net.Uri.parse(imagePath))
+                    device.services.camera.setCapturedImage(android.net.Uri.parse(imagePath))
                 }
                 result.success(true)
             } else {
@@ -629,12 +873,17 @@ class MetaWearablesDatPlugin :
             Log.d(TAG, "videoCodec '$videoCodec' ignored on Android (only raw I420 supported)")
         }
 
-        if (streamSession != null) {
+        // Fast path: a Stream is already attached to the current Session.
+        if (stream != null) {
             val entry = textureEntry
             if (entry != null) {
                 result.success(entry.id())
             } else {
-                result.error("TEXTURE_REGISTRATION_FAILED", "No texture registered for session $key", null)
+                result.error(
+                        "TEXTURE_REGISTRATION_FAILED",
+                        "No texture registered for session $key",
+                        null,
+                )
             }
             return
         }
@@ -649,12 +898,15 @@ class MetaWearablesDatPlugin :
                 // Register a Flutter texture for zero-copy rendering
                 val registry = textureRegistry
                 if (registry == null) {
-                    result.error("TEXTURE_REGISTRATION_FAILED", "TextureRegistry is not available.", null)
+                    result.error(
+                            "TEXTURE_REGISTRATION_FAILED",
+                            "TextureRegistry is not available.",
+                            null,
+                    )
                     return@launch
                 }
                 val entry = registry.createSurfaceTexture()
                 val surfaceTexture = entry.surfaceTexture()
-                // Set default buffer size — will be updated when first frame arrives
                 surfaceTexture.setDefaultBufferSize(1280, 720)
                 val surface = Surface(surfaceTexture)
                 textureEntry = entry
@@ -662,104 +914,215 @@ class MetaWearablesDatPlugin :
                 val textureId = entry.id()
                 Log.d(TAG, "Registered texture $textureId for session $key")
 
-                val session =
-                        Wearables.startStreamSession(
-                                app,
-                                deviceSelector,
-                                StreamConfiguration(videoQuality = streamQuality, fps.toInt())
-                        )
-                streamSession = session
-                streamSessionStateStreamHandler?.session = session
-                streamSessionErrorStreamHandler?.session = session
-
-                // Subscribe to video frames — render I420 → ARGB bitmap → SurfaceTexture
-                videoJob = scope.launch(Dispatchers.Default) {
-                    session.videoStream.collect { videoFrame ->
-                        // Update SurfaceTexture buffer size if frame dimensions change
-                        if (frameProcessor.needsBufferSizeUpdate(videoFrame.width, videoFrame.height)) {
-                            entry.surfaceTexture().setDefaultBufferSize(videoFrame.width, videoFrame.height)
-                        }
-                        frameProcessor.processFrame(videoFrame, surface)
-                    }
+                val activeSession = ensureSessionStarted() ?: run {
+                    teardownStreamOnly()
+                    result.error(
+                            "STREAM_ERROR",
+                            "Failed to create or start device session.",
+                            null,
+                    )
+                    return@launch
                 }
 
-                stateJob =
-                        scope.launch {
-                            session.state.collect { state ->
-                                Log.d(TAG, "StreamSession [$key] state: $state")
+                var addedStream: Stream? = null
+                activeSession
+                        .addStream(StreamConfiguration(videoQuality = streamQuality, fps.toInt()))
+                        .onSuccess { addedStream = it }
+                        .onFailure { error, _ ->
+                            val code =
+                                    when {
+                                        error.description.contains("already", ignoreCase = true) ->
+                                                "capabilityAlreadyActive"
+                                        else -> "unexpectedError"
+                                    }
+                            streamSessionErrorStreamHandler?.sendError(code, error.description)
+                            Log.e(TAG, "addStream failed: ${error.description}")
+                        }
+
+                val newStream = addedStream
+                if (newStream == null) {
+                    teardownStreamOnly()
+                    result.error("STREAM_ERROR", "Failed to add stream to session.", null)
+                    return@launch
+                }
+
+                stream = newStream
+                streamSessionStateStreamHandler?.stream = newStream
+
+                videoJob =
+                        scope.launch(Dispatchers.Default) {
+                            newStream.videoStream.collect { videoFrame ->
+                                if (frameProcessor.needsBufferSizeUpdate(
+                                                videoFrame.width,
+                                                videoFrame.height,
+                                        )
+                                ) {
+                                    val (targetWidth, targetHeight) =
+                                            frameProcessor.targetDimensions(
+                                                    videoFrame.width,
+                                                    videoFrame.height,
+                                            )
+                                    entry.surfaceTexture()
+                                            .setDefaultBufferSize(targetWidth, targetHeight)
+                                    videoStreamSizeStreamHandler?.send(targetWidth, targetHeight)
+                                    frameProcessor.onSurfaceBufferSizeApplied(
+                                            videoFrame.width,
+                                            videoFrame.height,
+                                    )
+                                }
+                                frameProcessor.processFrame(videoFrame, surface)
                             }
                         }
 
+                streamStateJob =
+                        scope.launch {
+                            newStream.state.collect { state ->
+                                Log.d(TAG, "Stream [$key] state: $state")
+                            }
+                        }
+
+                streamErrorJob =
+                        scope.launch {
+                            newStream.errorStream.collect { streamError ->
+                                Log.e(
+                                        TAG,
+                                        "Stream error: $streamError (${streamError.description})",
+                                )
+                                streamSessionErrorStreamHandler?.send(streamError)
+                            }
+                        }
+
+                newStream.start()
                 result.success(textureId)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start stream session", e)
-                cleanupSession()
+                teardownStreamOnly()
                 result.error("STREAM_ERROR", e.message ?: "Failed to start stream session.", null)
             }
         }
     }
 
+    /**
+     * Lazily create and start a [Session], reusing an existing one across
+     * stream start/stop toggles. Returns `null` if creation or start-up
+     * failed (an error has already been pushed onto the error stream).
+     */
+    private suspend fun ensureSessionStarted(): Session? {
+        val existing = session
+        if (existing != null) {
+            val currentState = existing.state.firstOrNull()
+            if (currentState == DeviceSessionState.STARTED) {
+                return existing
+            }
+        }
+
+        var created: Session? = null
+        Wearables.createSession(deviceSelector)
+                .onSuccess { created = it }
+                .onFailure { error, _ ->
+                    val identifier = error.description.lowercase()
+                    val code =
+                            when {
+                                identifier.contains("no eligible") -> "noEligibleDevice"
+                                identifier.contains("already") -> "sessionAlreadyExists"
+                                else -> "unexpectedError"
+                            }
+                    streamSessionErrorStreamHandler?.sendError(code, error.description)
+                    Log.e(TAG, "createSession failed: ${error.description}")
+                }
+
+        val newSession = created ?: return null
+        session = newSession
+        newSession.start()
+
+        // Wait until the session transitions to STARTED before we try to add
+        // a stream — mirrors the reference app pattern.
+        newSession.state.first { it == DeviceSessionState.STARTED }
+
+        // Subscribe to the active-device flow so we tear the Session down
+        // when the device disappears. Safe to call multiple times.
+        startDeviceAvailabilityMonitoring()
+
+        return newSession
+    }
+
+    private fun startDeviceAvailabilityMonitoring() {
+        if (deviceAvailabilityJob != null) return
+        deviceAvailabilityJob =
+                scope.launch {
+                    deviceSelector.activeDeviceFlow().collect { device ->
+                        if (device == null && session != null) {
+                            Log.d(TAG, "Active device lost — tearing down Session")
+                            teardownSession()
+                        }
+                    }
+                }
+    }
+
     private fun stopStreamSession(call: MethodCall, result: Result) {
-        val session = streamSession
-        if (session == null) {
+        if (stream == null) {
             val key = sessionKey ?: "auto"
-            result.error("SESSION_NOT_FOUND", "No stream session found for '$key'.", null)
+            result.error("SESSION_NOT_FOUND", "No stream found for '$key'.", null)
             return
         }
 
-        cleanupSession()
+        teardownStreamOnly()
         result.success(true)
     }
 
     private fun capturePhoto(call: MethodCall, result: Result) {
-        val session = streamSession
-        if (session == null) {
+        val activeStream = stream
+        if (activeStream == null) {
             val key = sessionKey ?: "auto"
-            result.error("SESSION_NOT_FOUND", "No stream session found for '$key'.", null)
+            result.error("SESSION_NOT_FOUND", "No active stream for '$key'.", null)
             return
         }
 
         val args = call.arguments as? Map<*, *>
         val format = args?.get("format") as? String
         if (format != null) {
-            Log.d(TAG, "capturePhoto format '$format' received (device decides actual format on Android)")
+            Log.d(
+                    TAG,
+                    "capturePhoto format '$format' received (device decides actual format on Android)",
+            )
         }
 
         scope.launch {
             try {
-                val photoResult = session.capturePhoto()
+                val photoResult = activeStream.capturePhoto()
                 photoResult
                         .onSuccess { photoData ->
                             val response: Map<String, Any> =
                                     when (photoData) {
                                         is PhotoData.Bitmap -> {
-                                            val stream = ByteArrayOutputStream()
+                                            val buffer = ByteArrayOutputStream()
                                             photoData.bitmap.compress(
                                                     android.graphics.Bitmap.CompressFormat.JPEG,
                                                     85,
-                                                    stream
+                                                    buffer,
                                             )
                                             mapOf(
-                                                    "bytes" to stream.toByteArray(),
-                                                    "format" to "jpeg"
+                                                    "bytes" to buffer.toByteArray(),
+                                                    "format" to "jpeg",
                                             )
                                         }
                                         is PhotoData.HEIC -> {
-                                            val buffer = photoData.data
-                                            val bytes = ByteArray(buffer.remaining())
-                                            buffer.get(bytes)
+                                            val heicBuffer = photoData.data
+                                            val bytes = ByteArray(heicBuffer.remaining())
+                                            heicBuffer.get(bytes)
                                             mapOf("bytes" to bytes, "format" to "heic")
                                         }
                                     }
                             result.success(response)
                         }
                         .onFailure { error, _ ->
-                            val errorCode = when (error) {
-                                is CaptureError.DeviceDisconnected -> "deviceDisconnected"
-                                is CaptureError.NotStreaming -> "notStreaming"
-                                is CaptureError.CaptureInProgress -> "captureInProgress"
-                                is CaptureError.CaptureFailed -> "captureFailed"
-                            }
+                            val errorCode =
+                                    when (error) {
+                                        is CaptureError.DeviceDisconnected -> "deviceDisconnected"
+                                        is CaptureError.NotStreaming -> "notStreaming"
+                                        is CaptureError.CaptureInProgress -> "captureInProgress"
+                                        is CaptureError.CaptureFailed -> "captureFailed"
+                                    }
                             Log.e(TAG, "Photo capture failed: $errorCode - ${error.description}")
                             streamSessionErrorStreamHandler?.sendError(errorCode, error.description)
                             result.error("CAPTURE_PHOTO_FAILED", error.description, errorCode)
@@ -771,17 +1134,26 @@ class MetaWearablesDatPlugin :
         }
     }
 
-    private fun cleanupSession() {
+    /**
+     * Tear down only the active stream, keeping the underlying [Session]
+     * alive so a subsequent `startStreamSession` re-uses it via
+     * `addStream` instead of paying the full session-start cost.
+     */
+    private fun teardownStreamOnly() {
         videoJob?.cancel()
         videoJob = null
-        stateJob?.cancel()
-        stateJob = null
-        streamSessionStateStreamHandler?.session = null
-        streamSessionErrorStreamHandler?.session = null
-        streamSession?.close()
-        streamSession = null
+        streamStateJob?.cancel()
+        streamStateJob = null
+        streamErrorJob?.cancel()
+        streamErrorJob = null
+        streamSessionStateStreamHandler?.stream = null
+        try {
+            stream?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping stream: ${e.message}")
+        }
+        stream = null
         sessionKey = null
-        // Release texture resources
         textureSurface?.release()
         textureSurface = null
         val entry = textureEntry
@@ -791,6 +1163,24 @@ class MetaWearablesDatPlugin :
         }
         textureEntry = null
         frameProcessor.release()
+        videoStreamSizeStreamHandler?.reset()
+    }
+
+    /**
+     * Tear down the entire session, including the active stream. Called on
+     * device loss, `unpairMockRayBanMeta`, `disableMockDevices`, and plugin
+     * dispose. The next `startStreamSession` will create a fresh Session.
+     */
+    private fun teardownSession() {
+        teardownStreamOnly()
+        deviceAvailabilityJob?.cancel()
+        deviceAvailabilityJob = null
+        try {
+            session?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping session: ${e.message}")
+        }
+        session = null
     }
 
     // endregion
