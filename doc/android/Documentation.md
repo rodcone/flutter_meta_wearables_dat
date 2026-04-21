@@ -2,7 +2,7 @@ This documentation folder contains the `CameraAccess` Android sample (Kotlin) fr
 
 To keep the repository lightweight, the Android sample app is excluded via .gitignore. If needed, you can clone it directly from `https://github.com/facebook/meta-wearables-dat-android/tree/main/samples/CameraAccess`.
 
-## Key SDK types (Android DAT 0.5.0)
+## Key SDK types (Android DAT 0.6.0)
 
 ### StreamSessionState enum
 - `STARTING` — session is starting

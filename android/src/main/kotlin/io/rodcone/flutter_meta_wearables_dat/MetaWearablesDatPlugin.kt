@@ -83,6 +83,7 @@ class MetaWearablesDatPlugin :
     private lateinit var streamSessionStateChannel: EventChannel
     private lateinit var streamSessionErrorChannel: EventChannel
     private lateinit var videoStreamSizeChannel: EventChannel
+    private lateinit var videoFramesChannel: EventChannel
     private var application: Application? = null
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
@@ -91,6 +92,12 @@ class MetaWearablesDatPlugin :
     private var streamSessionStateStreamHandler: StreamSessionStateStreamHandler? = null
     private var streamSessionErrorStreamHandler: StreamSessionErrorStreamHandler? = null
     private var videoStreamSizeStreamHandler: VideoStreamSizeStreamHandler? = null
+    private val videoFrameStreamHandler = VideoFrameStreamHandler()
+
+    // Background streaming — tracks whether the foreground service has been
+    // started so we can idempotently re-start / stop it, and so we can tear
+    // it down on plugin detach.
+    @Volatile private var backgroundStreamingStarted: Boolean = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // Gate SDK initialization until BT permissions are granted (mirrors reference app).
@@ -188,6 +195,13 @@ class MetaWearablesDatPlugin :
         videoStreamSizeStreamHandler = VideoStreamSizeStreamHandler()
         videoStreamSizeChannel.setStreamHandler(videoStreamSizeStreamHandler)
 
+        videoFramesChannel =
+                EventChannel(
+                        flutterPluginBinding.binaryMessenger,
+                        "flutter_meta_wearables_dat/video_frames",
+                )
+        videoFramesChannel.setStreamHandler(videoFrameStreamHandler)
+
         textureRegistry = flutterPluginBinding.textureRegistry
 
         val context = flutterPluginBinding.applicationContext
@@ -226,6 +240,8 @@ class MetaWearablesDatPlugin :
             "startStreamSession" -> startStreamSession(call, result)
             "stopStreamSession" -> stopStreamSession(call, result)
             "capturePhoto" -> capturePhoto(call, result)
+            "enableBackgroundStreaming" -> enableBackgroundStreaming(call, result)
+            "disableBackgroundStreaming" -> disableBackgroundStreaming(result)
             else -> result.notImplemented()
         }
     }
@@ -247,9 +263,15 @@ class MetaWearablesDatPlugin :
         videoStreamSizeChannel.setStreamHandler(null)
         videoStreamSizeStreamHandler?.dispose()
         videoStreamSizeStreamHandler = null
+        videoFramesChannel.setStreamHandler(null)
+        videoFrameStreamHandler.dispose()
 
         // Tear down any active session and stream
         teardownSession()
+
+        // Stop the background service if it's running — otherwise the
+        // notification would hang around after a hot restart.
+        stopBackgroundServiceIfRunning()
 
         textureRegistry = null
         scope.cancel()
@@ -853,6 +875,88 @@ class MetaWearablesDatPlugin :
 
     // endregion
 
+    // region Background Streaming
+
+    private fun enableBackgroundStreaming(call: MethodCall, result: Result) {
+        val app = application
+        if (app == null) {
+            result.error(
+                    "BACKGROUND_STREAMING_ERROR",
+                    "Application context is not available.",
+                    null,
+            )
+            return
+        }
+        val notification =
+                @Suppress("UNCHECKED_CAST")
+                (call.argument<Map<String, Any>>("androidNotification"))
+        if (notification == null) {
+            result.error(
+                    "INVALID_ARGS",
+                    "androidNotification is required on Android to display the foreground-service notification.",
+                    null,
+            )
+            return
+        }
+        try {
+            val intent = Intent(app, BackgroundStreamingService::class.java).apply {
+                putExtra(
+                        BackgroundStreamingService.EXTRA_TITLE,
+                        notification["title"] as? String,
+                )
+                putExtra(
+                        BackgroundStreamingService.EXTRA_TEXT,
+                        notification["text"] as? String,
+                )
+                putExtra(
+                        BackgroundStreamingService.EXTRA_CHANNEL_ID,
+                        notification["channelId"] as? String,
+                )
+                putExtra(
+                        BackgroundStreamingService.EXTRA_CHANNEL_NAME,
+                        notification["channelName"] as? String,
+                )
+                putExtra(
+                        BackgroundStreamingService.EXTRA_ICON_RESOURCE_NAME,
+                        notification["iconResourceName"] as? String,
+                )
+            }
+            ContextCompat.startForegroundService(app, intent)
+            backgroundStreamingStarted = true
+            result.success(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start BackgroundStreamingService", e)
+            result.error(
+                    "BACKGROUND_STREAMING_ERROR",
+                    e.message ?: "Failed to start background streaming service.",
+                    null,
+            )
+        }
+    }
+
+    private fun disableBackgroundStreaming(result: Result) {
+        try {
+            stopBackgroundServiceIfRunning()
+            result.success(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop BackgroundStreamingService", e)
+            result.error(
+                    "BACKGROUND_STREAMING_ERROR",
+                    e.message ?: "Failed to stop background streaming service.",
+                    null,
+            )
+        }
+    }
+
+    private fun stopBackgroundServiceIfRunning() {
+        if (!backgroundStreamingStarted) return
+        val app = application ?: return
+        app.stopService(Intent(app, BackgroundStreamingService::class.java))
+        backgroundStreamingStarted = false
+    }
+
+    // endregion
+
     // region Streaming
 
     private fun startStreamSession(call: MethodCall, result: Result) {
@@ -969,6 +1073,13 @@ class MetaWearablesDatPlugin :
                                             videoFrame.width,
                                             videoFrame.height,
                                     )
+                                }
+                                // Emit the raw I420 frame to Dart for recording /
+                                // custom processing before handing off to the
+                                // texture renderer. Guarded on hasListener so
+                                // unsubscribed apps pay nothing.
+                                if (videoFrameStreamHandler.hasListener) {
+                                    emitVideoFrame(videoFrame)
                                 }
                                 frameProcessor.processFrame(videoFrame, surface)
                             }
@@ -1132,6 +1243,34 @@ class MetaWearablesDatPlugin :
                 result.error("CAPTURE_PHOTO_FAILED", e.message ?: "Photo capture failed.", null)
             }
         }
+    }
+
+    /**
+     * Copy the raw SDK frame bytes into a ByteArray and push them onto the
+     * video_frames event channel. We forward the native I420 layout as-is
+     * (no I420→ARGB conversion) — this is the most useful format for
+     * on-device recording and keeps per-frame cost low.
+     */
+    private fun emitVideoFrame(videoFrame: com.meta.wearable.dat.camera.types.VideoFrame) {
+        val buffer = videoFrame.buffer
+        val remaining = buffer.remaining()
+        if (remaining <= 0) return
+        val bytes = ByteArray(remaining)
+        val originalPosition = buffer.position()
+        buffer.get(bytes, 0, remaining)
+        // Restore so the FrameProcessor can still read the same bytes.
+        buffer.position(originalPosition)
+        videoFrameStreamHandler.emit(
+                codec = if (videoFrame.isCompressed) "hvc1" else "raw",
+                bytes = bytes,
+                width = videoFrame.width,
+                height = videoFrame.height,
+                ptsUs = videoFrame.presentationTimeUs,
+                // SDK does not surface keyframe metadata on Android — assume
+                // every frame is self-contained. Accurate for raw I420;
+                // conservative for hvc1 (not currently reachable on Android).
+                isKeyframe = true,
+        )
     }
 
     /**

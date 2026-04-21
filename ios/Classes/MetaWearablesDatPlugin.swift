@@ -43,6 +43,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Current mock device config. Applied whenever MockDeviceKit is enabled.
   private var mockDeviceConfig: MockDeviceKitConfig = MockDeviceKitConfig()
 
+  // Background streaming — opt-in AVAudioSession keep-alive + software
+  // decoder mode. When enabled, the plugin keeps the decoder alive across
+  // foreground/background transitions and keeps emitting frames to the
+  // video_frames event channel regardless of UI visibility.
+  private let backgroundController = BackgroundStreamingController()
+  private let videoFrameHandler = VideoFrameStreamHandler()
+
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: registrar.messenger())
     let instance = MetaWearablesDatPlugin()
@@ -71,6 +78,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // Event channel for video frame dimensions (used by Dart to drive AspectRatio).
     let videoStreamSizeChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/video_stream_size", binaryMessenger: registrar.messenger())
     videoStreamSizeChannel.setStreamHandler(instance.videoStreamSizeHandler)
+    // Event channel for per-frame video samples. Serialization is skipped
+    // entirely when no subscriber is attached, so this is zero-cost for apps
+    // that don't opt in to background streaming.
+    let videoFramesChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/video_frames", binaryMessenger: registrar.messenger())
+    videoFramesChannel.setStreamHandler(instance.videoFrameHandler)
 
     Task { @MainActor in
       try? Wearables.configure()
@@ -138,9 +150,33 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         setMockPermission(call: call, result: result)
       case "setMockPermissionRequestResult":
         setMockPermissionRequestResult(call: call, result: result)
+      case "enableBackgroundStreaming":
+        enableBackgroundStreaming(result: result)
+      case "disableBackgroundStreaming":
+        disableBackgroundStreaming(result: result)
       default:
         result(FlutterMethodNotImplemented)
     }
+  }
+
+  // MARK: - Background streaming
+
+  private func enableBackgroundStreaming(result: @escaping FlutterResult) {
+    do {
+      try backgroundController.enable()
+      result(nil)
+    } catch {
+      result(FlutterError(
+        code: "BACKGROUND_STREAMING_ERROR",
+        message: "Failed to enable background streaming: \(error.localizedDescription). Verify the host app's Info.plist declares the 'audio' UIBackgroundMode.",
+        details: nil
+      ))
+    }
+  }
+
+  private func disableBackgroundStreaming(result: @escaping FlutterResult) {
+    backgroundController.disable()
+    result(nil)
   }
 
   // MARK: - MockDeviceKit lifecycle (0.6.0)
@@ -547,6 +583,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   public func applicationDidEnterBackground(_ application: UIApplication) {
     isInBackground = true
+    // When background streaming is enabled we force software decoding, which
+    // survives the GPU-access restriction — keep the decoder alive so frames
+    // continue to be decoded and emitted to the video_frames channel.
+    if backgroundController.isEnabled {
+      NSLog("[MWDAT] App entered background — background streaming active, decoder kept alive (software path)")
+      return
+    }
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
@@ -563,11 +606,22 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
   /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
   private func processAndSendFrame(_ videoFrame: VideoFrame) {
-    // Skip frame processing while backgrounded. iOS forbids GPU access in
-    // background and the Flutter raster thread is suspended — decoding and
-    // texture updates are both pointless. The underlying StreamSession stays
-    // alive; frames are silently dropped. Applies to both raw and hvc1.
-    guard !isInBackground else { return }
+    // When background streaming is NOT enabled, keep the existing behaviour:
+    // drop every frame while backgrounded, since iOS forbids GPU access and
+    // the Flutter raster thread is suspended.
+    if isInBackground && !backgroundController.isEnabled {
+      return
+    }
+
+    let pts = CMSampleBufferGetPresentationTimeStamp(videoFrame.sampleBuffer)
+    let ptsUs: Int64 = pts.isValid ? Int64(CMTimeGetSeconds(pts) * 1_000_000) : 0
+
+    // Forward the hvc1 compressed sample to Dart BEFORE decoding — this lets
+    // apps record the raw bitstream even when no decode path is needed (e.g.
+    // no texture subscriber, or decode failed while backgrounded).
+    if currentVideoCodec == .hvc1, videoFrameHandler.hasListener {
+      videoFrameHandler.emitHvc1(sampleBuffer: videoFrame.sampleBuffer, ptsUs: ptsUs)
+    }
 
     let now = Date()
     let minInterval = 1.0 / currentTargetFPS
@@ -595,21 +649,18 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    guard let texture = pixelBufferTexture,
-          let texId = textureId else {
-      return
+    // Emit the decoded raw BGRA pixels to the video_frames event channel so
+    // Dart subscribers (e.g. recorders) can access every frame. Guarded on
+    // hasListener so we don't memcpy for apps that don't opt in.
+    if currentVideoCodec == .raw, videoFrameHandler.hasListener {
+      videoFrameHandler.emitRaw(pixelBuffer: pixelBuffer, ptsUs: ptsUs)
     }
 
-    // Surface the frame dimensions to Dart so it can set an AspectRatio.
     let width = CVPixelBufferGetWidth(pixelBuffer)
     let height = CVPixelBufferGetHeight(pixelBuffer)
     videoStreamSizeHandler.send(width: width, height: height)
 
-    // Swap the pixel buffer (lock-protected) and notify Flutter's rasteriser
-    texture.latestPixelBuffer = pixelBuffer
-    textureRegistry?.textureFrameAvailable(texId)
-
-    // Update timing + counters
+    // Update timing + counters regardless of whether we push to the texture.
     lastFrameSendTime = now
     frameCounter += 1
 
@@ -617,27 +668,56 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let actualFPS = 1.0 / timeSinceLastFrame
       NSLog("[MWDAT] \(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
     }
+
+    // Skip texture updates while backgrounded. Metal texture writes from a
+    // backgrounded app are undefined behaviour; the texture will get a fresh
+    // frame on the first foregrounded tick. Frames keep flowing to Dart.
+    if isInBackground { return }
+
+    guard let texture = pixelBufferTexture,
+          let texId = textureId else {
+      return
+    }
+
+    texture.latestPixelBuffer = pixelBuffer
+    textureRegistry?.textureFrameAvailable(texId)
   }
 
   // MARK: - HEVC Decompression (for hvc1 codec)
 
-  /// Creates a VTDecompressionSession for decoding HEVC frames to BGRA pixel buffers.
-  private func setupDecompressionSession(formatDescription: CMFormatDescription) {
+  /// Creates a VTDecompressionSession for decoding HEVC frames to BGRA pixel
+  /// buffers. When `forceSoftware` is true (background streaming is on), we
+  /// force software decoding so the decoder survives foreground/background
+  /// transitions — the hardware decoder is torn down by iOS whenever the app
+  /// loses GPU access, which causes a multi-second stall on return.
+  private func setupDecompressionSession(
+    formatDescription: CMFormatDescription,
+    forceSoftware: Bool
+  ) {
     let attrs: [String: Any] = [
       kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
     ]
+
+    var decoderSpec: CFDictionary?
+    if forceSoftware {
+      let spec: [String: Any] = [
+        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder as String: false,
+      ]
+      decoderSpec = spec as CFDictionary
+    }
+
     var session: VTDecompressionSession?
     let status = VTDecompressionSessionCreate(
       allocator: kCFAllocatorDefault,
       formatDescription: formatDescription,
-      decoderSpecification: nil,
+      decoderSpecification: decoderSpec,
       imageBufferAttributes: attrs as CFDictionary,
       outputCallback: nil,
       decompressionSessionOut: &session
     )
     if status == noErr, let session {
       decompressionSession = session
-      NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding")
+      NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding (software=\(forceSoftware))")
     } else {
       NSLog("[MWDAT] Failed to create VTDecompressionSession: \(status)")
     }
@@ -651,7 +731,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
     // Lazily create decompression session on first frame
     if decompressionSession == nil {
-      setupDecompressionSession(formatDescription: formatDescription)
+      setupDecompressionSession(
+        formatDescription: formatDescription,
+        forceSoftware: backgroundController.isEnabled
+      )
     }
 
     guard let session = decompressionSession else { return nil }

@@ -28,6 +28,9 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
     - [1. Registration (One-time)](#1-registration-one-time)
     - [2. Permissions (First-time camera access)](#2-permissions-first-time-camera-access)
     - [3. Session (After registration and permissions)](#3-session-after-registration-and-permissions)
+      - [Video codecs](#video-codecs)
+      - [Background streaming](#background-streaming)
+      - [Stream quality](#stream-quality)
       - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
   - [AI Assistant Integration](#ai-assistant-integration)
   - [Troubleshooting](#troubleshooting)
@@ -296,29 +299,80 @@ Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTextu
 
 | Codec | Platform | Description |
 |-------|----------|-------------|
-| `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. Foreground only — frame delivery stops when app is backgrounded. Default. |
-| `VideoCodec.hvc1` | iOS only | Compressed HEVC frames. Stream session stays alive across app backgrounding — HEVC decoder is safely paused on background and auto-resumed on foreground. iOS-only; ignored on Android. |
+| `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. iOS: BGRA pixel data. Android: I420 planar YUV. Default. |
+| `VideoCodec.hvc1` | iOS only | Compressed HEVC (`hvc1` NAL units) decoded via `VTDecompressionSession`. Smaller over-the-wire payload than `raw` and the only codec that survives a brief background transition without any opt-in (hardware decoder is paused on background and auto-recreated on foreground). Ignored on Android. |
 
-#### Background behavior (iOS, `hvc1` only)
+For full background streaming (app backgrounded, phone locked, or both) on **either** platform and **either** codec, see [Background streaming](#background-streaming) below.
 
-With `VideoCodec.hvc1` on iOS, the stream session survives app backgrounding. You don't need to stop/restart it when the user switches apps — rendering resumes instantly when you return.
+#### Background streaming
 
-**How it works:**
+By default the host OS suspends your app shortly after it's no longer visible, and the DAT stream dies with it. Call `enableBackgroundStreaming()` **before** `startStreamSession()` to keep the session alive across all three "not visible" states:
 
-- The Meta DAT SDK keeps delivering compressed HEVC frames in the background (they're pure `CMBlockBuffer` CPU data — no GPU involvement).
-- When the app enters background, the plugin invalidates the hardware HEVC decoder (iOS forbids GPU access from backgrounded apps) and silently drops incoming frames.
-- The underlying `StreamSession` is **never stopped** — no reconnection latency.
-- When the app returns to foreground, the decoder is lazily recreated on the first frame. The last rendered frame stays visible during the transition, so there's no flicker.
+1. Flutter app sent to background (user taps home / switches apps).
+2. Screen locked while the app is in foreground.
+3. Both combined.
 
-**What you need to do:** nothing. It's automatic. You just need the Info.plist entries already documented in [Setup → iOS](#ios) (`bluetooth-peripheral`, `external-accessory`).
+```dart
+// Enable before starting the session. Notification fields are required on Android
+// (the OS needs them to display the mandatory foreground service notification).
+await MetaWearablesDat.enableBackgroundStreaming(
+  androidNotification: const BackgroundNotification(
+    title: 'Streaming from your glasses',
+    text: 'Keeps the camera stream alive in the background.',
+    channelId: 'myapp.streaming',
+    channelName: 'Camera Stream',
+    // iconResourceName: 'ic_stat_recording', // optional, falls back to app icon
+  ),
+);
 
-If you want to react to lifecycle changes in Dart (e.g., hide a UI element, pause an ML loop), use Flutter's standard `WidgetsBindingObserver.didChangeAppLifecycleState`.
+final textureId = await MetaWearablesDat.startStreamSession(deviceUUID);
 
-**Not covered:**
+// ...later, when you no longer need background execution:
+await MetaWearablesDat.stopStreamSession(deviceUUID);
+await MetaWearablesDat.disableBackgroundStreaming();
+```
 
-- `VideoCodec.raw` — the SDK itself stops delivering frames when backgrounded, so there's nothing to manage. If you need background streaming, you must use `hvc1`.
-- Android — no `hvc1` support in the Android DAT SDK; raw frames stop in background there too. Background streaming on Android is not currently supported.
-- `captureStreamFrame` — rasterizes via the Flutter engine, which also needs GPU access. It will return `null` while the app is backgrounded. If you run a periodic frame-capture loop (OCR, ML), pause it on `AppLifecycleState.paused` and resume on `AppLifecycleState.resumed`.
+**iOS — required `Info.plist` additions.** In addition to the default entries from [Setup → iOS](#ios-configuration), add `audio` and `bluetooth-central` to `UIBackgroundModes`:
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+    <string>audio</string>
+    <string>bluetooth-central</string>
+    <string>bluetooth-peripheral</string>
+    <string>external-accessory</string>
+</array>
+```
+
+**Android — no manual manifest changes needed.** The plugin's manifest auto-merges the required permissions (`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK`) and declares the internal foreground service.
+
+**How it works.** On iOS the plugin activates an `AVAudioSession` configured for Bluetooth HFP + mixing (which keeps the process scheduled in background) and forces software HEVC decoding so the decoder survives the background → foreground transition without stutter. On Android the plugin starts a foreground service of type `connectedDevice` with your notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
+
+**Accessing frames while backgrounded.** The normal `Texture` widget can't render in background (no GPU access), but the plugin exposes every decoded frame to Dart via `videoFramesStream()`, in both foreground and background. Useful for recording to disk, running ML, or re-muxing:
+
+```dart
+final sub = MetaWearablesDat.videoFramesStream().listen((frame) {
+  // frame.codec                   → VideoCodec.raw or VideoCodec.hvc1
+  // frame.bytes                   → Uint8List of the raw codec payload
+  // frame.width / frame.height    → pixel dimensions
+  // frame.presentationTimestampUs → monotonic, in microseconds
+  // frame.isKeyframe              → always true for raw; hvc1 keyframes carry SPS/PPS/VPS
+});
+```
+
+Frame bytes are codec-dependent:
+
+- `VideoCodec.raw` — **iOS**: BGRA pixel data, tightly packed at `width * height * 4` bytes. **Android**: I420 planar YUV at `width * height * 3/2` bytes (Y plane, then U, then V).
+- `VideoCodec.hvc1` (iOS only) — raw HEVC elementary stream (`hvc1` NAL units). Keyframes carry the parameter sets (VPS/SPS/PPS) inline, so the stream is self-contained and can be fed straight into `ffmpeg -i file.h265 out.mp4` or muxed into an mp4 track via `ffmpeg_kit_flutter`.
+
+Subscribing to `videoFramesStream()` is zero-cost when there are no listeners — the plugin won't encode or emit anything until the first subscriber attaches. Always subscribe *before* calling `startStreamSession()` if you want to capture the opening keyframe.
+
+**Notes and limitations:**
+
+- **On-device muxing.** The plugin gives you raw frame bytes — muxing into mp4/mov is the host app's responsibility. For hvc1 on iOS this is usually a one-liner with `ffmpeg_kit_flutter`; for raw you'll want to transcode first.
+- **Audio.** The iOS `AVAudioSession` is activated purely as a keep-alive. Microphone samples are not forwarded to Dart.
+- **`captureStreamFrame`.** Rasterizes via the Flutter engine, which needs GPU access. Returns `null` while the app is backgrounded — use `videoFramesStream()` instead if you need pixel data in background.
+- **Remember to disable.** `disableBackgroundStreaming()` tears down the `AVAudioSession` on iOS and stops the foreground service on Android. Calling it is idempotent and safe.
 
 #### Stream quality
 

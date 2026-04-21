@@ -30,6 +30,7 @@ class StreamSessionProvider extends ChangeNotifier {
   bool _isLoadingVideo = false;
   bool _isLoadingImage = false;
   int? _textureId;
+  bool _backgroundStreamingEnabled = false;
 
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
     _initializeActiveDeviceMonitoring();
@@ -49,6 +50,7 @@ class StreamSessionProvider extends ChangeNotifier {
   int? get textureId => _textureId;
   VideoStreamSize? get videoStreamSize => _videoStreamSize;
   bool get supportsHvc1 => Platform.isIOS;
+  bool get backgroundStreamingEnabled => _backgroundStreamingEnabled;
 
   void _initializeActiveDeviceMonitoring() {
     _activeDeviceSubscription = MetaWearablesDat.activeDeviceStream().listen(
@@ -221,6 +223,28 @@ class StreamSessionProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('[MetaWearablesDAT] Error stopping stream session: $e');
+    }
+  }
+
+  Future<void> setBackgroundStreamingEnabled(bool enabled) async {
+    if (_backgroundStreamingEnabled == enabled) return;
+    try {
+      if (enabled) {
+        await MetaWearablesDat.enableBackgroundStreaming(
+          androidNotification: const BackgroundNotification(
+            title: 'Streaming from your glasses',
+            text: 'Keeps the camera stream alive in the background.',
+            channelId: 'mwdat_example.streaming',
+            channelName: 'Stream Session',
+          ),
+        );
+      } else {
+        await MetaWearablesDat.disableBackgroundStreaming();
+      }
+      _backgroundStreamingEnabled = enabled;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[MetaWearablesDAT] Background streaming toggle failed: $e');
     }
   }
 

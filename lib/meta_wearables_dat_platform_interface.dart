@@ -189,4 +189,22 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
       'restartActiveDeviceMonitoring() has not been implemented.',
     );
   }
+
+  Future<void> enableBackgroundStreaming({
+    BackgroundNotification? androidNotification,
+  }) {
+    throw UnimplementedError(
+      'enableBackgroundStreaming() has not been implemented.',
+    );
+  }
+
+  Future<void> disableBackgroundStreaming() {
+    throw UnimplementedError(
+      'disableBackgroundStreaming() has not been implemented.',
+    );
+  }
+
+  Stream<VideoFrame> videoFramesStream() {
+    throw UnimplementedError('videoFramesStream() has not been implemented.');
+  }
 }

@@ -42,6 +42,13 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     'flutter_meta_wearables_dat/video_stream_size',
   );
 
+  /// The event channel used to receive per-frame video samples when
+  /// background streaming is enabled.
+  @visibleForTesting
+  final videoFramesEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/video_frames',
+  );
+
   @override
   Future<bool> configureMockDevices({
     bool initiallyRegistered = true,
@@ -373,5 +380,43 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
       'restartActiveDeviceMonitoring',
     );
     return ok ?? false;
+  }
+
+  @override
+  Future<void> enableBackgroundStreaming({
+    BackgroundNotification? androidNotification,
+  }) async {
+    final args = <String, dynamic>{};
+    if (androidNotification != null) {
+      args['androidNotification'] = androidNotification.toMap();
+    }
+    await methodChannel.invokeMethod<void>('enableBackgroundStreaming', args);
+  }
+
+  @override
+  Future<void> disableBackgroundStreaming() async {
+    await methodChannel.invokeMethod<void>('disableBackgroundStreaming');
+  }
+
+  @override
+  Stream<VideoFrame> videoFramesStream() {
+    return videoFramesEventChannel.receiveBroadcastStream().map(
+      (dynamic event) {
+        final map = Map<String, dynamic>.from(event as Map);
+        final codecStr = map['codec'] as String? ?? 'raw';
+        final codec = codecStr == 'hvc1' ? VideoCodec.hvc1 : VideoCodec.raw;
+        final bytes = map['bytes'] as Uint8List;
+        final bytesPerRow = (map['bytesPerRow'] as num?)?.toInt();
+        return VideoFrame(
+          codec: codec,
+          bytes: bytes,
+          width: (map['width'] as num).toInt(),
+          height: (map['height'] as num).toInt(),
+          presentationTimestampUs: (map['ptsUs'] as num).toInt(),
+          isKeyframe: (map['isKeyframe'] as bool?) ?? true,
+          bytesPerRow: bytesPerRow,
+        );
+      },
+    );
   }
 }

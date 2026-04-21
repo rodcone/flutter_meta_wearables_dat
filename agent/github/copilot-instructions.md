@@ -21,9 +21,13 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 - `activeDeviceStream()` — bool, device availability
 - `streamSessionStateStream()` — stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
 - `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, hingesClosed, permissionDenied, deviceNotConnected, etc.
+- `videoStreamSizeStream()` — VideoStreamSize (width/height/aspectRatio) emitted on stream start and resolution changes
 - `stopStreamSession(deviceUUID)` — end session
 - `capturePhoto(deviceUUID, format:)` — PhotoCaptureFormat.jpeg or .heic
-- `captureStreamFrame(textureId, width:, height:, format:)` — Dart-side rasterization for ML/OCR
+- `captureStreamFrame(textureId, width:, height:, format:)` — Dart-side rasterization for ML/OCR. Returns `null` while backgrounded.
+- `enableBackgroundStreaming(androidNotification: BackgroundNotification(...))` — opt-in; call BEFORE `startStreamSession()` to keep the session alive while backgrounded or screen-locked. iOS + Android. `BackgroundNotification` is required on Android.
+- `disableBackgroundStreaming()` — tears down the iOS `AVAudioSession` / stops the Android foreground service. Idempotent.
+- `videoFramesStream()` — per-frame `VideoFrame` (codec, bytes, width, height, presentationTimestampUs, isKeyframe) in both foreground and background. Zero-cost when no listener is attached. Subscribe before `startStreamSession()` to capture the opening keyframe.
 
 ### Mock device (testing without glasses)
 
@@ -33,15 +37,17 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 
 ## Platform differences
 
-- `VideoCodec.hvc1` — iOS only (background streaming). Falls back to raw on Android.
+- `VideoCodec.hvc1` — iOS only. Falls back to raw on Android.
+- Background streaming works on both platforms via `enableBackgroundStreaming()`. iOS needs `audio` + `bluetooth-central` added to `UIBackgroundModes`; Android needs a `BackgroundNotification` (plugin manifest auto-merges the required FOREGROUND_SERVICE / WAKE_LOCK permissions).
+- `videoFramesStream()` payload: iOS `raw` → BGRA, iOS `hvc1` → HEVC NAL units, Android `raw` → I420 planar YUV.
 - `FlutterFragmentActivity` required on Android (not FlutterActivity).
 - `requestAndroidPermissions()` must be called first on Android.
 - Photo format selection works on iOS only; Android device determines format.
 
 ## Setup
 
-- iOS: Info.plist needs Bluetooth, external accessory, background modes, URL scheme, MWDAT dict
-- Android: AndroidManifest permissions, GitHub Packages repo in settings.gradle.kts, GITHUB_TOKEN
+- iOS: Info.plist needs Bluetooth, external accessory, background modes, URL scheme, MWDAT dict. For background streaming also add `audio` and `bluetooth-central` to `UIBackgroundModes`.
+- Android: AndroidManifest permissions, GitHub Packages repo in settings.gradle.kts, GITHUB_TOKEN. No manifest changes needed for background streaming (permissions auto-merge from plugin).
 - Deep links: `app_links` package, forward all URIs to `handleUrl()`
 
 ## Streams
