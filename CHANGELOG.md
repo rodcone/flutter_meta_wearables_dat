@@ -1,3 +1,9 @@
+## 0.3.0
+* **BREAKING**: Update to DAT SDK 0.6.0 on iOS and Android.
+* New `setMockCameraFacing()` to switch the mock device's camera between front and back; adds `CameraFacing`.
+* New `configureMockDevices()`, `disableMockDevices()`, `setMockPermission()` and `setMockPermissionRequestResult()` for finer-grained mock device control.
+* New `videoStreamSizeStream()` exposing the native video frame dimensions so Dart can drive an `AspectRatio` around the `Texture` widget instead of forcing a fixed size.
+
 ## 0.2.2
 * **iOS**: `VideoCodec.hvc1` — invalidate `VTDecompressionSession` in background and recreate on foreground; stream session stays alive.
 
