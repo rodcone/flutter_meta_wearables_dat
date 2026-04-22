@@ -338,8 +338,20 @@ SWIFT_CLASS_NAMED("ObjC_Device")
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
+@class NSError;
+SWIFT_CLASS_NAMED("ObjC_DeviceSession")
+@interface MWDATDeviceSession : NSObject
+@property (nonatomic, readonly, copy) NSString * _Nonnull deviceIdentifier;
+- (void)start:(NSError * _Nullable * _Nullable)error;
+- (void)startAndWaitUntilReadyWithCompletionHandler:(void (^ _Nonnull)(NSError * _Nullable))completionHandler;
+- (void)stop;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
 typedef SWIFT_ENUM_NAMED(NSInteger, MWDATPermission, "ObjC_Permission", closed) {
   MWDATPermissionCamera = 0,
+  MWDATPermissionMicrophone = 1,
 };
 
 typedef SWIFT_ENUM_NAMED(NSInteger, MWDATPermissionStatus, "ObjC_PermissionStatus", closed) {
@@ -347,7 +359,6 @@ typedef SWIFT_ENUM_NAMED(NSInteger, MWDATPermissionStatus, "ObjC_PermissionStatu
   MWDATPermissionStatusDenied = 1,
 };
 
-@class NSError;
 enum MWDATRegistrationState : NSInteger;
 @class NSURL;
 enum MWDATSessionState : NSInteger;
@@ -359,14 +370,15 @@ SWIFT_CLASS_NAMED("ObjC_Wearables")
 + (void)resetForTesting;
 SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly, strong) MWDATWearables * _Nonnull sharedInstance;)
 + (MWDATWearables * _Nonnull)sharedInstance SWIFT_WARN_UNUSED_RESULT;
-@property (nonatomic) enum MWDATRegistrationState registrationState;
+@property (nonatomic, readonly) enum MWDATRegistrationState registrationState;
 - (void)startRegistrationWithCompletionHandler:(void (^ _Nonnull)(NSError * _Nullable))completionHandler;
 - (void)handleUrl:(NSURL * _Nonnull)url completionHandler:(void (^ _Nonnull)(BOOL, NSError * _Nullable))completionHandler;
 - (void)startUnregistrationWithCompletionHandler:(void (^ _Nonnull)(NSError * _Nullable))completionHandler;
-@property (nonatomic, copy) NSArray<NSString *> * _Nonnull devices;
+@property (nonatomic, readonly, copy) NSArray<NSString *> * _Nonnull devices;
 - (MWDATDevice * _Nullable)deviceForIdentifier:(NSString * _Nonnull)identifier SWIFT_WARN_UNUSED_RESULT;
 - (void)checkPermissionStatus:(enum MWDATPermission)permission completionHandler:(void (^ _Nonnull)(enum MWDATPermissionStatus, NSError * _Nullable))completionHandler;
 - (void)requestPermission:(enum MWDATPermission)permission completionHandler:(void (^ _Nonnull)(enum MWDATPermissionStatus, NSError * _Nullable))completionHandler;
+- (MWDATDeviceSession * _Nullable)createSessionForDeviceIdentifier:(NSString * _Nonnull)deviceIdentifier error:(NSError * _Nullable * _Nullable)error SWIFT_WARN_UNUSED_RESULT;
 - (void)addDeviceSessionStateListenerForDeviceId:(NSString * _Nonnull)deviceId listener:(void (^ _Nonnull)(enum MWDATSessionState))listener completionHandler:(void (^ _Nonnull)(ObjC_AnyListenerToken * _Nonnull))completionHandler;
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");

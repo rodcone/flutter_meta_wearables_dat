@@ -2,23 +2,31 @@ import Flutter
 import MWDATCore
 
 /// Stream handler for active device availability updates from the DAT SDK.
+///
+/// Uses a provider closure to reach the plugin's long-lived `AutoDeviceSelector`
+/// instead of spinning up a fresh one per `onListen`. A fresh selector needs a
+/// moment to discover the active device, which produced spurious "waiting for
+/// an active device" states when Dart subscribed late in the app lifecycle.
 class ActiveDeviceStreamHandler: NSObject, FlutterStreamHandler {
+  private let deviceSelectorProvider: @MainActor () -> AutoDeviceSelector
   private var activeDeviceTask: Task<Void, Never>?
-  private var deviceSelector: AutoDeviceSelector?
+
+  init(deviceSelectorProvider: @escaping @MainActor () -> AutoDeviceSelector) {
+    self.deviceSelectorProvider = deviceSelectorProvider
+    super.init()
+  }
 
   public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-    Task { @MainActor in
-      let selector = AutoDeviceSelector(wearables: Wearables.shared)
-      self.deviceSelector = selector
+    activeDeviceTask?.cancel()
+    activeDeviceTask = Task { @MainActor in
+      let selector = self.deviceSelectorProvider()
 
-      // Send initial state
+      // Seed the subscriber with the selector's current state so a device that
+      // was already active before Dart subscribed is reported immediately.
       events(selector.activeDevice != nil)
 
-      // Listen to device availability changes
-      self.activeDeviceTask = Task { @MainActor in
-        for await deviceId in selector.activeDeviceStream() {
-          events(deviceId != nil)
-        }
+      for await deviceId in selector.activeDeviceStream() {
+        events(deviceId != nil)
       }
     }
 
@@ -26,11 +34,8 @@ class ActiveDeviceStreamHandler: NSObject, FlutterStreamHandler {
   }
 
   public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    Task { @MainActor in
-      self.activeDeviceTask?.cancel()
-      self.activeDeviceTask = nil
-      self.deviceSelector = nil
-    }
+    activeDeviceTask?.cancel()
+    activeDeviceTask = nil
     return nil
   }
 }

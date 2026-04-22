@@ -35,16 +35,56 @@ Texture(textureId: textureId)
 
 | Codec | Platform | Description |
 |-------|----------|-------------|
-| `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. Foreground only. Default. |
-| `VideoCodec.hvc1` | iOS only | Compressed HEVC. Stream session survives app backgrounding — HEVC decoder auto-paused on background, auto-resumed on foreground. Ignored on Android. |
+| `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. iOS: BGRA. Android: I420 planar YUV. Default. |
+| `VideoCodec.hvc1` | iOS only | Compressed HEVC. Smaller over-the-wire payload than `raw`. Without `enableBackgroundStreaming()`, also survives a brief background transition — HEVC decoder auto-paused on background, auto-recreated on foreground. Ignored on Android. |
 
-## Background behavior (iOS, `hvc1` only)
+## Background streaming (optional — both platforms, both codecs)
 
-With `VideoCodec.hvc1` on iOS, the plugin auto-manages the HEVC decoder lifecycle across app backgrounding. The underlying `StreamSession` stays alive, and rendering resumes instantly on foreground return (last frame stays visible, no flicker).
+Call **before** `startStreamSession()` to keep the session alive when the host app is backgrounded, the phone is locked, or both.
 
-**Do NOT** stop/restart the stream session on app lifecycle changes — it's unnecessary and adds reconnection latency. To react to lifecycle changes in UI (e.g., overlay), use Flutter's standard `WidgetsBindingObserver.didChangeAppLifecycleState`.
+```dart
+await MetaWearablesDat.enableBackgroundStreaming(
+  androidNotification: const BackgroundNotification(
+    title: 'Streaming from your glasses',
+    text: 'Keeps the camera stream alive in the background.',
+    channelId: 'myapp.streaming',
+    channelName: 'Camera Stream',
+    // iconResourceName: 'ic_stat_recording', // optional, falls back to app icon
+  ),
+);
 
-Not supported: Android (no `hvc1`), `VideoCodec.raw` (SDK stops delivering frames in background). `captureStreamFrame` returns `null` while backgrounded — pause frame-capture loops on `AppLifecycleState.paused`.
+final textureId = await MetaWearablesDat.startStreamSession(null);
+
+// ...when done:
+await MetaWearablesDat.stopStreamSession(null);
+await MetaWearablesDat.disableBackgroundStreaming();
+```
+
+**iOS `Info.plist`**: add `audio` and `bluetooth-central` to `UIBackgroundModes` on top of the default entries. No other code changes.
+
+**Android manifest**: nothing to change — the plugin manifest auto-merges `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK` and the internal foreground service. `BackgroundNotification` is required on Android (OS mandate).
+
+**How it works.** iOS activates an `AVAudioSession` and forces software HEVC decoding so the decoder survives background→foreground without stutter. Android starts a foreground service of type `connectedDevice` with a customizable notification and a `PARTIAL_WAKE_LOCK`.
+
+**Frames in background.** The `Texture` widget can't render in background (no GPU access), but every frame is still emitted on `videoFramesStream()`:
+
+```dart
+final framesSub = MetaWearablesDat.videoFramesStream().listen((frame) {
+  // frame.codec, frame.bytes, frame.width, frame.height,
+  // frame.presentationTimestampUs, frame.isKeyframe
+});
+```
+
+Payload layout:
+
+| Codec | iOS bytes | Android bytes |
+|-------|-----------|---------------|
+| `raw` | BGRA, `width * height * 4` | I420 planar YUV, `width * height * 3/2` |
+| `hvc1` | HEVC NAL units (self-contained: keyframes carry VPS/SPS/PPS) | n/a |
+
+`videoFramesStream()` is zero-cost when no subscriber is attached. Subscribe **before** `startStreamSession()` to capture the opening keyframe. `captureStreamFrame` still returns `null` while backgrounded — use `videoFramesStream()` for pixel data in background.
+
+**Without `enableBackgroundStreaming()`**, the SDK stops delivering frames when the host OS suspends the app. Exception: `VideoCodec.hvc1` on iOS survives brief transitions via the auto-managed decoder lifecycle (for long-lived background, still call `enableBackgroundStreaming()`).
 
 ## Stream quality (resolution)
 

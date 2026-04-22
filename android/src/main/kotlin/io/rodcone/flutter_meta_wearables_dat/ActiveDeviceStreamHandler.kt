@@ -1,5 +1,6 @@
 package io.rodcone.flutter_meta_wearables_dat
 
+import android.util.Log
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import io.flutter.plugin.common.EventChannel
@@ -8,7 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -17,57 +17,90 @@ import kotlinx.coroutines.launch
  * Emits `true` when an active device is available, `false` otherwise.
  */
 internal class ActiveDeviceStreamHandler(
-        private val deviceSelector: DeviceSelector,
+        private val deviceSelectorProvider: () -> DeviceSelector,
         private val isInitialized: () -> Boolean,
         private val ensureInitialized: () -> Unit,
 ) : EventChannel.StreamHandler {
 
+    private companion object {
+        private const val TAG = "MetaWearablesDat"
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
+    private var rawDevicesJob: Job? = null
     private var eventSink: EventChannel.EventSink? = null
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         if (events == null) return
         eventSink = events
+        val initialized = isInitialized()
+        Log.d(TAG, "ActiveDeviceStream onListen — initialized=$initialized")
         // Only start collecting if SDK is already initialized.
         // If not yet initialized, restartMonitoring() will be called later
         // after BT permissions are granted.
-        if (isInitialized()) {
+        if (initialized) {
             startCollecting(events)
         }
     }
 
     override fun onCancel(arguments: Any?) {
+        Log.d(TAG, "ActiveDeviceStream onCancel")
         job?.cancel()
         job = null
         eventSink = null
     }
 
     /**
-     * Restart device monitoring by cancelling the current collection and re-subscribing to the
-     * active device flow. Called after BT permissions are granted or after registration
-     * completes so the flow picks up newly available devices.
+     * Start device monitoring if not already collecting. Idempotent: safe to call from multiple
+     * paths (BT permission grant, registration completion, Dart-triggered restart) without
+     * double-subscribing. Matches the official CameraAccess sample's one-shot `startMonitoring()`
+     * pattern.
      */
     fun restartMonitoring() {
-        val sink = eventSink ?: return
-        job?.cancel()
-        job = null
-        // Brief delay to let the SDK finish discovering devices after
-        // initialization or registration before we re-subscribe.
-        scope.launch {
-            delay(500)
-            startCollecting(sink)
+        val sink = eventSink
+        if (sink == null) {
+            Log.d(TAG, "ActiveDeviceStream restartMonitoring — no sink yet, skipping")
+            return
         }
+        if (job?.isActive == true) {
+            Log.d(TAG, "ActiveDeviceStream restartMonitoring — already collecting, skipping")
+            return
+        }
+        Log.d(TAG, "ActiveDeviceStream restartMonitoring — starting collection")
+        startCollecting(sink)
     }
 
     private fun startCollecting(events: EventChannel.EventSink) {
         ensureInitialized()
 
         job?.cancel()
+        rawDevicesJob?.cancel()
+        val selector = deviceSelectorProvider()
+        // Seed the subscriber with the current active-device state. `activeDeviceFlow()`
+        // does not guarantee replaying the latest value to new collectors, so a device
+        // that was already active before Dart subscribed would otherwise leave the UI
+        // stuck on "waiting for an active device".
+        val initial = selector.activeDevice()
+        val rawDevices = Wearables.devices.value
+        Log.d(
+                TAG,
+                "ActiveDeviceStream startCollecting — seed activeDevice=$initial (hasActive=${initial != null}), Wearables.devices=$rawDevices",
+        )
+        events.success(initial != null)
         job =
                 scope.launch {
-                    deviceSelector.activeDevice(Wearables.devices).collect { device ->
+                    selector.activeDeviceFlow().collect { device ->
+                        Log.d(TAG, "ActiveDeviceStream flow emit — device=$device (hasActive=${device != null})")
                         events.success(device != null)
+                    }
+                }
+        // Observe the raw DAT SDK device set separately so we can tell whether
+        // the SDK sees the glasses at all (vs. the selector filtering them out).
+        rawDevicesJob =
+                scope.launch {
+                    Wearables.devices.collect { ids ->
+                        Log.d(TAG, "Wearables.devices emit — ids=$ids")
                     }
                 }
     }
@@ -75,6 +108,8 @@ internal class ActiveDeviceStreamHandler(
     fun dispose() {
         job?.cancel()
         job = null
+        rawDevicesJob?.cancel()
+        rawDevicesJob = null
         eventSink = null
         scope.cancel()
     }

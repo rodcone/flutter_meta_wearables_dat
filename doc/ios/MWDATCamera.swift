@@ -4,6 +4,536 @@ import Foundation
 import MWDATCore
 import UIKit
 
+/// A device selector that automatically selects the best available device.
+/// Selects the first connected device from the devices list.
+@objc(MWDATAutoDeviceSelector) final public class ObjC_AutoDeviceSelector : NSObject, Sendable {
+
+    /// Creates an auto device selector that monitors the shared Wearables instance for device changes.
+    override dynamic public init()
+
+    @objc deinit
+}
+
+/// A token that can be used to cancel a listener subscription.
+/// Retain this token to keep the listener active; releasing it will cancel the subscription.
+@objc(MWDATCameraListenerToken) final public class ObjC_CameraListenerToken : NSObject, Sendable {
+
+    /// Cancels the listener subscription.
+    @objc final public func cancel()
+
+    @objc deinit
+}
+
+/// Supported formats for capturing photos from Meta Wearables devices.
+@objc(MWDATPhotoCaptureFormat) @frozen public enum ObjC_PhotoCaptureFormat : Int, Sendable {
+
+    /// High Efficiency Image Container format (HEIC) - provides better compression than JPEG.
+    case heic
+
+    /// Joint Photographic Experts Group format (JPEG) - widely supported image format.
+    case jpeg
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension ObjC_PhotoCaptureFormat : Equatable {
+}
+
+extension ObjC_PhotoCaptureFormat : Hashable {
+}
+
+extension ObjC_PhotoCaptureFormat : RawRepresentable {
+}
+
+extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
+}
+
+/// A photo captured from a Meta Wearables device.
+@objc(MWDATPhotoData) final public class ObjC_PhotoData : NSObject, Sendable {
+
+    /// The photo data in the specified format.
+    @objc final public var data: Data { get }
+
+    /// The format of the captured photo data.
+    @objc final public var format: MWDATCamera.ObjC_PhotoCaptureFormat { get }
+
+    /// Creates a UIImage from the photo data.
+    /// - Returns: A UIImage, or nil if the data cannot be converted.
+    @objc final public var image: UIImage? { get }
+
+    @objc deinit
+}
+
+/// A device selector that always selects a specific, predetermined device.
+/// Use this when you want to target operations to a particular device by its identifier.
+@objc(MWDATSpecificDeviceSelector) final public class ObjC_SpecificDeviceSelector : NSObject, Sendable {
+
+    /// Creates a device selector that targets a specific device.
+    /// - Parameter deviceIdentifier: The identifier of the device to always select.
+    @objc public init(deviceIdentifier: MWDATCore.DeviceIdentifier)
+
+    @objc deinit
+}
+
+/// A class for managing media streaming sessions with Meta Wearables devices.
+/// Handles video streaming, photo capture, and provides real-time state updates.
+///
+/// In addition to listener-based callbacks, this class also posts the following notifications:
+/// - `NSNotification.streamSessionStateChanged` - When session state changes
+/// - `NSNotification.streamSessionFrameReceived` - When a video frame is received
+/// - `NSNotification.streamSessionPhotoCaptured` - When a photo is captured
+/// - `NSNotification.streamSessionErrorOccurred` - When an error occurs
+@objc(MWDATStreamSession) final public class ObjC_StreamSession : NSObject, Sendable {
+
+    /// The configuration used for this streaming session.
+    @objc final public let config: MWDATCamera.ObjC_StreamSessionConfig
+
+    /// The current state of the streaming session.
+    @objc final public var state: MWDATCamera.ObjC_StreamSessionState { get }
+
+    @objc deinit
+
+    /// Starts video streaming from the device.
+    ///
+    /// Begins streaming video frames from the currently available device. If no device is currently
+    /// available, the session enters `.waitingForDevice` state and automatically connects when a
+    /// device becomes available.
+    ///
+    /// State transitions: `.stopped` -> `.waitingForDevice` (no device) or `.stopped` -> `.starting`
+    /// -> `.streaming` (with device).
+    @objc final public func start()
+
+    /// Stops video streaming and releases all resources.
+    ///
+    /// Shuts down the streaming pipeline and transitions to `.stopped` state.
+    ///
+    /// State transitions: Any state -> `.stopping` -> `.stopped`
+    @objc final public func stop()
+
+    /// Captures a still photo during streaming.
+    ///
+    /// Triggers a photo capture while video streaming is active. The captured photo is delivered
+    /// through the photo data listener. Video streaming is temporarily paused during capture and
+    /// automatically resumes after photo delivery.
+    ///
+    /// - Parameter format: The desired image format.
+    /// - Returns: `true` if the capture request was accepted, `false` if no device session is
+    ///   active or a capture is already in progress.
+    @discardableResult
+    @objc final public func capturePhoto(format: MWDATCamera.ObjC_PhotoCaptureFormat) -> Bool
+
+    /// Adds a listener for state changes.
+    ///
+    /// The listener will be called on the main thread whenever the session state changes.
+    /// - Parameter listener: A block called with the new state value.
+    /// - Returns: A token that must be retained to keep the listener active.
+    @objc final public func addStateListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamSessionState) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
+
+    /// Adds a listener for video frames.
+    ///
+    /// The listener will be called on the main thread for each video frame received.
+    /// - Parameter listener: A block called with each video frame.
+    /// - Returns: A token that must be retained to keep the listener active.
+    @objc final public func addVideoFrameListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_VideoFrame) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
+
+    /// Adds a listener for captured photos.
+    ///
+    /// The listener will be called on the main thread when a photo is captured.
+    /// - Parameter listener: A block called with the captured photo data.
+    /// - Returns: A token that must be retained to keep the listener active.
+    @objc final public func addPhotoDataListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_PhotoData) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
+
+    /// Adds a listener for errors.
+    ///
+    /// The listener will be called on the main thread when an error occurs.
+    /// - Parameter listener: A block called with the error code.
+    /// - Returns: A token that must be retained to keep the listener active.
+    @objc final public func addErrorListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamSessionError) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
+}
+
+/// Configuration for a media streaming session with a Meta Wearables device.
+@objc(MWDATStreamSessionConfig) final public class ObjC_StreamSessionConfig : NSObject, Sendable {
+
+    /// The video codec to use for streaming.
+    @objc final public var videoCodec: MWDATCamera.ObjC_VideoCodec { get }
+
+    /// The resolution at which to stream video content.
+    @objc final public var resolution: MWDATCamera.ObjC_StreamingResolution { get }
+
+    /// The target frame rate for the streaming session.
+    @objc final public var frameRate: Int { get }
+
+    /// Creates a new stream session configuration with default settings.
+    override dynamic public convenience init()
+
+    /// Creates a new stream session configuration with specified parameters.
+    /// - Parameters:
+    ///   - videoCodec: The video codec to use for streaming.
+    ///   - resolution: The resolution for video streaming.
+    ///   - frameRate: The target frame rate for streaming.
+    @objc public init(videoCodec: MWDATCamera.ObjC_VideoCodec, resolution: MWDATCamera.ObjC_StreamingResolution, frameRate: Int)
+
+    @objc deinit
+}
+
+/// Errors that can occur during streaming sessions.
+@objc(MWDATStreamSessionError) @frozen public enum ObjC_StreamSessionError : Int, Sendable {
+
+    /// An internal error occurred.
+    case internalError
+
+    /// The specified device could not be found.
+    case deviceNotFound
+
+    /// The specified device is not connected.
+    case deviceNotConnected
+
+    /// The operation timed out.
+    case timeout
+
+    /// Video streaming encountered an error.
+    case videoStreamingError
+
+    /// Camera permission was denied.
+    case permissionDenied
+
+    /// The device hinges were closed during streaming.
+    case hingesClosed
+
+    /// The device thermal state has reached a critical level that may affect streaming performance.
+    case thermalCritical
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension ObjC_StreamSessionError : Equatable {
+}
+
+extension ObjC_StreamSessionError : Hashable {
+}
+
+extension ObjC_StreamSessionError : RawRepresentable {
+}
+
+extension ObjC_StreamSessionError : BitwiseCopyable {
+}
+
+/// Represents the current state of a media streaming session.
+@objc(MWDATStreamSessionState) @frozen public enum ObjC_StreamSessionState : Int, Sendable {
+
+    /// The session is completely stopped and not attempting to connect.
+    case stopped
+
+    /// The session is waiting for a compatible device to become available.
+    case waitingForDevice
+
+    /// The session is in the process of starting up.
+    case starting
+
+    /// The session is actively streaming media data.
+    case streaming
+
+    /// The session is temporarily paused but maintains its connection.
+    case paused
+
+    /// The session is in the process of stopping.
+    case stopping
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension ObjC_StreamSessionState : Equatable {
+}
+
+extension ObjC_StreamSessionState : Hashable {
+}
+
+extension ObjC_StreamSessionState : RawRepresentable {
+}
+
+extension ObjC_StreamSessionState : BitwiseCopyable {
+}
+
+/// Valid streaming resolutions for live video from Meta Wearables devices.
+@objc(MWDATStreamingResolution) @frozen public enum ObjC_StreamingResolution : Int, Sendable {
+
+    /// High resolution streaming at 720x1280 pixels.
+    case high
+
+    /// Medium resolution streaming at 504x896 pixels.
+    case medium
+
+    /// Low resolution streaming at 360x640 pixels.
+    case low
+
+    /// The video frame width for this resolution.
+    public var width: Int { get }
+
+    /// The video frame height for this resolution.
+    public var height: Int { get }
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension ObjC_StreamingResolution : Equatable {
+}
+
+extension ObjC_StreamingResolution : Hashable {
+}
+
+extension ObjC_StreamingResolution : RawRepresentable {
+}
+
+extension ObjC_StreamingResolution : BitwiseCopyable {
+}
+
+/// Specifies the video codec to use for streaming.
+@objc(MWDATVideoCodec) @frozen public enum ObjC_VideoCodec : Int, Sendable {
+
+    /// Raw decompressed video frames (420v YUV pixel buffers).
+    /// Video frames are only delivered while the app is in the foreground.
+    case raw
+
+    /// Compressed HEVC video frames (hvc1).
+    /// Frames are delivered in both foreground and background.
+    case hvc1
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension ObjC_VideoCodec : Equatable {
+}
+
+extension ObjC_VideoCodec : Hashable {
+}
+
+extension ObjC_VideoCodec : RawRepresentable {
+}
+
+extension ObjC_VideoCodec : BitwiseCopyable {
+}
+
+/// Represents a single frame of video data from a Meta Wearables device.
+@objc(MWDATVideoFrame) final public class ObjC_VideoFrame : NSObject, Sendable {
+
+    /// Provides access to the underlying video sample buffer.
+    ///
+    /// **Important**: Callers must treat this buffer as read-only. The buffer
+    /// is only valid for the duration of the listener callback.
+    @objc final public var sampleBuffer: CMSampleBuffer { get }
+
+    /// Converts the video frame to a UIImage for display or processing.
+    /// - Returns: A UIImage representation of the video frame, or nil if conversion fails.
+    @objc final public var image: UIImage? { get }
+
+    @objc deinit
+}
+
 /// Supported formats for capturing photos from Meta Wearables devices.
 public enum PhotoCaptureFormat : Sendable {
 
@@ -93,21 +623,6 @@ final public class StreamSession : Sendable {
 
     @objc deinit
 
-    /// Creates a streaming session using the specified device selector.
-    ///
-    /// The session is created in `.stopped` state. Call ``start()`` to begin streaming.
-    /// Uses the default ``StreamSessionConfig`` configuration.
-    /// - Parameter deviceSelector: The device selector that determines which device to stream from. The selector's `activeDevice` can be nil initially.
-    public convenience init(deviceSelector: any MWDATCore.DeviceSelector)
-
-    /// Creates a streaming session with custom configuration.
-    ///
-    /// The session is created in `.stopped` state. Call ``start()`` to begin streaming.
-    /// - Parameters:
-    ///   - streamSessionConfig: Configuration specifying resolution, frame rate, and codec settings.
-    ///   - deviceSelector: The device selector that determines which device to stream from.
-    public convenience init(streamSessionConfig: MWDATCamera.StreamSessionConfig, deviceSelector: any MWDATCore.DeviceSelector)
-
     /// Starts video streaming from the device.
     ///
     /// Begins streaming video frames from the currently available device. If no device is currently
@@ -150,6 +665,12 @@ final public class StreamSession : Sendable {
     final public func capturePhoto(format: MWDATCamera.PhotoCaptureFormat) -> Bool
 }
 
+extension StreamSession : MWDATCore.Capability {
+
+    /// The current state of this capability.
+    final public var capabilityState: MWDATCore.CapabilityState { get }
+}
+
 /// Configuration for a media streaming session with a Meta Wearables device.
 /// Defines video codec, resolution, frame delivery strategy, and target frame rate.
 public struct StreamSessionConfig : Sendable {
@@ -163,12 +684,18 @@ public struct StreamSessionConfig : Sendable {
     /// The target frame rate for the streaming session.
     public let frameRate: UInt
 
+    /// Whether to skip launching the native app on the device when starting the stream.
+    /// When `true`, the device will not launch the Livestream app via SNAM protocol,
+    /// allowing DAT to manage app lifecycle via DATSessionMessageHandler instead.
+    public let skipAppLaunch: Bool
+
     /// Creates a new stream session configuration with specified parameters.
     /// - Parameters:
     ///   - videoCodec: The video codec to use for streaming.
     ///   - resolution: The resolution for video streaming.
     ///   - frameRate: The target frame rate for streaming.
-    public init(videoCodec: MWDATCamera.VideoCodec, resolution: MWDATCamera.StreamingResolution, frameRate: UInt)
+    ///   - skipAppLaunch: Whether to skip launching the native app on the device. Defaults to `false`.
+    public init(videoCodec: MWDATCamera.VideoCodec, resolution: MWDATCamera.StreamingResolution, frameRate: UInt, skipAppLaunch: Bool = false)
 
     /// Creates a new stream session configuration with default settings.
     /// Uses raw video codec, medium resolution, deliver-all frame strategy, and 30 FPS.
@@ -438,5 +965,71 @@ public struct VideoFrameSize : Sendable {
     ///   - width: The width of the video frame in pixels.
     ///   - height: The height of the video frame in pixels.
     public init(width: UInt, height: UInt)
+}
+
+extension DeviceSession {
+
+    /// Creates and adds a ``StreamSession`` to this device session.
+    ///
+    /// The device session must be in ``DeviceSessionState/started`` state. The returned
+    /// stream session is automatically added as a capability and will be stopped when
+    /// this device session stops.
+    ///
+    /// - Parameter config: Configuration for the streaming session. Defaults to ``StreamSessionConfig()``.
+    /// - Returns: A configured ``StreamSession`` added to this device session, or `nil`
+    ///   if the session is not in the started state.
+    /// - Throws: ``DeviceSessionError/capabilityAlreadyActive`` if a StreamSession is already attached.
+    final public func addStream(config: MWDATCamera.StreamSessionConfig = StreamSessionConfig()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.StreamSession?
+}
+
+extension ObjC_DeviceSession {
+
+    /// Creates a stream capability with the default configuration.
+    ///
+    /// Returns `nil` without setting `error` when the device session is not started yet.
+    @objc(addStreamWithError:) final public func addStream(_ error: NSErrorPointer = nil) -> MWDATCamera.ObjC_StreamSession?
+
+    /// Creates a stream capability with the provided configuration.
+    ///
+    /// Returns `nil` without setting `error` when the device session is not started yet.
+    @objc(addStreamWithConfig:error:) final public func addStream(config: MWDATCamera.ObjC_StreamSessionConfig, error: NSErrorPointer = nil) -> MWDATCamera.ObjC_StreamSession?
+}
+
+/// Notification names for stream session events.
+///
+/// - Important: Notifications are delivered on a background thread. If your observer updates UI,
+///   dispatch to the main queue:
+///   ```objc
+///   - (void)onStateChanged:(NSNotification *)notification {
+///     dispatch_async(dispatch_get_main_queue(), ^{
+///       // UI updates here
+///     });
+///   }
+///   ```
+@objc extension NSNotification {
+
+    /// Posted when stream session state changes.
+    /// - Note: Delivered on a background thread. Dispatch to main queue for UI updates.
+    /// - object: The `MWDATStreamSession` instance that changed state.
+    /// - userInfo: `["state": MWDATStreamSessionState]`
+    @objc public static let streamSessionStateChanged: Notification.Name
+
+    /// Posted when a video frame is received.
+    /// - Note: Delivered on a background thread at up to 30-60 fps. Dispatch to main queue for UI updates.
+    /// - object: The `MWDATStreamSession` instance that received the frame.
+    /// - userInfo: `["frame": MWDATVideoFrame]`
+    @objc public static let streamSessionFrameReceived: Notification.Name
+
+    /// Posted when a photo is captured.
+    /// - Note: Delivered on a background thread. Dispatch to main queue for UI updates.
+    /// - object: The `MWDATStreamSession` instance that captured the photo.
+    /// - userInfo: `["photo": MWDATPhotoData]`
+    @objc public static let streamSessionPhotoCaptured: Notification.Name
+
+    /// Posted when an error occurs during streaming.
+    /// - Note: Delivered on a background thread. Dispatch to main queue for UI updates.
+    /// - object: The `MWDATStreamSession` instance where the error occurred.
+    /// - userInfo: `["error": MWDATStreamSessionError]`
+    @objc public static let streamSessionErrorOccurred: Notification.Name
 }
 

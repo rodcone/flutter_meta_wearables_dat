@@ -9,20 +9,9 @@ import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dar
     as stream_providers;
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/sheet_handle_bar.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 const String _packageVersion = '0.2.2';
-const String _datVersion = '0.5.0';
-const String _pubDevUrl =
-    'https://pub.dev/packages/flutter_meta_wearables_dat';
-
-Future<void> _openDocumentation() async {
-  await HapticFeedback.lightImpact();
-  final uri = Uri.parse(_pubDevUrl);
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-}
+const String _datVersion = '0.6.0';
 
 class SettingsSheet extends StatelessWidget {
   const SettingsSheet({super.key});
@@ -47,11 +36,11 @@ class SettingsSheet extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 18),
             const _StreamSettingsSection(),
             const SizedBox(height: 24),
             _DisconnectSection(),
-            const Spacer(),
+            const SizedBox(height: 24),
             _AboutSection(),
             SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
           ],
@@ -90,9 +79,70 @@ class _StreamSettingsSection extends StatelessWidget {
               onCodecChanged: sp.setVideoCodec,
               enabled: !locked,
             ),
+            const SizedBox(height: 16),
+            _BackgroundStreamingToggle(
+              value: sp.backgroundStreamingEnabled,
+              onChanged: sp.setBackgroundStreamingEnabled,
+            ),
           ],
         );
       },
+    );
+  }
+}
+
+class _BackgroundStreamingToggle extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _BackgroundStreamingToggle({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Icon(
+            Icons.smartphone,
+            size: 18,
+            color: theme.colorScheme.onSurface.withOpacity(0.65),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Keep streaming in background',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: theme.colorScheme.onSurface.withOpacity(0.85),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Stream stays alive when the app is backgrounded or the phone is locked.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface.withOpacity(0.55),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: (v) {
+              HapticFeedback.selectionClick();
+              onChanged(v);
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -489,31 +539,7 @@ class _AboutSection extends StatelessWidget {
           value: Platform.isIOS ? 'iOS' : 'Android',
         ),
         const SizedBox(height: 12),
-        InkWell(
-          onTap: () => unawaited(_openDocumentation()),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.open_in_new,
-                  size: 18,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Documentation on pub.dev',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.w500,
-                    // decoration: TextDecoration.underline,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        
       ],
     );
   }

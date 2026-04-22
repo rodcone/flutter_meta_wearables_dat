@@ -54,6 +54,9 @@ Communication:
 | `CameraPermissionException` | `code`, `message`, `details`, `isDeviceDisconnected`, `isPermissionDenied`, `isInternalError` |
 | `CapturedPhoto` | `bytes` (Uint8List), `format` (String), `fileExtension`, `mimeType` |
 | `CapturedFrame` | `bytes` (Uint8List), `width`, `height`, `format` (FrameFormat) |
+| `VideoStreamSize` | `width`, `height`, `aspectRatio` |
+| `VideoFrame` | `codec` (VideoCodec), `bytes` (Uint8List), `width`, `height`, `presentationTimestampUs`, `isKeyframe` |
+| `BackgroundNotification` | `title`, `text`, `channelId`, `channelName`, `iconResourceName?` (Android only) |
 
 ### Error codes (StreamSessionError)
 
@@ -97,6 +100,14 @@ static Future<int> startStreamSession(
 static Future<bool> stopStreamSession(String? deviceUUID)
 static Stream<StreamSessionState> streamSessionStateStream()
 static Stream<StreamSessionError> streamSessionErrorStream()
+static Stream<VideoStreamSize> videoStreamSizeStream()
+
+// Background streaming (opt-in; call before startStreamSession)
+static Future<void> enableBackgroundStreaming({
+  BackgroundNotification? androidNotification, // required on Android
+})
+static Future<void> disableBackgroundStreaming()
+static Stream<VideoFrame> videoFramesStream()   // foreground + background
 
 // Photo capture
 static Future<CapturedPhoto> capturePhoto(
@@ -345,11 +356,66 @@ final photo = await MetaWearablesDat.capturePhoto(null);
 await MetaWearablesDat.stopStreamSession(null);
 ```
 
-### Background streaming (iOS, `hvc1` only)
+### Background streaming (optional — both platforms, both codecs)
 
-With `VideoCodec.hvc1` on iOS, the stream session survives app backgrounding — the plugin auto-manages the HEVC decoder lifecycle. No developer action required; do NOT stop/restart the stream session on app lifecycle changes. The underlying `StreamSession` stays alive, rendering resumes instantly on foreground return, and the last frame is preserved so there's no flicker.
+Opt in **before** `startStreamSession()` to keep the session alive when the app is backgrounded, the phone is locked, or both.
 
-Not supported: Android (no `hvc1`), `VideoCodec.raw` (SDK stops frame delivery on background). `captureStreamFrame` returns `null` while backgrounded — pause any frame-capture loops on `AppLifecycleState.paused` using Flutter's `WidgetsBindingObserver`.
+```dart
+await MetaWearablesDat.enableBackgroundStreaming(
+  androidNotification: const BackgroundNotification(
+    title: 'Streaming from your glasses',
+    text: 'Keeps the camera stream alive in the background.',
+    channelId: 'myapp.streaming',
+    channelName: 'Camera Stream',
+    // iconResourceName: 'ic_stat_recording', // optional, falls back to app icon
+  ),
+);
+
+final textureId = await MetaWearablesDat.startStreamSession(null);
+
+// ...when done:
+await MetaWearablesDat.stopStreamSession(null);
+await MetaWearablesDat.disableBackgroundStreaming();
+```
+
+**Additional iOS `Info.plist` entries** (required only if you call `enableBackgroundStreaming`): add `audio` and `bluetooth-central` alongside the existing `bluetooth-peripheral` and `external-accessory`:
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+    <string>audio</string>
+    <string>bluetooth-central</string>
+    <string>bluetooth-peripheral</string>
+    <string>external-accessory</string>
+</array>
+```
+
+**Android manifest:** nothing to change — the plugin manifest auto-merges `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK` permissions and the internal foreground service. `BackgroundNotification` is required on Android (the OS requires a visible notification for the foreground service).
+
+**How it works.** iOS activates an `AVAudioSession` (`.playAndRecord` / `.videoRecording` + `.allowBluetoothHFP` + `.mixWithOthers`) to keep the process scheduled, and forces software HEVC decoding so the decoder survives background→foreground without stutter. Android starts a foreground service of type `connectedDevice` with the provided notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
+
+**Frames in background.** The `Texture` widget can't render in background (no GPU access). Subscribe to `videoFramesStream()` to receive every frame in both foreground and background — useful for recording, ML, re-muxing:
+
+```dart
+final framesSub = MetaWearablesDat.videoFramesStream().listen((frame) {
+  // frame.codec                   → VideoCodec.raw | VideoCodec.hvc1
+  // frame.bytes                   → Uint8List of the raw codec payload
+  // frame.width / frame.height    → pixel dimensions
+  // frame.presentationTimestampUs → monotonic, in microseconds
+  // frame.isKeyframe              → always true for raw; hvc1 keyframes carry VPS/SPS/PPS
+});
+```
+
+Codec payload layout:
+
+| Codec | iOS | Android |
+|-------|-----|---------|
+| `raw` | BGRA, `width * height * 4` bytes | I420 planar YUV, `width * height * 3/2` bytes |
+| `hvc1` | raw HEVC NAL units (self-contained: keyframes carry VPS/SPS/PPS) | n/a — Android SDK doesn't support `hvc1` |
+
+`videoFramesStream()` is zero-cost when no subscriber is attached. Subscribe **before** `startStreamSession()` to capture the opening keyframe.
+
+**Without `enableBackgroundStreaming()`**, only `VideoCodec.hvc1` on iOS survives a brief background transition (HEVC decoder auto-paused / auto-recreated; last rendered frame preserved). All other combinations stop frame delivery when the host OS suspends the app. `captureStreamFrame` always returns `null` while backgrounded — use `videoFramesStream()` instead if you need pixel data in background.
 
 ### Raw frame capture for ML/OCR
 
@@ -369,8 +435,10 @@ final frame = await MetaWearablesDat.captureStreamFrame(
 
 | Feature | iOS | Android |
 |---------|-----|---------|
-| Video codec `raw` | Yes | Yes |
-| Video codec `hvc1` | Yes — survives backgrounding (decoder auto-paused, session stays alive) | No (ignored, falls back to raw) |
+| Video codec `raw` | Yes (BGRA on the `videoFramesStream`) | Yes (I420 planar YUV on the `videoFramesStream`) |
+| Video codec `hvc1` | Yes — without `enableBackgroundStreaming()`, also survives a brief background transition (decoder auto-paused, session stays alive) | No (ignored, falls back to raw) |
+| `enableBackgroundStreaming()` | Activates `AVAudioSession` + forces software HEVC decoding. Requires `audio` + `bluetooth-central` in `UIBackgroundModes` | Starts a foreground service (type `connectedDevice`) + holds a `PARTIAL_WAKE_LOCK`. Requires `BackgroundNotification`. Manifest permissions auto-merge |
+| `videoFramesStream()` | Emits BGRA (`raw`) or HEVC NAL units (`hvc1`) | Emits I420 planar YUV (`raw` only) |
 | `requestAndroidPermissions()` | No-op | Required before any DAT call |
 | `restartActiveDeviceMonitoring()` | No-op | Required after registration |
 | Photo format selection | HEIC or JPEG | Device-determined (param ignored) |

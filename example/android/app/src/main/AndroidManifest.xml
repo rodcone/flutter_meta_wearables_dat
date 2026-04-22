@@ -3,6 +3,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- MockDeviceKit opens the phone's camera to simulate the wearable feed. -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <application
         android:label="flutter_meta_wearables_dat_example"
         android:name="${applicationName}"

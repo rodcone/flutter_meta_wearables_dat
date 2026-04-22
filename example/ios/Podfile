@@ -1,8 +1,9 @@
 # Define platform for your project (plugin requires iOS 17.0)
 platform :ios, '17.0'
 
-# Use Git specs repo instead of CDN (avoids HTTP/2 framing errors)
-source 'https://github.com/CocoaPods/Specs.git'
+# CocoaPods CDN (fast). If HTTP/2 CDN errors return, temporarily use:
+# source 'https://github.com/CocoaPods/Specs.git'
+source 'https://cdn.cocoapods.org/'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'

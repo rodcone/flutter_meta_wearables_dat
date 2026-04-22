@@ -35,12 +35,15 @@ enum RegistrationState {
 
 /// Video codec to use for streaming.
 enum VideoCodec {
-  /// Raw decompressed video frames (foreground only).
-  /// When the app enters background, frame delivery stops.
+  /// Raw decompressed video frames.
+  /// iOS delivers BGRA via `CMSampleBufferGetImageBuffer`; Android delivers
+  /// I420 converted to ARGB. The only codec supported on Android.
   raw('raw'),
 
-  /// Compressed HEVC video frames (hvc1).
-  /// Frames are delivered in both foreground and background.
+  /// Compressed HEVC video frames (hvc1). iOS only.
+  /// Decoded to BGRA via `VTDecompressionSession`. When background streaming
+  /// is enabled the decoder is configured software-only so it survives the
+  /// foreground/background transition without a keyframe wait.
   hvc1('hvc1');
 
   const VideoCodec(this.value);
@@ -125,6 +128,58 @@ class StreamSessionError {
 
   @override
   String toString() => 'StreamSessionError($code): $message';
+}
+
+/// Permissions that can be requested from the Meta Wearables SDK.
+///
+/// Currently only camera is exposed; the enum is designed to grow as
+/// additional permissions are surfaced by the SDK.
+enum Permission {
+  camera('camera');
+
+  const Permission(this.value);
+
+  /// String value sent over the platform channel.
+  final String value;
+}
+
+/// The current status of a [Permission].
+enum PermissionStatus {
+  granted('granted'),
+  denied('denied');
+
+  const PermissionStatus(this.value);
+
+  /// String value sent over the platform channel.
+  final String value;
+}
+
+/// Which phone camera to use when streaming into a mock device.
+enum CameraFacing {
+  front('front'),
+  back('back');
+
+  const CameraFacing(this.value);
+
+  /// String value sent over the platform channel.
+  final String value;
+}
+
+/// Dimensions of the active video stream, reported from the native layer
+/// when a new stream starts or the underlying frame size changes.
+///
+/// Use [aspectRatio] when sizing the `Texture` widget so landscape or
+/// portrait frames aren't stretched into a hardcoded container.
+class VideoStreamSize {
+  const VideoStreamSize({required this.width, required this.height});
+
+  final int width;
+  final int height;
+
+  double get aspectRatio => height == 0 ? 1 : width / height;
+
+  @override
+  String toString() => 'VideoStreamSize(${width}x$height)';
 }
 
 /// Supported photo capture formats.
@@ -234,8 +289,128 @@ class CapturedFrame {
   });
 }
 
+/// Notification shown by the Android foreground service that keeps the
+/// stream alive while the app is backgrounded. Required on Android; ignored
+/// on iOS.
+class BackgroundNotification {
+  const BackgroundNotification({
+    required this.title,
+    required this.text,
+    required this.channelId,
+    required this.channelName,
+    this.iconResourceName,
+  });
+
+  /// Notification title (bold line).
+  final String title;
+
+  /// Notification body.
+  final String text;
+
+  /// Unique notification channel id. Reuse the same value across calls to
+  /// avoid re-creating the channel.
+  final String channelId;
+
+  /// User-visible channel name shown in Android settings.
+  final String channelName;
+
+  /// Drawable resource name for the small icon, e.g. `"ic_stat_recording"`.
+  /// When null, the app's launcher icon is used.
+  final String? iconResourceName;
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+    'title': title,
+    'text': text,
+    'channelId': channelId,
+    'channelName': channelName,
+    if (iconResourceName != null) 'iconResourceName': iconResourceName,
+  };
+}
+
+/// A single video frame delivered over the platform channel.
+///
+/// Emitted by [MetaWearablesDat.videoFramesStream] in both foreground and
+/// background once [MetaWearablesDat.enableBackgroundStreaming] has been
+/// called. For preview rendering you still want the zero-copy `Texture`
+/// returned by [MetaWearablesDat.startStreamSession] — this stream is meant
+/// for recording or custom processing.
+class VideoFrame {
+  const VideoFrame({
+    required this.codec,
+    required this.bytes,
+    required this.width,
+    required this.height,
+    required this.presentationTimestampUs,
+    required this.isKeyframe,
+    this.bytesPerRow,
+  });
+
+  /// The codec the bytes are in.
+  ///
+  /// - [VideoCodec.raw] — platform-specific decoded pixel layout:
+  ///   - **iOS**: 32-bit BGRA, length `bytesPerRow * height` (may contain
+  ///     row padding — use [bytesPerRow] when iterating rows).
+  ///   - **Android**: I420 planar YUV (3 planes: Y, U, V) at
+  ///     `width * height * 3 / 2` bytes. This is the SDK's native frame
+  ///     format — forwarded as-is for zero-overhead recording. Convert
+  ///     on the Dart side or feed directly into an encoder that accepts
+  ///     YUV (FFmpeg, MediaCodec, etc.).
+  /// - [VideoCodec.hvc1] — HEVC (`hvc1`) compressed sample. Parameter sets
+  ///   (VPS/SPS/PPS) are carried on keyframes (`isKeyframe == true`).
+  ///   Ready to be written into an `mp4` track as-is, or decoded by
+  ///   VideoToolbox / MediaCodec. iOS only.
+  final VideoCodec codec;
+
+  /// The frame bytes. Ownership transfers to the listener; the plugin
+  /// does not retain the buffer after emission.
+  final Uint8List bytes;
+  final int width;
+  final int height;
+
+  /// Monotonic presentation timestamp in microseconds. Stable across the
+  /// lifetime of a single stream session.
+  final int presentationTimestampUs;
+
+  /// Always `true` for [VideoCodec.raw]. For [VideoCodec.hvc1] indicates
+  /// whether this frame carries parameter sets and can be decoded without
+  /// prior frames.
+  final bool isKeyframe;
+
+  /// Number of bytes per row for [VideoCodec.raw] frames on iOS — may be
+  /// larger than `width * 4` due to row alignment. `null` on Android and
+  /// for [VideoCodec.hvc1].
+  final int? bytesPerRow;
+}
+
 /// The main class for the Meta Wearables DAT.
 class MetaWearablesDat {
+  /// Configures the mock device subsystem.
+  ///
+  /// Call before [pairMockRayBanMeta] to simulate specific registration /
+  /// permission states. Calling this after devices have been paired tears
+  /// down the existing mock state and re-enables MockDeviceKit with the new
+  /// configuration.
+  ///
+  /// - [initiallyRegistered] — when `false`, the SDK behaves as if the user
+  ///   has not yet registered, so `startRegistration` can be exercised.
+  /// - [initialPermissionsGranted] — when `false`, all permissions start in
+  ///   the `denied` state and must be granted explicitly (via
+  ///   [setMockPermission] or by simulating a `requestPermission` flow).
+  static Future<bool> configureMockDevices({
+    bool initiallyRegistered = true,
+    bool initialPermissionsGranted = true,
+  }) {
+    return MetaWearablesDatPlatform.instance.configureMockDevices(
+      initiallyRegistered: initiallyRegistered,
+      initialPermissionsGranted: initialPermissionsGranted,
+    );
+  }
+
+  /// Disables the mock device subsystem and unpairs any paired mock devices.
+  static Future<bool> disableMockDevices() {
+    return MetaWearablesDatPlatform.instance.disableMockDevices();
+  }
+
   /// Pairs a mock RayBan Meta device.
   static Future<String?> pairMockRayBanMeta() {
     return MetaWearablesDatPlatform.instance.pairMockRayBanMeta();
@@ -244,6 +419,33 @@ class MetaWearablesDat {
   /// Unpairs a mock RayBan Meta device.
   static Future<bool> unpairMockRayBanMeta(String deviceUUID) {
     return MetaWearablesDatPlatform.instance.unpairMockRayBanMeta(deviceUUID);
+  }
+
+  /// Overrides the status returned by `checkPermissionStatus` for a given
+  /// [permission] on mock devices.
+  ///
+  /// Use together with [configureMockDevices] to test permission-gated
+  /// code paths (e.g. granted vs denied).
+  static Future<bool> setMockPermission(
+    Permission permission,
+    PermissionStatus status,
+  ) {
+    return MetaWearablesDatPlatform.instance.setMockPermission(
+      permission,
+      status,
+    );
+  }
+
+  /// Configures the result that a subsequent `requestPermission` call will
+  /// return for a given [permission] on mock devices.
+  static Future<bool> setMockPermissionRequestResult(
+    Permission permission,
+    PermissionStatus status,
+  ) {
+    return MetaWearablesDatPlatform.instance.setMockPermissionRequestResult(
+      permission,
+      status,
+    );
   }
 
   /// Requests the Android runtime permissions required by the DAT SDK
@@ -305,6 +507,20 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.setMockCameraFeed(
       deviceUUID,
       videoPath,
+    );
+  }
+
+  /// Streams the phone's front or back camera into the mock device.
+  ///
+  /// Mutually exclusive with [setMockCameraFeed] — calling either clears
+  /// the source configured by the other.
+  static Future<bool> setMockCameraFacing(
+    String deviceUUID,
+    CameraFacing facing,
+  ) {
+    return MetaWearablesDatPlatform.instance.setMockCameraFacing(
+      deviceUUID,
+      facing,
     );
   }
 
@@ -455,11 +671,73 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.activeDeviceStream();
   }
 
+  /// Stream of video frame dimensions for the active stream session.
+  ///
+  /// Emits once shortly after `startStreamSession` and again if the
+  /// underlying source changes resolution. Use [VideoStreamSize.aspectRatio]
+  /// with an `AspectRatio` widget wrapping the `Texture` so landscape
+  /// footage isn't crammed into a portrait box (or vice versa).
+  static Stream<VideoStreamSize> videoStreamSizeStream() {
+    return MetaWearablesDatPlatform.instance.videoStreamSizeStream();
+  }
+
   /// Restarts active device monitoring on Android.
   /// Call after registration completes so the plugin re-subscribes
   /// to the device flow and picks up newly available devices.
   /// No-op on iOS.
   static Future<bool> restartActiveDeviceMonitoring() {
     return MetaWearablesDatPlatform.instance.restartActiveDeviceMonitoring();
+  }
+
+  /// Enables background streaming.
+  ///
+  /// Call this BEFORE [startStreamSession] if you want the stream to survive
+  /// the host app being backgrounded, the screen being locked, or the user
+  /// switching apps. Safe to call again to reconfigure the Android
+  /// notification; safe to call after [startStreamSession] too — the
+  /// keep-alive mechanism engages immediately.
+  ///
+  /// **iOS** — activates an `AVAudioSession` in `.playAndRecord` /
+  /// `.videoRecording` mode and switches the HEVC decoder to software so it
+  /// survives background/foreground transitions. The host app's `Info.plist`
+  /// must declare these `UIBackgroundModes`: `audio`, `bluetooth-central`,
+  /// `bluetooth-peripheral`, `external-accessory`.
+  ///
+  /// **Android** — starts a foreground service with the given
+  /// [androidNotification] and acquires a `PARTIAL_WAKE_LOCK`. The plugin
+  /// manifest merges `FOREGROUND_SERVICE`,
+  /// `FOREGROUND_SERVICE_CONNECTED_DEVICE`, and `WAKE_LOCK` into your
+  /// `AndroidManifest.xml`. [androidNotification] must be provided on
+  /// Android; passing `null` on Android throws.
+  static Future<void> enableBackgroundStreaming({
+    BackgroundNotification? androidNotification,
+  }) {
+    return MetaWearablesDatPlatform.instance.enableBackgroundStreaming(
+      androidNotification: androidNotification,
+    );
+  }
+
+  /// Disables background streaming.
+  ///
+  /// Deactivates the `AVAudioSession` on iOS and stops the foreground
+  /// service / releases the wake lock on Android. Safe to call multiple
+  /// times. Does NOT stop the active stream session; use
+  /// [stopStreamSession] for that.
+  static Future<void> disableBackgroundStreaming() {
+    return MetaWearablesDatPlatform.instance.disableBackgroundStreaming();
+  }
+
+  /// Stream of per-frame [VideoFrame] events, emitted in both foreground and
+  /// background when background streaming is enabled.
+  ///
+  /// Use this when you want to record the stream to disk or run custom
+  /// per-frame processing. For preview rendering, the zero-copy `Texture`
+  /// returned by [startStreamSession] is always the right choice — it
+  /// bypasses the platform channel.
+  ///
+  /// Subscribers have no effect when background streaming is disabled; the
+  /// native side short-circuits serialization so there is no per-frame cost.
+  static Stream<VideoFrame> videoFramesStream() {
+    return MetaWearablesDatPlatform.instance.videoFramesStream();
   }
 }

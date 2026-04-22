@@ -1,6 +1,6 @@
 package io.rodcone.flutter_meta_wearables_dat
 
-import com.meta.wearable.dat.camera.StreamSession
+import com.meta.wearable.dat.camera.Stream
 import com.meta.wearable.dat.camera.types.StreamSessionState
 import io.flutter.plugin.common.EventChannel
 import kotlinx.coroutines.CoroutineScope
@@ -15,8 +15,8 @@ import kotlinx.coroutines.launch
  * Stream handler for stream session state updates from the DAT SDK.
  * Emits integer values matching the Dart `StreamSessionState` enum.
  *
- * Set the [session] property when a stream session is created.
- * Clear it when the session is torn down.
+ * Set the [stream] property when a stream is added to a session.
+ * Clear it when the stream is torn down.
  */
 internal class StreamSessionStateStreamHandler : EventChannel.StreamHandler {
 
@@ -24,8 +24,8 @@ internal class StreamSessionStateStreamHandler : EventChannel.StreamHandler {
     private var job: Job? = null
     private var eventSink: EventChannel.EventSink? = null
 
-    /** The active stream session to observe. Setting this resubscribes to the state flow. */
-    var session: StreamSession? = null
+    /** The active stream to observe. Setting this resubscribes to the state flow. */
+    var stream: Stream? = null
         set(value) {
             field = value
             resubscribe()
@@ -47,11 +47,11 @@ internal class StreamSessionStateStreamHandler : EventChannel.StreamHandler {
         job?.cancel()
         job = null
         val sink = eventSink ?: return
-        val currentSession = session ?: return
+        val currentStream = stream ?: return
 
         job =
                 scope.launch {
-                    currentSession.state.collect { state -> sink.success(mapState(state)) }
+                    currentStream.state.collect { state -> sink.success(mapState(state)) }
                 }
     }
 
@@ -79,9 +79,9 @@ internal class StreamSessionStateStreamHandler : EventChannel.StreamHandler {
                 StreamSessionState.STOPPING -> 0
                 StreamSessionState.STOPPED -> 1
                 StreamSessionState.STARTING -> 3
-                StreamSessionState.STARTED -> 3  // No Dart equivalent; treat as "starting"
+                StreamSessionState.STARTED -> 3
                 StreamSessionState.STREAMING -> 4
-                StreamSessionState.CLOSED -> 1   // No Dart equivalent; treat as "stopped"
+                StreamSessionState.CLOSED -> 1
             }
         }
     }

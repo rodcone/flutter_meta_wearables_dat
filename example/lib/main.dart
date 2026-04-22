@@ -136,21 +136,24 @@ class _MyAppState extends State<MyApp> {
                                 ),
                               ),
                             ),
-                          FloatingActionButton.small(
-                            heroTag: 'mock_device',
-                            backgroundColor: Colors.blueAccent,
-                            tooltip: 'Mock device',
-                            onPressed: () {
-                              HapticFeedback.lightImpact();
-                              showModalBottomSheet<void>(
-                                isScrollControlled: true,
-                                context: context,
-                                builder: (ctx) => const MockDeviceSheet(),
-                              );
-                            },
-                            child:
-                                const Icon(Icons.bug_report, color: Colors.white),
-                          ),
+                          if (!deviceProvider.isRegistered)
+                            FloatingActionButton.small(
+                              heroTag: 'mock_device',
+                              backgroundColor: Colors.blueAccent,
+                              tooltip: 'Mock device',
+                              onPressed: () {
+                                HapticFeedback.lightImpact();
+                                showModalBottomSheet<void>(
+                                  isScrollControlled: true,
+                                  context: context,
+                                  builder: (ctx) => const MockDeviceSheet(),
+                                );
+                              },
+                              child: const Icon(
+                                Icons.bug_report,
+                                color: Colors.white,
+                              ),
+                            ),
                         ],
                       ),
                     ),

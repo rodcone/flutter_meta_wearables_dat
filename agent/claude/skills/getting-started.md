@@ -31,6 +31,10 @@ Add to `ios/Runner/Info.plist`:
 <array>
     <string>bluetooth-peripheral</string>
     <string>external-accessory</string>
+    <!-- Optional: required only if you call MetaWearablesDat.enableBackgroundStreaming()
+         to keep the stream alive while backgrounded or the phone is locked. -->
+    <!-- <string>audio</string>                -->
+    <!-- <string>bluetooth-central</string>   -->
 </array>
 
 <key>CFBundleURLTypes</key>

@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 
+enum _MetaButtonVariant { primaryText, secondaryText, icon }
+
 class MetaButton extends StatelessWidget {
   final String? text;
   final Widget? icon;
   final VoidCallback onPressed;
   final Color? color;
   final bool enabled;
-  final bool _isIconButton;
+  final _MetaButtonVariant _variant;
 
-  // Constructor for text button
+  // Primary text button — full-height (55), used for main actions.
   const MetaButton.text({
     super.key,
     required this.text,
@@ -16,9 +18,19 @@ class MetaButton extends StatelessWidget {
     this.color,
     this.enabled = true,
   }) : icon = null,
-       _isIconButton = false;
+       _variant = _MetaButtonVariant.primaryText;
 
-  // Constructor for icon button (circle-shaped)
+  // Secondary text button — reduced height, suited for dense tool rows.
+  const MetaButton.secondary({
+    super.key,
+    required this.text,
+    required this.onPressed,
+    this.color,
+    this.enabled = true,
+  }) : icon = null,
+       _variant = _MetaButtonVariant.secondaryText;
+
+  // Icon button (circle-shaped)
   const MetaButton.icon({
     super.key,
     required this.icon,
@@ -26,13 +38,17 @@ class MetaButton extends StatelessWidget {
     this.color,
     this.enabled = true,
   }) : text = null,
-       _isIconButton = true;
+       _variant = _MetaButtonVariant.icon;
 
   @override
   Widget build(BuildContext context) {
     return Opacity(
       opacity: enabled ? 1.0 : 0.5,
-      child: _isIconButton ? _buildIconButton() : _buildTextButton(context),
+      child: switch (_variant) {
+        _MetaButtonVariant.primaryText => _buildTextButton(context),
+        _MetaButtonVariant.secondaryText => _buildSecondaryTextButton(context),
+        _MetaButtonVariant.icon => _buildIconButton(),
+      },
     );
   }
 
@@ -54,6 +70,33 @@ class MetaButton extends StatelessWidget {
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
             color: Colors.white,
             fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSecondaryTextButton(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 36,
+      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      child: FilledButton.tonal(
+        style: FilledButton.styleFrom(
+          backgroundColor: color,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          minimumSize: const Size(0, 36),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: () {
+          if (enabled) onPressed();
+        },
+        child: Text(
+          text!,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: color == null ? null : Colors.white,
           ),
         ),
       ),
