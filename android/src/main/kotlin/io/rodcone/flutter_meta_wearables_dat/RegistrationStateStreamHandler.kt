@@ -1,5 +1,6 @@
 package io.rodcone.flutter_meta_wearables_dat
 
+import android.util.Log
 import com.meta.wearable.dat.core.Wearables
 import io.flutter.plugin.common.EventChannel
 import kotlinx.coroutines.CoroutineScope
@@ -34,11 +35,13 @@ internal class RegistrationStateStreamHandler(
     }
 
     /**
-     * Start or restart collecting registration state events. Called when SDK becomes
-     * initialized.
+     * Start collecting registration state events if not already collecting. Idempotent: safe to
+     * call from multiple paths (permission-just-granted, permissions-already-granted, etc.)
+     * without double-subscribing.
      */
     fun restartMonitoring() {
         val sink = eventSink ?: return
+        if (job?.isActive == true) return
         startCollecting(sink)
     }
 
@@ -50,9 +53,11 @@ internal class RegistrationStateStreamHandler(
                 scope.launch {
                     // Send initial state
                     val initialState = Wearables.registrationState.first()
+                    Log.d("MetaWearablesDat", "RegistrationState initial=$initialState")
                     events.success(mapState(initialState))
                     // Listen to state changes
                     Wearables.registrationState.collect { state ->
+                        Log.d("MetaWearablesDat", "RegistrationState emit=$state")
                         events.success(mapState(state))
                     }
                 }

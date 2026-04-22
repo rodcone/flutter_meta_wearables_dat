@@ -63,6 +63,7 @@ class MetaWearablesDatPlugin :
         private const val PERMISSION_REQUEST_CODE = 48291
         private const val BT_PERMISSION_REQUEST_CODE = 48292
         private const val MOCK_CAMERA_PERMISSION_REQUEST_CODE = 48293
+        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 48294
         private val REQUIRED_PERMISSIONS: Array<String> =
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                     arrayOf(
@@ -115,6 +116,11 @@ class MetaWearablesDatPlugin :
     // MockDeviceKit when simulating the wearable feed from the phone camera.
     private var pendingMockCameraFacingCall: MethodCall? = null
     private var pendingMockCameraFacingResult: Result? = null
+
+    // Pending state for the Android 13+ POST_NOTIFICATIONS permission, requested
+    // lazily when the host app calls `enableBackgroundStreaming`.
+    private var pendingBackgroundCall: MethodCall? = null
+    private var pendingBackgroundResult: Result? = null
 
     // Single shared device selector — mirrors reference app's WearablesViewModel pattern.
     // One instance is shared across device monitoring and stream session creation.
@@ -234,6 +240,7 @@ class MetaWearablesDatPlugin :
             "setMockPermission" -> result.notImplemented()
             "setMockPermissionRequestResult" -> result.notImplemented()
             "restartActiveDeviceMonitoring" -> {
+                Log.d(TAG, "restartActiveDeviceMonitoring invoked from Dart")
                 activeDeviceStreamHandler?.restartMonitoring()
                 result.success(true)
             }
@@ -338,13 +345,38 @@ class MetaWearablesDatPlugin :
                                 grantResults.all { it == PackageManager.PERMISSION_GRANTED }
                 if (allGranted) {
                     // Initialize SDK now that BT permissions are granted (mirrors reference app pattern)
+                    Log.d(TAG, "BT permissions just granted by user")
                     btPermissionsGranted = true
                     ensureWearablesInitialized()
                     // Start monitoring now that SDK is properly initialized with permissions
                     registrationStateStreamHandler?.restartMonitoring()
                     activeDeviceStreamHandler?.restartMonitoring()
+                } else {
+                    Log.d(TAG, "BT permissions denied by user")
                 }
                 pendingResult.success(allGranted)
+                return true
+            }
+            NOTIFICATION_PERMISSION_REQUEST_CODE -> {
+                val pendingCall = pendingBackgroundCall
+                val pendingResult = pendingBackgroundResult
+                pendingBackgroundCall = null
+                pendingBackgroundResult = null
+                if (pendingCall == null || pendingResult == null) return false
+                val granted =
+                        grantResults.isNotEmpty() &&
+                                grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+                if (!granted) {
+                    Log.w(
+                            TAG,
+                            "POST_NOTIFICATIONS denied — the foreground service will still run, " +
+                                    "but its notification will not appear until the user enables it in system settings.",
+                    )
+                }
+                // Start the service regardless: the keep-alive foreground service
+                // is the load-bearing part. A missing notification is a UX issue,
+                // not a correctness issue.
+                startBackgroundStreamingService(pendingCall, pendingResult)
                 return true
             }
             MOCK_CAMERA_PERMISSION_REQUEST_CODE -> {
@@ -397,6 +429,7 @@ class MetaWearablesDatPlugin :
 
         if (missingPermissions.isEmpty()) {
             // Permissions already granted — initialize SDK and start monitoring
+            Log.d(TAG, "requestAndroidPermissions — all permissions already granted")
             btPermissionsGranted = true
             ensureWearablesInitialized()
             registrationStateStreamHandler?.restartMonitoring()
@@ -898,6 +931,56 @@ class MetaWearablesDatPlugin :
             )
             return
         }
+
+        // On Android 13+ (API 33+), POST_NOTIFICATIONS is a runtime permission.
+        // Without it the foreground service still runs, but the notification is
+        // silently suppressed — so prompt for it now before starting the service.
+        // Older API levels auto-grant, so this branch is a no-op pre-Tiramisu.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val act = activity
+            val granted =
+                    app.let {
+                        ContextCompat.checkSelfPermission(
+                                it,
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                        ) == PackageManager.PERMISSION_GRANTED
+                    }
+            if (!granted && act != null) {
+                pendingBackgroundCall = call
+                pendingBackgroundResult = result
+                ActivityCompat.requestPermissions(
+                        act,
+                        arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                        NOTIFICATION_PERMISSION_REQUEST_CODE,
+                )
+                return
+            }
+        }
+
+        startBackgroundStreamingService(call, result)
+    }
+
+    private fun startBackgroundStreamingService(call: MethodCall, result: Result) {
+        val app = application
+        if (app == null) {
+            result.error(
+                    "BACKGROUND_STREAMING_ERROR",
+                    "Application context is not available.",
+                    null,
+            )
+            return
+        }
+        val notification =
+                @Suppress("UNCHECKED_CAST")
+                (call.argument<Map<String, Any>>("androidNotification"))
+        if (notification == null) {
+            result.error(
+                    "INVALID_ARGS",
+                    "androidNotification is required on Android to display the foreground-service notification.",
+                    null,
+            )
+            return
+        }
         try {
             val intent = Intent(app, BackgroundStreamingService::class.java).apply {
                 putExtra(
@@ -1326,10 +1409,19 @@ class MetaWearablesDatPlugin :
 
     // region Helpers
 
+    private var wearablesInitializedLogged = false
+
     private fun ensureWearablesInitialized() {
-        if (!btPermissionsGranted) return
+        if (!btPermissionsGranted) {
+            Log.d(TAG, "ensureWearablesInitialized — BT permissions not yet granted, skipping")
+            return
+        }
         val app = application ?: return
         Wearables.initialize(app)
+        if (!wearablesInitializedLogged) {
+            Log.d(TAG, "ensureWearablesInitialized — Wearables.initialize() called")
+            wearablesInitializedLogged = true
+        }
     }
 
     private fun mapRegistrationState(

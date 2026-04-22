@@ -344,7 +344,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
 </array>
 ```
 
-**Android — no manual manifest changes needed.** The plugin's manifest auto-merges the required permissions (`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK`) and declares the internal foreground service.
+**Android — no manual manifest changes needed.** The plugin's manifest auto-merges the required permissions (`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`) and declares the internal foreground service. On Android 13+ (API 33+), the first call to `enableBackgroundStreaming()` prompts the user for `POST_NOTIFICATIONS` — if denied, the foreground service still runs (so the stream survives), but its notification is suppressed by the OS until the user enables notifications for your app in system settings.
 
 **How it works.** On iOS the plugin activates an `AVAudioSession` configured for Bluetooth HFP + mixing (which keeps the process scheduled in background) and forces software HEVC decoding so the decoder survives the background → foreground transition without stutter. On Android the plugin starts a foreground service of type `connectedDevice` with your notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
 
