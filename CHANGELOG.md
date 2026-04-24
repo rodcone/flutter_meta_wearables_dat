@@ -1,3 +1,6 @@
+## 0.3.1
+* Fix: CMSampleBufferGetFormatDescription used with .hvc1 background streaming to correctly pass VPS/SPS/PPS and enable ffmpeg_kit_flutter use cases while backgrounded.
+
 ## 0.3.0
 * **BREAKING**: Update to DAT SDK 0.6.0 on iOS and Android.
 * New `setMockCameraFacing()` to switch the mock device's camera between front and back; adds `CameraFacing`.
