@@ -297,10 +297,10 @@ Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTextu
 
 #### Video codecs
 
-| Codec | Platform | Description |
-|-------|----------|-------------|
-| `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. iOS: BGRA pixel data. Android: I420 planar YUV. Default. |
-| `VideoCodec.hvc1` | iOS only | Compressed HEVC (`hvc1` NAL units) decoded via `VTDecompressionSession`. Smaller over-the-wire payload than `raw` and the only codec that survives a brief background transition without any opt-in (hardware decoder is paused on background and auto-recreated on foreground). Ignored on Android. |
+| Codec             | Platform      | Description                                                                                                                                                                                                                                                                                          |
+|-------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `VideoCodec.raw`  | iOS & Android | Raw uncompressed frames. iOS: BGRA pixel data. Android: I420 planar YUV. Default.                                                                                                                                                                                                                    |
+| `VideoCodec.hvc1` | iOS only      | Compressed HEVC (`hvc1` NAL units) decoded via `VTDecompressionSession`. Smaller over-the-wire payload than `raw` and the only codec that survives a brief background transition without any opt-in (hardware decoder is paused on background and auto-recreated on foreground). Ignored on Android. |
 
 For full background streaming (app backgrounded, phone locked, or both) on **either** platform and **either** codec, see [Background streaming](#background-streaming) below.
 
@@ -376,11 +376,11 @@ Subscribing to `videoFramesStream()` is zero-cost when there are no listeners â€
 
 #### Stream quality
 
-| Quality | Resolution |
-|---------|-----------|
-| `StreamQuality.low` | 360 x 640 |
-| `StreamQuality.medium` | 504 x 896 |
-| `StreamQuality.high` | 720 x 1280 |
+| Quality                | Resolution |
+|------------------------|------------|
+| `StreamQuality.low`    | 360 x 640  |
+| `StreamQuality.medium` | 504 x 896  |
+| `StreamQuality.high`   | 720 x 1280 |
 
 Valid FPS values: 2, 7, 15, 24, 30.
 
