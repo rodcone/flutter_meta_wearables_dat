@@ -1,0 +1,28 @@
+name: flutter_meta_wearables_dat_mock_device
+description: "Optional MockDeviceKit add-on for flutter_meta_wearables_dat — simulates a Ray-Ban Meta device using the phone's camera. Pull this in only for development and testing; production apps should omit it to avoid linking AVFoundation/Camera symbols."
+version: 0.4.0
+repository: https://github.com/rodcone/flutter_meta_wearables_dat
+
+environment:
+  sdk: ^3.9.2
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.0.2
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+  flutter_test:
+    sdk: flutter
+  very_good_analysis: ^10.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: io.rodcone.flutter_meta_wearables_dat_mock_device
+        pluginClass: MetaWearablesDatMockDevicePlugin
+      ios:
+        pluginClass: MetaWearablesDatMockDevicePlugin

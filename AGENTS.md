@@ -123,15 +123,8 @@ static Future<CapturedFrame?> captureStreamFrame(
   FrameFormat format = FrameFormat.rawRgba,
 })
 
-// Mock device (testing without physical glasses)
-static Future<String?> pairMockRayBanMeta()
-static Future<bool> unpairMockRayBanMeta(String deviceUUID)
-static Future<bool> mockDevicePowerOn(String deviceUUID)
-static Future<bool> mockDevicePowerOff(String deviceUUID)
-static Future<bool> mockDeviceDon(String deviceUUID)
-static Future<bool> mockDeviceDoff(String deviceUUID)
-static Future<bool> setMockCameraFeed(String deviceUUID, String? videoPath)
-static Future<bool> setMockCapturedImage(String deviceUUID, String? imagePath)
+// Mock device APIs live in the optional companion package
+// `flutter_meta_wearables_dat_mock_device` — see "Testing with MockDeviceKit".
 ```
 
 ## Dev environment setup
@@ -448,28 +441,47 @@ final frame = await MetaWearablesDat.captureStreamFrame(
 
 ## Testing with MockDeviceKit
 
-Develop and test without physical Meta glasses:
+Develop and test without physical Meta glasses. Mock support lives in the optional companion package `flutter_meta_wearables_dat_mock_device` so production builds don't have to link `MWDATMockDevice` (iOS) or `mwdat-mockdevice` (Android), and therefore don't need `NSCameraUsageDescription` or the `CAMERA` permission.
+
+```yaml
+# pubspec.yaml — add only in dev/staging configs
+dependencies:
+  flutter_meta_wearables_dat: ^0.4.0
+  flutter_meta_wearables_dat_mock_device: ^0.4.0
+```
 
 ```dart
-// Create a mock device
-final deviceUUID = await MetaWearablesDat.pairMockRayBanMeta();
+import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
+import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
+
+// Pre-grant registration + camera so the mock flow doesn't bounce through Meta AI
+await MetaWearablesDatMockDevice.configure(
+  initiallyRegistered: true,
+  initialPermissionsGranted: true,
+);
+
+// Pair a simulated Ray-Ban Meta backed by the phone's camera
+final deviceUUID = await MetaWearablesDatMockDevice.pairRayBanMeta();
 
 // Simulate glasses lifecycle
-await MetaWearablesDat.mockDevicePowerOn(deviceUUID!);
-await MetaWearablesDat.mockDeviceDon(deviceUUID);
+await MetaWearablesDatMockDevice.powerOn(deviceUUID!);
+await MetaWearablesDatMockDevice.don(deviceUUID);
+await MetaWearablesDatMockDevice.setCameraFacing(deviceUUID, CameraFacing.back);
 
-// Set mock camera feed (video must be H.265/HEVC)
-await MetaWearablesDat.setMockCameraFeed(deviceUUID, videoPath);
+// Override the live camera feed with a video file (must be H.265/HEVC)
+await MetaWearablesDatMockDevice.setCameraFeed(deviceUUID, videoPath);
 
-// Set mock captured image (for capturePhoto)
-await MetaWearablesDat.setMockCapturedImage(deviceUUID, imagePath);
+// Override the photo returned by capturePhoto()
+await MetaWearablesDatMockDevice.setCapturedImage(deviceUUID, imagePath);
 
-// Start streaming with specific device
+// Streaming, photo capture, etc. all go through the core plugin against this UUID
 final textureId = await MetaWearablesDat.startStreamSession(deviceUUID);
 
 // Clean up
-await MetaWearablesDat.unpairMockRayBanMeta(deviceUUID);
+await MetaWearablesDatMockDevice.unpairRayBanMeta(deviceUUID);
 ```
+
+Mock-only types (`Permission`, `PermissionStatus`, `CameraFacing`) are exported from `flutter_meta_wearables_dat_mock_device`. Apps using the mock package **must** declare `NSCameraUsageDescription` (iOS) and the `CAMERA` permission (Android), since the simulated glasses use the phone's camera as their feed.
 
 ## Debugging
 

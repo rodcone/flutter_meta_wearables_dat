@@ -1,4 +1,4 @@
-group = "io.rodcone.flutter_meta_wearables_dat"
+group = "io.rodcone.flutter_meta_wearables_dat_mock_device"
 version = "1.0-SNAPSHOT"
 
 ext.mwdat_version = "0.6.0"
@@ -27,7 +27,7 @@ apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
 
 android {
-    namespace = "io.rodcone.flutter_meta_wearables_dat"
+    namespace = "io.rodcone.flutter_meta_wearables_dat_mock_device"
 
     compileSdk = 36
 
@@ -50,11 +50,12 @@ android {
     }
 
     dependencies {
+        // mwdat-core provides the Permission / PermissionStatus types reused
+        // by this add-on, plus the Wearables singleton MockDeviceKit registers
+        // its mock devices into. The core plugin already pulls it transitively,
+        // but declaring it here keeps this module compilable in isolation.
         implementation("com.meta.wearable:mwdat-core:$mwdat_version")
-        implementation("com.meta.wearable:mwdat-camera:$mwdat_version")
-        implementation("androidx.emoji2:emoji2:1.5.0")
-        // Required for ActivityResultRegistry and ComponentActivity
-        implementation("androidx.activity:activity-ktx:1.9.3")
+        implementation("com.meta.wearable:mwdat-mockdevice:$mwdat_version")
 
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")

@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
+import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
 
 /// Provider to manage mock device operations and state.
 /// Handles pairing, unpairing, and device state operations for mock devices.
@@ -25,14 +25,14 @@ class MockDeviceProvider extends ChangeNotifier {
   Future<void> pairMockRayBanMeta() async {
     unawaited(HapticFeedback.lightImpact());
 
-    final deviceUUID = await MetaWearablesDat.pairMockRayBanMeta();
+    final deviceUUID = await MetaWearablesDatMockDevice.pairRayBanMeta();
     _deviceUUID = deviceUUID;
     notifyListeners();
   }
 
   Future<void> unpairMockRayBanMeta() async {
     if (_deviceUUID == null) return;
-    await MetaWearablesDat.unpairMockRayBanMeta(_deviceUUID!);
+    await MetaWearablesDatMockDevice.unpairRayBanMeta(_deviceUUID!);
     _deviceUUID = null;
     _isPoweredOn = false;
     _isDonned = false;
@@ -42,12 +42,12 @@ class MockDeviceProvider extends ChangeNotifier {
 
   Future<void> powerOn() async {
     if (_deviceUUID == null) return;
-    await MetaWearablesDat.mockDevicePowerOn(_deviceUUID!);
+    await MetaWearablesDatMockDevice.powerOn(_deviceUUID!);
     _isPoweredOn = true;
     // The SDK requires the device to be donned before streaming. The UI no
     // longer exposes don/doff as a separate step, so fold it into power-on.
     try {
-      await MetaWearablesDat.mockDeviceDon(_deviceUUID!);
+      await MetaWearablesDatMockDevice.don(_deviceUUID!);
       _isDonned = true;
     } catch (e) {
       debugPrint('[MetaWearablesDAT] Auto-don after power on failed: $e');
@@ -57,7 +57,7 @@ class MockDeviceProvider extends ChangeNotifier {
 
   Future<void> powerOff() async {
     if (_deviceUUID == null) return;
-    await MetaWearablesDat.mockDevicePowerOff(_deviceUUID!);
+    await MetaWearablesDatMockDevice.powerOff(_deviceUUID!);
     _isPoweredOn = false;
     _isDonned = false;
     notifyListeners();
@@ -65,7 +65,7 @@ class MockDeviceProvider extends ChangeNotifier {
 
   Future<void> setCameraFacing(CameraFacing facing) async {
     if (_deviceUUID == null) return;
-    await MetaWearablesDat.setMockCameraFacing(_deviceUUID!, facing);
+    await MetaWearablesDatMockDevice.setCameraFacing(_deviceUUID!, facing);
     _cameraFacing = facing;
     notifyListeners();
   }

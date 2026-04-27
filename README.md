@@ -11,6 +11,8 @@
 
 A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolkit (DAT), enabling integration with Meta AI Glasses for iOS and Android.
 
+> **Mock device support is in a separate package.** Real-device pairing, registration, streaming and photo capture all live in this core plugin. The simulated Ray-Ban Meta (driven by the phone's camera) lives in the optional add-on **[`flutter_meta_wearables_dat_mock_device`](flutter_meta_wearables_dat_mock_device/)** — pull it in only for development. Production apps that omit it ship without `MWDATMockDevice.xcframework` (iOS) or `mwdat-mockdevice` (Android), so they don't need to declare `NSCameraUsageDescription` or the `CAMERA` permission. See [Optional: mock device add-on](#optional-mock-device-add-on) for the one-line install.
+
 ## Table of contents
 - [flutter\_meta\_wearables\_dat](#flutter_meta_wearables_dat)
   - [Table of contents](#table-of-contents)
@@ -33,6 +35,7 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
       - [Background streaming](#background-streaming)
       - [Stream quality](#stream-quality)
       - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
+  - [Optional: mock device add-on](#optional-mock-device-add-on)
   - [AI Assistant Integration](#ai-assistant-integration)
   - [Troubleshooting](#troubleshooting)
   - [Example app](#example-app)
@@ -418,6 +421,40 @@ void stopFrameProcessing() => _processing = false;
 > **Memory note:** Raw RGBA at 720×1280 is ~3.7 MB per frame. Capture on demand (every 200–500 ms is typical for OCR/ML) rather than every rendered frame.
 
 **Note:** See the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) for a complete implementation.
+
+## Optional: mock device add-on
+
+Meta gates registration on real glasses, so during development it's often handy to pair against a simulated Ray-Ban Meta backed by the phone's camera. That capability lives in the optional [`flutter_meta_wearables_dat_mock_device`](flutter_meta_wearables_dat_mock_device/) package — same repo, separate plugin. Apps that don't depend on it never link `MWDATMockDevice.xcframework` / `mwdat-mockdevice`, which is what allows the core plugin to ship without `NSCameraUsageDescription` (iOS) or the `CAMERA` permission (Android).
+
+```yaml
+# pubspec.yaml — add only in dev/staging builds
+dependencies:
+  flutter_meta_wearables_dat: ^0.4.0
+  flutter_meta_wearables_dat_mock_device: ^0.4.0
+```
+
+```dart
+import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
+
+// Grant the perms the SDK normally asks for at runtime so the mock flow doesn't
+// bounce through Meta AI for registration during dev.
+await MetaWearablesDatMockDevice.configure(
+  initiallyRegistered: true,
+  initialPermissionsGranted: true,
+);
+
+final uuid = await MetaWearablesDatMockDevice.pairRayBanMeta();
+await MetaWearablesDatMockDevice.powerOn(uuid);
+await MetaWearablesDatMockDevice.don(uuid);
+await MetaWearablesDatMockDevice.setCameraFacing(uuid, CameraFacing.back);
+
+// From here, the core plugin's normal streaming API works against this UUID:
+final textureId = await MetaWearablesDat.startStreamSession(uuid);
+```
+
+Apps that pull in this package **must** declare `NSCameraUsageDescription` (iOS) and the `CAMERA` permission (Android) — the mock device uses the phone's camera as the simulated glasses feed. The `Permission`, `PermissionStatus`, and `CameraFacing` enums all live in this package.
+
+If you previously used the inline mock APIs (`MetaWearablesDat.pairMockRayBanMeta()` etc. in `flutter_meta_wearables_dat` 0.3.x), see the [0.4.0 migration table in the changelog](CHANGELOG.md).
 
 ## AI Assistant Integration
 

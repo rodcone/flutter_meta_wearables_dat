@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
+import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
 
 /// Provider to manage streaming state and active device monitoring.
 /// Depends on DeviceProvider for registration state and permissions.
@@ -131,7 +132,7 @@ class StreamSessionProvider extends ChangeNotifier {
     try {
       // Set camera feed if video is selected (only for mock devices)
       if (_selectedVideo != null && mockDeviceProvider.deviceUUID != null) {
-        await MetaWearablesDat.setMockCameraFeed(
+        await MetaWearablesDatMockDevice.setCameraFeed(
           mockDeviceProvider.deviceUUID!,
           _selectedVideo,
         );
@@ -139,7 +140,7 @@ class StreamSessionProvider extends ChangeNotifier {
 
       // Set captured image if image is selected (only for mock devices)
       if (_selectedImage != null && mockDeviceProvider.deviceUUID != null) {
-        await MetaWearablesDat.setMockCapturedImage(
+        await MetaWearablesDatMockDevice.setCapturedImage(
           mockDeviceProvider.deviceUUID!,
           _selectedImage,
         );

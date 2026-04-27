@@ -1,6 +1,11 @@
 # Maintainer Guide: Updating Meta Wearables DAT
 
-This plugin manages the native Meta Wearables DAT for both iOS and Android platforms. Follow the platform-specific steps below to update the DAT version.
+This repo ships **two federated plugins** that both consume the Meta Wearables DAT:
+
+- `flutter_meta_wearables_dat/` (root) — vendors `MWDATCore` + `MWDATCamera` (iOS) and depends on `mwdat-core` + `mwdat-camera` (Android).
+- `flutter_meta_wearables_dat_mock_device/` (sibling) — vendors `MWDATMockDevice` (iOS) and depends on `mwdat-mockdevice` (Android).
+
+Update **both** packages together when bumping the DAT version, otherwise the host app will mix incompatible binaries from the two SDKs. Follow the platform-specific steps below.
 
 ## iOS
 
@@ -19,11 +24,12 @@ The Meta Wearables DAT is distributed as pre-compiled binaries.
 
 ### 2. Replace Local Files
 
-Update the binaries in the plugin's internal structure:
+Update the binaries across **both** plugins:
 
-1. Navigate to `ios/Frameworks/` in this repository
-2. Delete the existing `.xcframework` folders
-3. Paste the new versions you extracted
+1. **Core plugin** — replace `MWDATCore.xcframework` and `MWDATCamera.xcframework` in `ios/Frameworks/` (root).
+2. **Mock add-on** — replace `MWDATMockDevice.xcframework` in `flutter_meta_wearables_dat_mock_device/ios/Frameworks/`.
+
+Delete the existing folders before pasting the new versions to avoid stale slices.
 
 ### 3. Sync Example App
 
@@ -53,13 +59,17 @@ The Android implementation uses Maven dependencies from GitHub Packages. Follow 
 
 ### 2. Update Plugin Version
 
-Update the version in `android/build.gradle` (single place for all three DAT libraries):
+Update the version in **both** `build.gradle` files (each plugin owns its own `ext.mwdat_version`):
 
 ```groovy
-ext.mwdat_version = "0.3.0"  # Update to the latest version
+// android/build.gradle (core)
+ext.mwdat_version = "0.6.0"  // mwdat-core, mwdat-camera
+
+// flutter_meta_wearables_dat_mock_device/android/build.gradle
+ext.mwdat_version = "0.6.0"  // mwdat-mockdevice
 ```
 
-The `mwdat-core`, `mwdat-camera`, and `mwdat-mockdevice` dependencies all use this variable.
+Keep the two values in sync — mixing versions across the two plugins risks ABI breakage at runtime.
 
 
 ### 3. Sync Dependencies
@@ -85,10 +95,84 @@ Key Android-specific implementation files:
 - Clean build: `./gradlew clean build`
 - Run the example app to ensure everything works with the new version
 
-## Update Documentation
+## Releasing a new version
 
-After updating either platform:
+The two packages release **in lockstep at the same version number**. CI enforces this on PRs (the `versions-in-sync` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) fails if the two pubspecs drift), and the publish workflow ([`.github/workflows/publish.yml`](../.github/workflows/publish.yml)) publishes both packages to pub.dev when you push a tag of the form `v<x>.<y>.<z>`.
 
-- **Changelog**: Add a new entry in `CHANGELOG.md` reflecting the DAT version bump and platform
-- **Pubspec**: Increment the plugin version in `pubspec.yaml` if preparing for a release
-- **README**: Update any version-specific instructions if the DAT API has changed
+### When to release
+
+Any user-visible change to either package — DAT SDK bump, API addition, bug fix, README rewrite that ships on pub.dev, etc. The two CHANGELOGs can have asymmetric entries (one side may legitimately say "no user-visible changes" on a given release), but the version number is always shared.
+
+### Pre-flight checklist
+
+Before tagging, confirm:
+
+1. **All four version locations match.** Bump together:
+   - `pubspec.yaml`
+   - `ios/flutter_meta_wearables_dat.podspec` (`s.version`)
+   - `flutter_meta_wearables_dat_mock_device/pubspec.yaml`
+   - `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device.podspec` (`s.version`)
+2. **Both `CHANGELOG.md` files have a `## <new-version>` entry.** The publish workflow's `github-release` job extracts these for the GitHub release notes — missing entries produce an empty release body.
+3. **Both packages are clean locally:**
+   ```bash
+   dart analyze && (cd flutter_meta_wearables_dat_mock_device && dart analyze)
+   dart pub publish --dry-run && (cd flutter_meta_wearables_dat_mock_device && dart pub publish --dry-run)
+   ```
+4. **The example app still builds** — `cd example && flutter build ios --release --no-codesign` and `flutter build apk --release`.
+5. **You're tagging from `main` with no uncommitted changes.** Tags are not branch-scoped on push; whatever commit you tag is what gets published.
+
+### Steps
+
+```bash
+# 1. On a feature branch, do the version bumps + changelog entries.
+#    Open a PR, get it reviewed, merge to main.
+
+# 2. After merge, tag from main.
+git checkout main
+git pull --ff-only
+TAG="v$(grep '^version:' pubspec.yaml | awk '{print $2}')"
+git tag "$TAG"
+git push origin "$TAG"
+
+# 3. Watch the publish workflow.
+gh run watch -R rodcone/flutter_meta_wearables_dat
+```
+
+The workflow will:
+
+- Verify the tag matches **both** pubspec versions (fails fast if they drift).
+- Run `dart analyze --fatal-infos` and tests on both packages.
+- Publish the core package to pub.dev.
+- Publish the mock add-on to pub.dev.
+- Create a GitHub release whose body combines both CHANGELOG entries for this version.
+
+### First-time release of the mock add-on (one-time setup)
+
+The very first publish of `flutter_meta_wearables_dat_mock_device` **cannot** go through the existing OIDC-based publish workflow as-is — pub.dev's "Trusted publishing" requires the package to exist *before* you can configure GitHub Actions as a trusted publisher for it. Two options:
+
+- **Recommended — manual first publish.** From a maintainer's machine, after `dart pub login`:
+  ```bash
+  cd flutter_meta_wearables_dat_mock_device
+  dart pub publish        # confirm prompts
+  ```
+  Then on pub.dev, open the new package's *Admin* tab and add `rodcone/flutter_meta_wearables_dat` + the `pub.dev` GitHub environment as a trusted publisher (matching what's already set for the core package). After that, every subsequent release goes through the workflow automatically.
+- **Alternative — `PUB_TOKEN` for one run.** Generate a publishing token, add it as a `PUB_TOKEN` secret in the repo, temporarily swap `dart pub publish --force` for a token-based call, run the workflow, then remove the secret and revert the workflow.
+
+The core package (`flutter_meta_wearables_dat`) is already live on pub.dev and presumably already has trusted publishing configured, so the OIDC path works for it on this release.
+
+### Recovering from a half-published release
+
+The publish job runs sequentially: core first, then mock. pub.dev versions are **immutable** — you can't re-upload the same version after fixing a problem. So if core publishes successfully but the mock add-on step fails:
+
+1. Fix the cause of the mock-publish failure on a hotfix branch.
+2. Bump both packages to the next patch version (e.g. `0.4.0` → `0.4.1`) — all four version locations + both CHANGELOGs. The core CHANGELOG entry can be a one-liner like *"Republish to align with `flutter_meta_wearables_dat_mock_device 0.4.1`"*.
+3. Merge, tag `v0.4.1`, push.
+
+This should be rare in practice — both publishes have already passed `dart pub publish --dry-run` in CI by the time you tag — but the failure mode exists and forward-bump is the only recovery path.
+
+## Updating documentation
+
+When releasing — beyond the CHANGELOG and pubspec bumps covered in the checklist above:
+
+- **README**: update version-specific instructions in the root [`README.md`](../README.md) and [`flutter_meta_wearables_dat_mock_device/README.md`](../flutter_meta_wearables_dat_mock_device/README.md) if any DAT API changed.
+- **Agent files**: if API surface changed, sync [`AGENTS.md`](../AGENTS.md), [`agent/claude/`](../agent/claude/), [`agent/cursor/`](../agent/cursor/), and [`agent/github/`](../agent/github/). These are installed into consumer projects via [`install-skills.sh`](../install-skills.sh), so out-of-date copies leak into other repos.

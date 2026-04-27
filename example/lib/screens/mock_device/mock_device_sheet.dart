@@ -1,11 +1,11 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart'
     as stream_providers;
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/meta_button.dart';
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/sheet_handle_bar.dart';
+import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 

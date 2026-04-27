@@ -21,9 +21,6 @@ import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.core.session.Session
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
-import com.meta.wearable.dat.mockdevice.MockDeviceKit
-import com.meta.wearable.dat.mockdevice.api.MockRaybanMeta
-import com.meta.wearable.dat.mockdevice.api.camera.CameraFacing
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -62,7 +59,6 @@ class MetaWearablesDatPlugin :
         private const val TAG = "MetaWearablesDat"
         private const val PERMISSION_REQUEST_CODE = 48291
         private const val BT_PERMISSION_REQUEST_CODE = 48292
-        private const val MOCK_CAMERA_PERMISSION_REQUEST_CODE = 48293
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 48294
         private val REQUIRED_PERMISSIONS: Array<String> =
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
@@ -111,11 +107,6 @@ class MetaWearablesDatPlugin :
     // may touch `Wearables` internals and throw before `Wearables.initialize()`.
     private val permissionContract by lazy { Wearables.RequestPermissionContract() }
     private var btPermissionResult: Result? = null
-
-    // Pending state for the Android runtime CAMERA permission, needed by
-    // MockDeviceKit when simulating the wearable feed from the phone camera.
-    private var pendingMockCameraFacingCall: MethodCall? = null
-    private var pendingMockCameraFacingResult: Result? = null
 
     // Pending state for the Android 13+ POST_NOTIFICATIONS permission, requested
     // lazily when the host app calls `enableBackgroundStreaming`.
@@ -228,17 +219,16 @@ class MetaWearablesDatPlugin :
             "getCameraPermissionStatus" -> getCameraPermissionStatus(result)
             "requestCameraPermission" -> requestCameraPermission(result)
             "handleUrl" -> handleUrl(call, result)
-            "configureMockDevices" -> configureMockDevices(call, result)
-            "disableMockDevices" -> disableMockDevices(result)
-            "pairMockRayBanMeta" -> pairMockRayBanMeta(result)
-            "unpairMockRayBanMeta" -> unpairMockRayBanMeta(call, result)
-            "mockDevicePowerOn", "mockDevicePowerOff", "mockDeviceDon", "mockDeviceDoff" ->
-                    mockDeviceAction(call, result)
-            "setMockCameraFeed" -> setMockCameraFeed(call, result)
-            "setMockCameraFacing" -> setMockCameraFacing(call, result)
-            "setMockCapturedImage" -> setMockCapturedImage(call, result)
-            "setMockPermission" -> result.notImplemented()
-            "setMockPermissionRequestResult" -> result.notImplemented()
+            // Internal cross-plugin bridge — invoked by
+            // `flutter_meta_wearables_dat_mock_device` over the shared
+            // binaryMessenger when a file-fed mock video carries rotation
+            // metadata that the mock SDK strips out. Underscore-prefixed to
+            // signal it's not part of the public Dart API.
+            "_setVideoFeedRotation" -> {
+                val degrees = call.argument<Int>("degrees") ?: 0
+                frameProcessor.setRotation(degrees)
+                result.success(true)
+            }
             "restartActiveDeviceMonitoring" -> {
                 Log.d(TAG, "restartActiveDeviceMonitoring invoked from Dart")
                 activeDeviceStreamHandler?.restartMonitoring()
@@ -377,26 +367,6 @@ class MetaWearablesDatPlugin :
                 // is the load-bearing part. A missing notification is a UX issue,
                 // not a correctness issue.
                 startBackgroundStreamingService(pendingCall, pendingResult)
-                return true
-            }
-            MOCK_CAMERA_PERMISSION_REQUEST_CODE -> {
-                val pendingCall = pendingMockCameraFacingCall
-                val pendingResult = pendingMockCameraFacingResult
-                pendingMockCameraFacingCall = null
-                pendingMockCameraFacingResult = null
-                if (pendingCall == null || pendingResult == null) return false
-                val granted =
-                        grantResults.isNotEmpty() &&
-                                grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-                if (!granted) {
-                    pendingResult.error(
-                            "PERMISSION_DENIED",
-                            "CAMERA permission is required for mock device camera feed.",
-                            null,
-                    )
-                    return true
-                }
-                applyMockCameraFacing(pendingCall, pendingResult)
                 return true
             }
             else -> return false
@@ -583,316 +553,6 @@ class MetaWearablesDatPlugin :
                         null
                 )
             }
-        }
-    }
-
-    // endregion
-
-    // region Mock Device
-
-    private var mockKitEnabled = false
-
-    private fun ensureMockKitEnabled() {
-        if (mockKitEnabled) return
-        val app = application ?: return
-        MockDeviceKit.getInstance(app).enable()
-        mockKitEnabled = true
-    }
-
-    private fun configureMockDevices(call: MethodCall, result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        val initiallyRegistered =
-                (call.argument<Boolean>("initiallyRegistered")) ?: true
-        val initialPermissionsGranted =
-                (call.argument<Boolean>("initialPermissionsGranted")) ?: true
-        if (!initiallyRegistered || !initialPermissionsGranted) {
-            Log.w(
-                    TAG,
-                    "configureMockDevices: initiallyRegistered/initialPermissionsGranted " +
-                            "overrides are not yet supported on Android; enabling MockDeviceKit " +
-                            "with default settings."
-            )
-        }
-        try {
-            val kit = MockDeviceKit.getInstance(app)
-            if (mockKitEnabled) {
-                kit.disable()
-                mockKitEnabled = false
-            }
-            kit.enable()
-            mockKitEnabled = true
-            result.success(true)
-        } catch (e: Exception) {
-            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to configure mock devices", null)
-        }
-    }
-
-    private fun disableMockDevices(result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        try {
-            teardownSession()
-            if (mockKitEnabled) {
-                MockDeviceKit.getInstance(app).disable()
-                mockKitEnabled = false
-            }
-            result.success(true)
-        } catch (e: Exception) {
-            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to disable mock devices", null)
-        }
-    }
-
-    private fun pairMockRayBanMeta(result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        try {
-            ensureMockKitEnabled()
-            val mockDevice = MockDeviceKit.getInstance(app).pairRaybanMeta()
-            result.success(mockDevice.deviceIdentifier.toString())
-        } catch (e: Exception) {
-            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to pair mock device", null)
-        }
-    }
-
-    private fun unpairMockRayBanMeta(call: MethodCall, result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        val deviceId = call.argument<String>("deviceUUID")
-        if (deviceId == null) {
-            result.error("INVALID_ARGS", "deviceUUID is missing", null)
-            return
-        }
-        try {
-            val kit = MockDeviceKit.getInstance(app)
-            val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
-            if (device != null) {
-                teardownSession()
-                kit.unpairDevice(device)
-                result.success(true)
-            } else {
-                result.error("DEVICE_NOT_FOUND", "No mock device found with uuid $deviceId", null)
-            }
-        } catch (e: Exception) {
-            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to unpair mock device", null)
-        }
-    }
-
-    private fun mockDeviceAction(call: MethodCall, result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        val deviceId = call.argument<String>("deviceUUID")
-        if (deviceId == null) {
-            result.error("INVALID_ARGS", "deviceUUID is missing", null)
-            return
-        }
-        try {
-            val kit = MockDeviceKit.getInstance(app)
-            val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
-            if (device != null) {
-                when (call.method) {
-                    "mockDevicePowerOn" -> device.powerOn()
-                    "mockDevicePowerOff" -> device.powerOff()
-                    "mockDeviceDon" -> device.don()
-                    "mockDeviceDoff" -> device.doff()
-                }
-                result.success(true)
-            } else {
-                result.error("DEVICE_NOT_FOUND", "No mock device found with uuid $deviceId", null)
-            }
-        } catch (e: Exception) {
-            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to perform action", null)
-        }
-    }
-
-    private fun setMockCameraFeed(call: MethodCall, result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        val deviceId = call.argument<String>("deviceUUID")
-        val videoPath = call.argument<String>("videoPath")
-        if (deviceId == null) {
-            result.error("INVALID_ARGS", "deviceUUID is missing", null)
-            return
-        }
-        try {
-            val kit = MockDeviceKit.getInstance(app)
-            val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
-            if (device is MockRaybanMeta) {
-                if (videoPath != null) {
-                    val uri = android.net.Uri.parse(videoPath)
-                    // MockDeviceKit extracts raw NAL units from the file without
-                    // honoring the container's rotation metadata, so phone-recorded
-                    // portrait videos arrive as native-landscape frames. Read the
-                    // rotation here so the FrameProcessor can compensate when
-                    // rendering to the Flutter texture.
-                    frameProcessor.setRotation(readVideoRotationDegrees(app, uri))
-                    device.services.camera.setCameraFeed(uri)
-                }
-                result.success(true)
-            } else {
-                result.error("INVALID_DEVICE", "Device is not a mock glasses device", null)
-            }
-        } catch (e: Exception) {
-            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to set camera feed", null)
-        }
-    }
-
-    private fun readVideoRotationDegrees(context: android.content.Context, uri: android.net.Uri): Int {
-        val retriever = android.media.MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, uri)
-            retriever
-                    .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-                    ?.toIntOrNull()
-                    ?: 0
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to read video rotation metadata for $uri", e)
-            0
-        } finally {
-            try {
-                retriever.release()
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun setMockCameraFacing(call: MethodCall, result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        val deviceId = call.argument<String>("deviceUUID")
-        val facingRaw = call.argument<String>("cameraFacing")
-        if (deviceId == null) {
-            result.error("INVALID_ARGS", "deviceUUID is missing", null)
-            return
-        }
-        if (facingRaw?.lowercase() !in setOf("front", "back")) {
-            result.error("INVALID_ARGS", "cameraFacing must be 'front' or 'back'", null)
-            return
-        }
-
-        // MockDeviceKit reads from the phone's physical camera to simulate the
-        // wearable feed, so the Android runtime CAMERA permission must be granted.
-        if (ContextCompat.checkSelfPermission(app, android.Manifest.permission.CAMERA) !=
-                        PackageManager.PERMISSION_GRANTED
-        ) {
-            val act = activity
-            if (act == null) {
-                result.error(
-                        "PERMISSION_ERROR",
-                        "Activity is not available to request CAMERA permission.",
-                        null,
-                )
-                return
-            }
-            if (pendingMockCameraFacingResult != null) {
-                result.error(
-                        "PERMISSION_ERROR",
-                        "A CAMERA permission request is already in progress.",
-                        null,
-                )
-                return
-            }
-            pendingMockCameraFacingCall = call
-            pendingMockCameraFacingResult = result
-            ActivityCompat.requestPermissions(
-                    act,
-                    arrayOf(android.Manifest.permission.CAMERA),
-                    MOCK_CAMERA_PERMISSION_REQUEST_CODE,
-            )
-            return
-        }
-
-        applyMockCameraFacing(call, result)
-    }
-
-    private fun applyMockCameraFacing(call: MethodCall, result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        val deviceId = call.argument<String>("deviceUUID")
-        val facingRaw = call.argument<String>("cameraFacing")
-        if (deviceId == null) {
-            result.error("INVALID_ARGS", "deviceUUID is missing", null)
-            return
-        }
-        val facing =
-                when (facingRaw?.lowercase()) {
-                    "front" -> CameraFacing.FRONT
-                    "back" -> CameraFacing.BACK
-                    else -> {
-                        result.error(
-                                "INVALID_ARGS",
-                                "cameraFacing must be 'front' or 'back'",
-                                null,
-                        )
-                        return
-                    }
-                }
-        try {
-            val kit = MockDeviceKit.getInstance(app)
-            val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
-            if (device is MockRaybanMeta) {
-                // Physical camera frames are already oriented correctly by the
-                // SDK's internal CameraFrameRotator — clear any rotation left
-                // over from a previous video-feed session.
-                frameProcessor.setRotation(0)
-                device.services.camera.setCameraFeed(facing)
-                result.success(true)
-            } else {
-                result.error("INVALID_DEVICE", "Device is not a mock glasses device", null)
-            }
-        } catch (e: Exception) {
-            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to set camera facing", null)
-        }
-    }
-
-    private fun setMockCapturedImage(call: MethodCall, result: Result) {
-        val app = application
-        if (app == null) {
-            result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
-            return
-        }
-        val deviceId = call.argument<String>("deviceUUID")
-        val imagePath = call.argument<String>("imagePath")
-        if (deviceId == null) {
-            result.error("INVALID_ARGS", "deviceUUID is missing", null)
-            return
-        }
-        try {
-            val kit = MockDeviceKit.getInstance(app)
-            val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
-            if (device is MockRaybanMeta) {
-                if (imagePath != null) {
-                    device.services.camera.setCapturedImage(android.net.Uri.parse(imagePath))
-                }
-                result.success(true)
-            } else {
-                result.error("INVALID_DEVICE", "Device is not a mock glasses device", null)
-            }
-        } catch (e: Exception) {
-            result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to set captured image", null)
         }
     }
 
@@ -1390,8 +1050,8 @@ class MetaWearablesDatPlugin :
 
     /**
      * Tear down the entire session, including the active stream. Called on
-     * device loss, `unpairMockRayBanMeta`, `disableMockDevices`, and plugin
-     * dispose. The next `startStreamSession` will create a fresh Session.
+     * device loss and plugin dispose. The next `startStreamSession` will create
+     * a fresh Session.
      */
     private fun teardownSession() {
         teardownStreamOnly()

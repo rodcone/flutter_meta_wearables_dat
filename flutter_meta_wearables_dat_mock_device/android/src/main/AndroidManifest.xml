@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  package="io.rodcone.flutter_meta_wearables_dat_mock_device">
+
+  <!-- MockDeviceKit reads from the phone's physical camera to simulate the
+       Ray-Ban Meta feed. This permission only ships when the consumer app
+       depends on this add-on; production apps that omit the add-on never
+       see it merged into their manifest. -->
+  <uses-permission android:name="android.permission.CAMERA" />
+
+</manifest>

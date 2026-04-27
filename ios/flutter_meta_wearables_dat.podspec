@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_meta_wearables_dat'
-  s.version          = '0.3.1'
+  s.version          = '0.4.0'
   s.summary          = 'A new Flutter plugin project.'
   s.description      = <<-DESC
 A new Flutter plugin project.
@@ -19,12 +19,11 @@ A new Flutter plugin project.
   s.static_framework = true
   s.vendored_frameworks = [
     'Frameworks/MWDATCore.xcframework',
-    'Frameworks/MWDATCamera.xcframework',
-    'Frameworks/MWDATMockDevice.xcframework'
+    'Frameworks/MWDATCamera.xcframework'
   ]
   s.preserve_paths = 'Frameworks/*.xcframework'
   s.frameworks = 'CoreBluetooth', 'Network', 'AVFoundation', 'VideoToolbox'
-  s.xcconfig = { 'OTHER_LDFLAGS' => '-framework MWDATCamera -framework MWDATCore -framework MWDATMockDevice' }
+  s.xcconfig = { 'OTHER_LDFLAGS' => '-framework MWDATCamera -framework MWDATCore' }
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386', 'OTHER_LDFLAGS' => '-lc++' }
