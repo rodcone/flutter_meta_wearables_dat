@@ -21,9 +21,13 @@ jobs:
       - name: flutter pub get
         working-directory: ${{ matrix.package }}
         run: flutter pub get
+      # Scope to lib/ — without it, `dart analyze` from the root recurses into
+      # flutter_meta_wearables_dat_mock_device/lib/ but can't resolve its
+      # self-imports because the sibling's .dart_tool isn't populated in this
+      # matrix slot.
       - name: dart analyze
         working-directory: ${{ matrix.package }}
-        run: dart analyze --fatal-infos
+        run: dart analyze --fatal-infos lib/
       - name: dart format
         working-directory: ${{ matrix.package }}
         run: dart format --set-exit-if-changed lib/

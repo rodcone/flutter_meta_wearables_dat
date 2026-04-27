@@ -34,17 +34,20 @@ jobs:
           done
           echo "OK: tag $TAG_VERSION matches both pubspecs"
 
+      # Scope analyze to lib/ so the root invocation doesn't recurse into the
+      # sibling mock package (whose .dart_tool isn't populated for the root
+      # working directory).
       - name: Analyze core
         run: |
           flutter pub get
-          dart analyze --fatal-infos
+          dart analyze --fatal-infos lib/
           if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
 
       - name: Analyze mock add-on
         working-directory: flutter_meta_wearables_dat_mock_device
         run: |
           flutter pub get
-          dart analyze --fatal-infos
+          dart analyze --fatal-infos lib/
           if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
 
       # Publish core first; if the mock add-on fails afterwards, re-tag
