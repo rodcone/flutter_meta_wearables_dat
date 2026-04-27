@@ -50,96 +50,6 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   );
 
   @override
-  Future<bool> configureMockDevices({
-    bool initiallyRegistered = true,
-    bool initialPermissionsGranted = true,
-  }) async {
-    final ok = await methodChannel.invokeMethod<bool>('configureMockDevices', {
-      'initiallyRegistered': initiallyRegistered,
-      'initialPermissionsGranted': initialPermissionsGranted,
-    });
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> disableMockDevices() async {
-    final ok = await methodChannel.invokeMethod<bool>('disableMockDevices');
-    return ok ?? false;
-  }
-
-  @override
-  Future<String?> pairMockRayBanMeta() async {
-    final deviceUUID = await methodChannel.invokeMethod<String>(
-      'pairMockRayBanMeta',
-    );
-    return deviceUUID;
-  }
-
-  @override
-  Future<bool> unpairMockRayBanMeta(String deviceUUID) async {
-    final ok = await methodChannel.invokeMethod<bool>('unpairMockRayBanMeta', {
-      'deviceUUID': deviceUUID,
-    });
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> setMockPermission(
-    Permission permission,
-    PermissionStatus status,
-  ) async {
-    final ok = await methodChannel.invokeMethod<bool>('setMockPermission', {
-      'permission': permission.value,
-      'status': status.value,
-    });
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> setMockPermissionRequestResult(
-    Permission permission,
-    PermissionStatus status,
-  ) async {
-    final ok = await methodChannel.invokeMethod<bool>(
-      'setMockPermissionRequestResult',
-      {'permission': permission.value, 'status': status.value},
-    );
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> mockDevicePowerOn(String deviceUUID) async {
-    final ok = await methodChannel.invokeMethod<bool>('mockDevicePowerOn', {
-      'deviceUUID': deviceUUID,
-    });
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> mockDevicePowerOff(String deviceUUID) async {
-    final ok = await methodChannel.invokeMethod<bool>('mockDevicePowerOff', {
-      'deviceUUID': deviceUUID,
-    });
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> mockDeviceDon(String deviceUUID) async {
-    final ok = await methodChannel.invokeMethod<bool>('mockDeviceDon', {
-      'deviceUUID': deviceUUID,
-    });
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> mockDeviceDoff(String deviceUUID) async {
-    final ok = await methodChannel.invokeMethod<bool>('mockDeviceDoff', {
-      'deviceUUID': deviceUUID,
-    });
-    return ok ?? false;
-  }
-
-  @override
   Future<bool> requestAndroidPermissions() async {
     final ok = await methodChannel.invokeMethod<bool>(
       'requestAndroidPermissions',
@@ -212,39 +122,6 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   @override
   Future<bool> disconnect() async {
     final ok = await methodChannel.invokeMethod<bool>('disconnect');
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> setMockCameraFeed(String deviceUUID, String? videoPath) async {
-    final ok = await methodChannel.invokeMethod<bool>('setMockCameraFeed', {
-      'deviceUUID': deviceUUID,
-      'videoPath': videoPath,
-    });
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> setMockCameraFacing(
-    String deviceUUID,
-    CameraFacing facing,
-  ) async {
-    final ok = await methodChannel.invokeMethod<bool>('setMockCameraFacing', {
-      'deviceUUID': deviceUUID,
-      'cameraFacing': facing.value,
-    });
-    return ok ?? false;
-  }
-
-  @override
-  Future<bool> setMockCapturedImage(
-    String deviceUUID,
-    String? imagePath,
-  ) async {
-    final ok = await methodChannel.invokeMethod<bool>('setMockCapturedImage', {
-      'deviceUUID': deviceUUID,
-      'imagePath': imagePath,
-    });
     return ok ?? false;
   }
 

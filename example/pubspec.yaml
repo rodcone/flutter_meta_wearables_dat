@@ -13,6 +13,13 @@ dependencies:
   flutter_meta_wearables_dat:
     path: ../
 
+  # Optional MockDeviceKit add-on. The example app uses mock pairing for
+  # development; production apps should omit this dependency to keep
+  # MockDeviceKit/AVFoundation/Camera symbols out of their binary and skip
+  # the matching Info.plist / AndroidManifest permission strings.
+  flutter_meta_wearables_dat_mock_device:
+    path: ../flutter_meta_wearables_dat_mock_device
+
   cupertino_icons: ^1.0.8
   provider: ^6.1.1
   image_picker: ^1.2.0

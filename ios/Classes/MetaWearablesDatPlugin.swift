@@ -2,7 +2,6 @@ import Flutter
 import UIKit
 import MWDATCore
 import MWDATCamera
-import MWDATMockDevice
 import AVFoundation
 import CoreMedia
 import VideoToolbox
@@ -39,9 +38,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var streamStateHandler = StreamSessionStateStreamHandler()
   private var streamErrorHandler = StreamSessionErrorStreamHandler()
   private var videoStreamSizeHandler = VideoStreamSizeStreamHandler()
-
-  // Current mock device config. Applied whenever MockDeviceKit is enabled.
-  private var mockDeviceConfig: MockDeviceKitConfig = MockDeviceKitConfig()
 
   // Background streaming — opt-in AVAudioSession keep-alive + software
   // decoder mode. When enabled, the plugin keeps the decoder alive across
@@ -92,26 +88,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
-      case "pairMockRayBanMeta":
-        pairMockRayBanMeta(result: result)
-      case "unpairMockRayBanMeta":
-        unpairMockRayBanMeta(call: call, result: result)
-      case "mockDevicePowerOn":
-        mockDeviceAction(call: call, result: result) { device in
-          device.powerOn()
-        }
-      case "mockDevicePowerOff":
-        mockDeviceAction(call: call, result: result) { device in
-          device.powerOff()
-        }
-      case "mockDeviceDon":
-        mockDeviceAction(call: call, result: result) { device in
-          device.don()
-        }
-      case "mockDeviceDoff":
-        mockDeviceAction(call: call, result: result) { device in
-          device.doff()
-        }
       case "requestAndroidPermissions":
         // No-op on iOS — Android-only runtime permissions
         result(true)
@@ -128,12 +104,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         getCameraPermissionStatus(result: result)
       case "requestCameraPermission":
         requestCameraPermission(result: result)
-      case "setMockCameraFeed":
-        setMockCameraFeed(call: call, result: result)
-      case "setMockCameraFacing":
-        setMockCameraFacing(call: call, result: result)
-      case "setMockCapturedImage":
-        setMockCapturedImage(call: call, result: result)
       case "startStreamSession":
         startStreamSession(call: call, result: result)
       case "stopStreamSession":
@@ -142,14 +112,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         capturePhoto(call: call, result: result)
       case "getRegistrationState":
         getRegistrationState(result: result)
-      case "configureMockDevices":
-        configureMockDevices(call: call, result: result)
-      case "disableMockDevices":
-        disableMockDevices(result: result)
-      case "setMockPermission":
-        setMockPermission(call: call, result: result)
-      case "setMockPermissionRequestResult":
-        setMockPermissionRequestResult(call: call, result: result)
       case "enableBackgroundStreaming":
         enableBackgroundStreaming(result: result)
       case "disableBackgroundStreaming":
@@ -177,134 +139,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private func disableBackgroundStreaming(result: @escaping FlutterResult) {
     backgroundController.disable()
     result(nil)
-  }
-
-  // MARK: - MockDeviceKit lifecycle (0.6.0)
-
-  private func ensureMockKitEnabled() {
-    if !MockDeviceKit.shared.isEnabled {
-      MockDeviceKit.shared.enable(config: mockDeviceConfig)
-    }
-  }
-
-  func configureMockDevices(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    let args = call.arguments as? [String: Any]
-    let initiallyRegistered = (args?["initiallyRegistered"] as? Bool) ?? true
-    let initialPermissionsGranted = (args?["initialPermissionsGranted"] as? Bool) ?? true
-    mockDeviceConfig = MockDeviceKitConfig(
-      initiallyRegistered: initiallyRegistered,
-      initialPermissionsGranted: initialPermissionsGranted
-    )
-
-    Task { @MainActor in
-      // Re-enable to apply the new config (disable is a no-op when off).
-      await teardownDeviceSession()
-      if MockDeviceKit.shared.isEnabled {
-        MockDeviceKit.shared.disable()
-      }
-      MockDeviceKit.shared.enable(config: mockDeviceConfig)
-      result(true)
-    }
-  }
-
-  func disableMockDevices(result: @escaping FlutterResult) {
-    Task { @MainActor in
-      await teardownDeviceSession()
-      if MockDeviceKit.shared.isEnabled {
-        MockDeviceKit.shared.disable()
-      }
-      result(true)
-    }
-  }
-
-  func pairMockRayBanMeta(result: @escaping FlutterResult) {
-    Task { @MainActor in
-      ensureMockKitEnabled()
-      let mockDevice = MockDeviceKit.shared.pairRaybanMeta()
-      result(mockDevice.deviceIdentifier)
-    }
-  }
-
-  func unpairMockRayBanMeta(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String : Any], let uuidString = args["deviceUUID"] as? String else {
-      result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID missing", details: nil))
-      return
-    }
-    Task { @MainActor in
-      let devices = MockDeviceKit.shared.pairedDevices
-      guard let device = devices.first(where: { $0.deviceIdentifier == uuidString }) else {
-        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock device with uuid \(uuidString)", details: nil))
-        return
-      }
-
-      // Clean up active session — unpairing the device invalidates it.
-      await teardownDeviceSession()
-
-      MockDeviceKit.shared.unpairDevice(device)
-      result(true)
-    }
-  }
-
-  private func mockDeviceAction(call: FlutterMethodCall, result: @escaping FlutterResult, perform: @escaping @MainActor (any MWDATMockDevice.MockDevice) -> Void) {
-    guard let args = call.arguments as? [String : Any], let uuidString = args["deviceUUID"] as? String else {
-      result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID missing", details: nil))
-      return
-    }
-
-    Task { @MainActor in
-      let devices = MockDeviceKit.shared.pairedDevices
-      guard let device = devices.first(where: { $0.deviceIdentifier == uuidString }) else {
-        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock device with uuid \(uuidString)", details: nil))
-        return
-      }
-      perform(device)
-      result(true)
-    }
-  }
-
-  // MARK: - Mock permissions (0.6.0)
-
-  private func parsePermission(_ raw: String?) -> MWDATCore.Permission? {
-    switch raw {
-    case "camera": return .camera
-    default: return nil
-    }
-  }
-
-  private func parsePermissionStatus(_ raw: String?) -> MWDATCore.PermissionStatus? {
-    switch raw {
-    case "granted": return .granted
-    case "denied": return .denied
-    default: return nil
-    }
-  }
-
-  func setMockPermission(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String: Any],
-          let permission = parsePermission(args["permission"] as? String),
-          let status = parsePermissionStatus(args["status"] as? String) else {
-      result(FlutterError(code: "INVALID_ARGS", message: "permission/status missing or invalid", details: nil))
-      return
-    }
-    Task { @MainActor in
-      ensureMockKitEnabled()
-      MockDeviceKit.shared.permissions.set(permission, status)
-      result(true)
-    }
-  }
-
-  func setMockPermissionRequestResult(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String: Any],
-          let permission = parsePermission(args["permission"] as? String),
-          let status = parsePermissionStatus(args["status"] as? String) else {
-      result(FlutterError(code: "INVALID_ARGS", message: "permission/status missing or invalid", details: nil))
-      return
-    }
-    Task { @MainActor in
-      ensureMockKitEnabled()
-      MockDeviceKit.shared.permissions.setRequestResult(permission, result: status)
-      result(true)
-    }
   }
 
   // MARK: - Permissions
@@ -760,149 +594,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
 
     return outputBuffer
-  }
-
-  // MARK: - Mock Camera Feed
-
-  private func mockCameraKit(for deviceUUID: String) -> (any MWDATMockDevice.MockCameraKit)? {
-    let devices = MockDeviceKit.shared.pairedDevices
-    guard let device = devices.first(where: { $0.deviceIdentifier == deviceUUID }) else {
-      return nil
-    }
-    guard let displayless = device as? any MWDATMockDevice.MockDisplaylessGlasses else {
-      return nil
-    }
-    return displayless.services.camera
-  }
-
-  func setMockCameraFeed(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String : Any],
-          let uuidString = args["deviceUUID"] as? String else {
-      result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID missing", details: nil))
-      return
-    }
-
-    Task { @MainActor in
-      guard let cameraKit = mockCameraKit(for: uuidString) else {
-        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock camera device with uuid \(uuidString)", details: nil))
-        return
-      }
-
-      if let videoPath = args["videoPath"] as? String, !videoPath.isEmpty {
-        let fileURL = URL(fileURLWithPath: videoPath)
-
-        // Validate file exists
-        let fileManager = FileManager.default
-        if !fileManager.fileExists(atPath: videoPath) {
-          result(FlutterError(code: "FILE_NOT_FOUND", message: "Video file not found at path: \(videoPath)", details: nil))
-          return
-        }
-
-        // Validate video codec - must be HEVC/H.265
-        let asset = AVAsset(url: fileURL)
-        let tracks = try? await asset.loadTracks(withMediaType: .video)
-        var foundHEVC = false
-
-        if let videoTracks = tracks {
-          for videoTrack in videoTracks {
-            if let formatDescriptions = try? await videoTrack.load(.formatDescriptions) as? [CMFormatDescription],
-               let formatDescription = formatDescriptions.first {
-              let codecType = CMFormatDescriptionGetMediaSubType(formatDescription)
-              let codecString = String(format: "%c%c%c%c",
-                                      (codecType >> 24) & 0xFF,
-                                      (codecType >> 16) & 0xFF,
-                                      (codecType >> 8) & 0xFF,
-                                      codecType & 0xFF)
-
-              if codecType == kCMVideoCodecType_HEVC ||
-                 codecString == "hvc1" ||
-                 codecString == "hev1" {
-                foundHEVC = true
-                break
-              }
-            }
-          }
-        }
-
-        if !foundHEVC {
-          result(FlutterError(code: "INVALID_CODEC", message: "Video must be HEVC/H.265 format. Use file_picker (not image_picker) to preserve original format.", details: nil))
-          return
-        }
-
-        cameraKit.setCameraFeed(fileURL: fileURL)
-        result(true)
-      } else {
-        result(true)
-      }
-    }
-  }
-
-  func setMockCameraFacing(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String: Any],
-          let uuidString = args["deviceUUID"] as? String,
-          let facingRaw = args["cameraFacing"] as? String else {
-      result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID/cameraFacing missing", details: nil))
-      return
-    }
-
-    let facing: MWDATMockDevice.CameraFacing
-    switch facingRaw {
-    case "front": facing = .front
-    case "back":  facing = .back
-    default:
-      result(FlutterError(code: "INVALID_ARGS", message: "cameraFacing must be 'front' or 'back'", details: nil))
-      return
-    }
-
-    Task { @MainActor in
-      guard let cameraKit = mockCameraKit(for: uuidString) else {
-        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock camera device with uuid \(uuidString)", details: nil))
-        return
-      }
-      // MockDeviceKit opens the phone's camera to simulate the wearable feed.
-      // Prompt proactively so a denial surfaces as a clear error instead of a
-      // silent black feed when the stream starts.
-      let granted = await Self.ensureCameraAuthorization()
-      guard granted else {
-        result(FlutterError(code: "PERMISSION_DENIED", message: "Camera permission is required for the mock device feed.", details: nil))
-        return
-      }
-      await cameraKit.setCameraFeed(cameraFacing: facing)
-      result(true)
-    }
-  }
-
-  private static func ensureCameraAuthorization() async -> Bool {
-    switch AVCaptureDevice.authorizationStatus(for: .video) {
-    case .authorized: return true
-    case .notDetermined: return await AVCaptureDevice.requestAccess(for: .video)
-    case .denied, .restricted: return false
-    @unknown default: return false
-    }
-  }
-
-  func setMockCapturedImage(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String : Any],
-          let uuidString = args["deviceUUID"] as? String else {
-      result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID missing", details: nil))
-      return
-    }
-
-    Task { @MainActor in
-      guard let cameraKit = mockCameraKit(for: uuidString) else {
-        result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock camera device with uuid \(uuidString)", details: nil))
-        return
-      }
-
-      if let imagePath = args["imagePath"] as? String, !imagePath.isEmpty {
-        let fileURL = URL(fileURLWithPath: imagePath)
-        cameraKit.setCapturedImage(fileURL: fileURL)
-        result(true)
-      } else {
-        // If imagePath is nil or empty, we could clear the image or just return success
-        result(true)
-      }
-    }
   }
 
   // MARK: - Stream Session

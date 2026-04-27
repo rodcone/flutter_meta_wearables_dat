@@ -130,41 +130,6 @@ class StreamSessionError {
   String toString() => 'StreamSessionError($code): $message';
 }
 
-/// Permissions that can be requested from the Meta Wearables SDK.
-///
-/// Currently only camera is exposed; the enum is designed to grow as
-/// additional permissions are surfaced by the SDK.
-enum Permission {
-  camera('camera');
-
-  const Permission(this.value);
-
-  /// String value sent over the platform channel.
-  final String value;
-}
-
-/// The current status of a [Permission].
-enum PermissionStatus {
-  granted('granted'),
-  denied('denied');
-
-  const PermissionStatus(this.value);
-
-  /// String value sent over the platform channel.
-  final String value;
-}
-
-/// Which phone camera to use when streaming into a mock device.
-enum CameraFacing {
-  front('front'),
-  back('back');
-
-  const CameraFacing(this.value);
-
-  /// String value sent over the platform channel.
-  final String value;
-}
-
 /// Dimensions of the active video stream, reported from the native layer
 /// when a new stream starts or the underlying frame size changes.
 ///
@@ -384,70 +349,6 @@ class VideoFrame {
 
 /// The main class for the Meta Wearables DAT.
 class MetaWearablesDat {
-  /// Configures the mock device subsystem.
-  ///
-  /// Call before [pairMockRayBanMeta] to simulate specific registration /
-  /// permission states. Calling this after devices have been paired tears
-  /// down the existing mock state and re-enables MockDeviceKit with the new
-  /// configuration.
-  ///
-  /// - [initiallyRegistered] — when `false`, the SDK behaves as if the user
-  ///   has not yet registered, so `startRegistration` can be exercised.
-  /// - [initialPermissionsGranted] — when `false`, all permissions start in
-  ///   the `denied` state and must be granted explicitly (via
-  ///   [setMockPermission] or by simulating a `requestPermission` flow).
-  static Future<bool> configureMockDevices({
-    bool initiallyRegistered = true,
-    bool initialPermissionsGranted = true,
-  }) {
-    return MetaWearablesDatPlatform.instance.configureMockDevices(
-      initiallyRegistered: initiallyRegistered,
-      initialPermissionsGranted: initialPermissionsGranted,
-    );
-  }
-
-  /// Disables the mock device subsystem and unpairs any paired mock devices.
-  static Future<bool> disableMockDevices() {
-    return MetaWearablesDatPlatform.instance.disableMockDevices();
-  }
-
-  /// Pairs a mock RayBan Meta device.
-  static Future<String?> pairMockRayBanMeta() {
-    return MetaWearablesDatPlatform.instance.pairMockRayBanMeta();
-  }
-
-  /// Unpairs a mock RayBan Meta device.
-  static Future<bool> unpairMockRayBanMeta(String deviceUUID) {
-    return MetaWearablesDatPlatform.instance.unpairMockRayBanMeta(deviceUUID);
-  }
-
-  /// Overrides the status returned by `checkPermissionStatus` for a given
-  /// [permission] on mock devices.
-  ///
-  /// Use together with [configureMockDevices] to test permission-gated
-  /// code paths (e.g. granted vs denied).
-  static Future<bool> setMockPermission(
-    Permission permission,
-    PermissionStatus status,
-  ) {
-    return MetaWearablesDatPlatform.instance.setMockPermission(
-      permission,
-      status,
-    );
-  }
-
-  /// Configures the result that a subsequent `requestPermission` call will
-  /// return for a given [permission] on mock devices.
-  static Future<bool> setMockPermissionRequestResult(
-    Permission permission,
-    PermissionStatus status,
-  ) {
-    return MetaWearablesDatPlatform.instance.setMockPermissionRequestResult(
-      permission,
-      status,
-    );
-  }
-
   /// Requests the Android runtime permissions required by the DAT SDK
   /// (Bluetooth, Internet). Returns true if all permissions are granted.
   /// No-op on iOS.
@@ -480,59 +381,6 @@ class MetaWearablesDat {
   /// URL must be passed to [handleUrl] to complete unregistration.
   static Future<bool> disconnect() {
     return MetaWearablesDatPlatform.instance.disconnect();
-  }
-
-  /// Powers on a mock RayBan Meta device.
-  static Future<bool> mockDevicePowerOn(String deviceUUID) {
-    return MetaWearablesDatPlatform.instance.mockDevicePowerOn(deviceUUID);
-  }
-
-  /// Powers off a mock RayBan Meta device.
-  static Future<bool> mockDevicePowerOff(String deviceUUID) {
-    return MetaWearablesDatPlatform.instance.mockDevicePowerOff(deviceUUID);
-  }
-
-  /// Simulates putting on (donning) a mock RayBan Meta device.
-  static Future<bool> mockDeviceDon(String deviceUUID) {
-    return MetaWearablesDatPlatform.instance.mockDeviceDon(deviceUUID);
-  }
-
-  /// Simulates taking off (doffing) a mock RayBan Meta device.
-  static Future<bool> mockDeviceDoff(String deviceUUID) {
-    return MetaWearablesDatPlatform.instance.mockDeviceDoff(deviceUUID);
-  }
-
-  /// Sets the camera feed for the mock device.
-  static Future<bool> setMockCameraFeed(String deviceUUID, String? videoPath) {
-    return MetaWearablesDatPlatform.instance.setMockCameraFeed(
-      deviceUUID,
-      videoPath,
-    );
-  }
-
-  /// Streams the phone's front or back camera into the mock device.
-  ///
-  /// Mutually exclusive with [setMockCameraFeed] — calling either clears
-  /// the source configured by the other.
-  static Future<bool> setMockCameraFacing(
-    String deviceUUID,
-    CameraFacing facing,
-  ) {
-    return MetaWearablesDatPlatform.instance.setMockCameraFacing(
-      deviceUUID,
-      facing,
-    );
-  }
-
-  /// Sets the captured image for the mock device.
-  static Future<bool> setMockCapturedImage(
-    String deviceUUID,
-    String? imagePath,
-  ) {
-    return MetaWearablesDatPlatform.instance.setMockCapturedImage(
-      deviceUUID,
-      imagePath,
-    );
   }
 
   /// Starts a stream session with the given device UUID, FPS, and stream quality.

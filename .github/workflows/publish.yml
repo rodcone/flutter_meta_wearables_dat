@@ -19,20 +19,47 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - run: flutter pub get
 
-      - name: Verify tag matches pubspec version
+      # Both packages publish in lockstep — verify the tag matches *both*
+      # pubspecs before doing anything destructive.
+      - name: Verify tag matches both pubspec versions
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PUBSPEC_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          if [ "$TAG_VERSION" != "$PUBSPEC_VERSION" ]; then
-            echo "ERROR: Tag version ($TAG_VERSION) does not match pubspec version ($PUBSPEC_VERSION)"
-            exit 1
-          fi
+          for pkg in . flutter_meta_wearables_dat_mock_device; do
+            PUBSPEC_VERSION=$(grep '^version:' "$pkg/pubspec.yaml" | awk '{print $2}')
+            if [ "$TAG_VERSION" != "$PUBSPEC_VERSION" ]; then
+              echo "ERROR: tag $TAG_VERSION does not match $pkg/pubspec.yaml ($PUBSPEC_VERSION)"
+              exit 1
+            fi
+          done
+          echo "OK: tag $TAG_VERSION matches both pubspecs"
 
-      - run: dart analyze --fatal-infos
-      - run: if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
-      - run: dart pub publish --force
+      # Scope analyze to lib/ so the root invocation doesn't recurse into the
+      # sibling mock package (whose .dart_tool isn't populated for the root
+      # working directory).
+      - name: Analyze core
+        run: |
+          flutter pub get
+          dart analyze --fatal-infos lib/
+          if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
+
+      - name: Analyze mock add-on
+        working-directory: flutter_meta_wearables_dat_mock_device
+        run: |
+          flutter pub get
+          dart analyze --fatal-infos lib/
+          if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
+
+      # Publish core first; if the mock add-on fails afterwards, re-tag
+      # patch-level after fixing — the core publish is not retried, so a
+      # half-publish is recoverable by bumping both packages to the next
+      # patch and re-running.
+      - name: Publish core to pub.dev
+        run: dart pub publish --force
+
+      - name: Publish mock add-on to pub.dev
+        working-directory: flutter_meta_wearables_dat_mock_device
+        run: dart pub publish --force
 
   github-release:
     needs: publish
@@ -42,18 +69,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Combine release notes from both CHANGELOGs so the GitHub release
+      # captures everything that shipped under this tag.
       - name: Extract changelog for this version
         id: changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          # Extract the section for this version from CHANGELOG.md
-          NOTES=$(awk "/^## ${VERSION}/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md)
-          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$NOTES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          CORE_NOTES=$(awk "/^## ${VERSION}/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md)
+          MOCK_NOTES=$(awk "/^## ${VERSION}/{flag=1; next} /^## /{flag=0} flag" flutter_meta_wearables_dat_mock_device/CHANGELOG.md)
+          {
+            echo "notes<<EOF"
+            echo "## flutter_meta_wearables_dat $VERSION"
+            echo ""
+            echo "$CORE_NOTES"
+            echo ""
+            echo "## flutter_meta_wearables_dat_mock_device $VERSION"
+            echo ""
+            echo "$MOCK_NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body: ${{ steps.changelog.notes }}
+          body: ${{ steps.changelog.outputs.notes }}
           generate_release_notes: false

@@ -36,27 +36,32 @@ PODS:
     - DKImagePickerController/PhotoGallery
     - Flutter
   - Flutter (1.0.0)
-  - flutter_meta_wearables_dat (0.3.0):
+  - flutter_meta_wearables_dat (0.4.0):
     - Flutter
+  - flutter_meta_wearables_dat_mock_device (0.4.0):
+    - Flutter
+    - flutter_meta_wearables_dat
   - image_picker_ios (0.0.1):
     - Flutter
+  - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
   - SDWebImage (5.21.7):
     - SDWebImage/Core (= 5.21.7)
   - SDWebImage/Core (5.21.7)
   - share_plus (0.0.1):
     - Flutter
   - SwiftyGif (5.4.5)
-  - url_launcher_ios (0.0.1):
-    - Flutter
 
 DEPENDENCIES:
   - app_links (from `.symlinks/plugins/app_links/ios`)
   - file_picker (from `.symlinks/plugins/file_picker/ios`)
   - Flutter (from `Flutter`)
   - flutter_meta_wearables_dat (from `.symlinks/plugins/flutter_meta_wearables_dat/ios`)
+  - flutter_meta_wearables_dat_mock_device (from `.symlinks/plugins/flutter_meta_wearables_dat_mock_device/ios`)
   - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
+  - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
   - share_plus (from `.symlinks/plugins/share_plus/ios`)
-  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
 
 SPEC REPOS:
   trunk:
@@ -74,12 +79,14 @@ EXTERNAL SOURCES:
     :path: Flutter
   flutter_meta_wearables_dat:
     :path: ".symlinks/plugins/flutter_meta_wearables_dat/ios"
+  flutter_meta_wearables_dat_mock_device:
+    :path: ".symlinks/plugins/flutter_meta_wearables_dat_mock_device/ios"
   image_picker_ios:
     :path: ".symlinks/plugins/image_picker_ios/ios"
+  path_provider_foundation:
+    :path: ".symlinks/plugins/path_provider_foundation/darwin"
   share_plus:
     :path: ".symlinks/plugins/share_plus/ios"
-  url_launcher_ios:
-    :path: ".symlinks/plugins/url_launcher_ios/ios"
 
 SPEC CHECKSUMS:
   app_links: 3dbc685f76b1693c66a6d9dd1e9ab6f73d97dc0a
@@ -87,12 +94,13 @@ SPEC CHECKSUMS:
   DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
   file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  flutter_meta_wearables_dat: ebdbf7ffb5d8c70c879e08a85e4e2e5e2e360341
+  flutter_meta_wearables_dat: c612a0dfb06489d22e02160cd5374dd126d161ca
+  flutter_meta_wearables_dat_mock_device: c188f20f19c0fca9676cae3c74ccded70f241700
   image_picker_ios: e0ece4aa2a75771a7de3fa735d26d90817041326
+  path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
   SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
-  url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
 
 PODFILE CHECKSUM: f374215f0fcce7886753508da55ef961ec8c75ba
 

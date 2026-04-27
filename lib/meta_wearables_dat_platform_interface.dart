@@ -27,61 +27,6 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     _instance = instance;
   }
 
-  Future<bool> configureMockDevices({
-    bool initiallyRegistered = true,
-    bool initialPermissionsGranted = true,
-  }) {
-    throw UnimplementedError(
-      'configureMockDevices() has not been implemented.',
-    );
-  }
-
-  Future<bool> disableMockDevices() {
-    throw UnimplementedError('disableMockDevices() has not been implemented.');
-  }
-
-  Future<String?> pairMockRayBanMeta() {
-    throw UnimplementedError('pairMockRayBanMeta() has not been implemented.');
-  }
-
-  Future<bool> unpairMockRayBanMeta(String deviceUUID) {
-    throw UnimplementedError(
-      'unpairMockRayBanMeta() has not been implemented.',
-    );
-  }
-
-  Future<bool> setMockPermission(
-    Permission permission,
-    PermissionStatus status,
-  ) {
-    throw UnimplementedError('setMockPermission() has not been implemented.');
-  }
-
-  Future<bool> setMockPermissionRequestResult(
-    Permission permission,
-    PermissionStatus status,
-  ) {
-    throw UnimplementedError(
-      'setMockPermissionRequestResult() has not been implemented.',
-    );
-  }
-
-  Future<bool> mockDevicePowerOn(String deviceUUID) {
-    throw UnimplementedError('mockDevicePowerOn() has not been implemented.');
-  }
-
-  Future<bool> mockDevicePowerOff(String deviceUUID) {
-    throw UnimplementedError('mockDevicePowerOff() has not been implemented.');
-  }
-
-  Future<bool> mockDeviceDon(String deviceUUID) {
-    throw UnimplementedError('mockDeviceDon() has not been implemented.');
-  }
-
-  Future<bool> mockDeviceDoff(String deviceUUID) {
-    throw UnimplementedError('mockDeviceDoff() has not been implemented.');
-  }
-
   Future<bool> requestAndroidPermissions() {
     throw UnimplementedError(
       'requestAndroidPermissions() has not been implemented.',
@@ -110,20 +55,6 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
 
   Future<bool> disconnect() {
     throw UnimplementedError('disconnect() has not been implemented.');
-  }
-
-  Future<bool> setMockCameraFeed(String deviceUUID, String? videoPath) {
-    throw UnimplementedError('setMockCameraFeed() has not been implemented.');
-  }
-
-  Future<bool> setMockCameraFacing(String deviceUUID, CameraFacing facing) {
-    throw UnimplementedError('setMockCameraFacing() has not been implemented.');
-  }
-
-  Future<bool> setMockCapturedImage(String deviceUUID, String? imagePath) {
-    throw UnimplementedError(
-      'setMockCapturedImage() has not been implemented.',
-    );
   }
 
   /// Starts a stream session. Returns a texture ID (int) for rendering

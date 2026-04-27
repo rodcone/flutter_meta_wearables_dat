@@ -5,25 +5,49 @@ globs: "**/*mock*.dart"
 
 # DAT Mock Device
 
+Mock APIs live in the optional add-on `flutter_meta_wearables_dat_mock_device` (since 0.4.0). Production builds that omit it skip `MWDATMockDevice` linkage and don't need `NSCameraUsageDescription` / `CAMERA`.
+
+## Add the dev-only dependency
+```yaml
+dependencies:
+  flutter_meta_wearables_dat: ^0.4.0
+  flutter_meta_wearables_dat_mock_device: ^0.4.0
+```
+
+```dart
+import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
+```
+
 ## Create and control
 ```dart
-final uuid = await MetaWearablesDat.pairMockRayBanMeta();
-await MetaWearablesDat.mockDevicePowerOn(uuid!);
-await MetaWearablesDat.mockDeviceDon(uuid); // Required for streaming
+await MetaWearablesDatMockDevice.configure(
+  initiallyRegistered: true,
+  initialPermissionsGranted: true,
+);
+final uuid = await MetaWearablesDatMockDevice.pairRayBanMeta();
+await MetaWearablesDatMockDevice.powerOn(uuid!);
+await MetaWearablesDatMockDevice.don(uuid); // Required for streaming
+await MetaWearablesDatMockDevice.setCameraFacing(uuid, CameraFacing.back);
 ```
 
 ## Mock camera feed
 ```dart
-await MetaWearablesDat.setMockCameraFeed(uuid, videoPath); // H.265/HEVC only
-await MetaWearablesDat.setMockCapturedImage(uuid, imagePath);
+await MetaWearablesDatMockDevice.setCameraFeed(uuid, videoPath); // H.265/HEVC only
+await MetaWearablesDatMockDevice.setCapturedImage(uuid, imagePath);
 ```
 
 ## Stream with mock device
-Pass specific `deviceUUID` (not null): `startStreamSession(uuid, fps: 24)`
+Streaming + capture still go through the core API. Pass the specific `deviceUUID` (not null):
+```dart
+final textureId = await MetaWearablesDat.startStreamSession(uuid, fps: 24);
+```
 
 ## Cleanup
 ```dart
-await MetaWearablesDat.unpairMockRayBanMeta(uuid);
+await MetaWearablesDat.stopStreamSession(uuid);
+await MetaWearablesDatMockDevice.unpairRayBanMeta(uuid);
 ```
+
+`Permission`, `PermissionStatus`, and `CameraFacing` enums live in the mock package.
 
 See `example/lib/providers/mock_device_provider.dart` for canonical pattern.

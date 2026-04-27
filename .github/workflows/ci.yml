@@ -7,31 +7,81 @@ on:
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - .
+          - flutter_meta_wearables_dat_mock_device
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - run: flutter pub get
-      - run: dart analyze --fatal-infos
-      - run: dart format --set-exit-if-changed lib/
+      - name: flutter pub get
+        working-directory: ${{ matrix.package }}
+        run: flutter pub get
+      # Scope to lib/ — without it, `dart analyze` from the root recurses into
+      # flutter_meta_wearables_dat_mock_device/lib/ but can't resolve its
+      # self-imports because the sibling's .dart_tool isn't populated in this
+      # matrix slot.
+      - name: dart analyze
+        working-directory: ${{ matrix.package }}
+        run: dart analyze --fatal-infos lib/
+      - name: dart format
+        working-directory: ${{ matrix.package }}
+        run: dart format --set-exit-if-changed lib/
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - .
+          - flutter_meta_wearables_dat_mock_device
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - run: flutter pub get
-      - run: if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
+      - name: flutter pub get
+        working-directory: ${{ matrix.package }}
+        run: flutter pub get
+      - name: flutter test
+        working-directory: ${{ matrix.package }}
+        run: if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
 
   dry-run:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - .
+          - flutter_meta_wearables_dat_mock_device
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - run: flutter pub get
-      - run: dart pub publish --dry-run
+      - name: flutter pub get
+        working-directory: ${{ matrix.package }}
+        run: flutter pub get
+      - name: dart pub publish --dry-run
+        working-directory: ${{ matrix.package }}
+        run: dart pub publish --dry-run
+
+  versions-in-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify both pubspec versions match
+        run: |
+          CORE_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          MOCK_VERSION=$(grep '^version:' flutter_meta_wearables_dat_mock_device/pubspec.yaml | awk '{print $2}')
+          if [ "$CORE_VERSION" != "$MOCK_VERSION" ]; then
+            echo "ERROR: core ($CORE_VERSION) and mock add-on ($MOCK_VERSION) versions must match — they release in lockstep"
+            exit 1
+          fi
+          echo "OK: both packages are at $CORE_VERSION"
