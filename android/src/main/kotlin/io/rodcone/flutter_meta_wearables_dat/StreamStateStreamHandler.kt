@@ -1,7 +1,7 @@
 package io.rodcone.flutter_meta_wearables_dat
 
 import com.meta.wearable.dat.camera.Stream
-import com.meta.wearable.dat.camera.types.StreamSessionState
+import com.meta.wearable.dat.camera.types.StreamState
 import io.flutter.plugin.common.EventChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,12 +13,12 @@ import kotlinx.coroutines.launch
 
 /**
  * Stream handler for stream session state updates from the DAT SDK.
- * Emits integer values matching the Dart `StreamSessionState` enum.
+ * Emits integer values matching the Dart `StreamState` enum.
  *
  * Set the [stream] property when a stream is added to a session.
  * Clear it when the stream is torn down.
  */
-internal class StreamSessionStateStreamHandler : EventChannel.StreamHandler {
+internal class StreamStateStreamHandler : EventChannel.StreamHandler {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
@@ -64,7 +64,7 @@ internal class StreamSessionStateStreamHandler : EventChannel.StreamHandler {
 
     companion object {
         /**
-         * Maps Android SDK StreamSessionState to int values expected by Dart.
+         * Maps Android SDK StreamState to int values expected by Dart.
          *
          * Android enum: STARTING, STARTED, STREAMING, STOPPING, STOPPED, CLOSED
          * Dart enum:    stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
@@ -74,14 +74,14 @@ internal class StreamSessionStateStreamHandler : EventChannel.StreamHandler {
          * - CLOSED has no direct Dart equivalent; mapped to stopped(1).
          * - Android has no WAITING_FOR_DEVICE or PAUSED states.
          */
-        fun mapState(state: StreamSessionState): Int {
+        fun mapState(state: StreamState): Int {
             return when (state) {
-                StreamSessionState.STOPPING -> 0
-                StreamSessionState.STOPPED -> 1
-                StreamSessionState.STARTING -> 3
-                StreamSessionState.STARTED -> 3
-                StreamSessionState.STREAMING -> 4
-                StreamSessionState.CLOSED -> 1
+                StreamState.STOPPING -> 0
+                StreamState.STOPPED -> 1
+                StreamState.STARTING -> 3
+                StreamState.STARTED -> 3
+                StreamState.STREAMING -> 4
+                StreamState.CLOSED -> 1
             }
         }
     }
