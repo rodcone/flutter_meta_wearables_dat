@@ -1,187 +1,277 @@
 import AVFoundation
 import Foundation
+import ImageIO
 import MWDATCore
+import Network
 
-/// A suite for mocking camera functionality.
-public protocol MockCameraKit {
+/// The camera to use for live streaming from the phone.
+public enum CameraFacing : Sendable {
 
-    func setCameraFeed(fileURL: URL) async
+    case front
 
-    func setCapturedImage(fileURL: URL) async
+    case back
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    public static func == (a: MWDATMockDevice.CameraFacing, b: MWDATMockDevice.CameraFacing) -> Bool
+
+    public func hash(into hasher: inout Hasher)
+
+    public var hashValue: Int { get }
 }
 
-@MainActor public protocol MockDevice {
+extension CameraFacing : Equatable {
+}
+
+extension CameraFacing : Hashable {
+}
+
+/// A suite for mocking camera functionality.
+public protocol MockCameraKit : Sendable {
+
+    /// Sets the camera feed from a video file.
+    ///
+    /// Supported codecs: h.265
+    ///
+    /// Mutually exclusive with ``setCameraFeed(cameraFacing:)``.
+    /// Calling this clears any active camera source.
+    ///
+    /// - Parameter fileURL: URL of the file containing the video stream.
+    func setCameraFeed(fileURL: URL)
+
+    /// Sets the camera feed to stream live from the phone's camera.
+    ///
+    /// Mutually exclusive with ``setCameraFeed(fileURL:)``.
+    /// Calling this clears any active camera feed file.
+    ///
+    /// - Parameter cameraFacing: Which phone camera to use.
+    func setCameraFeed(cameraFacing: MWDATMockDevice.CameraFacing) async
+
+    /// Sets the captured image from an image file.
+    /// - Parameter fileURL: URL of the file containing the image.
+    func setCapturedImage(fileURL: URL)
+}
+
+public protocol MockDevice : Sendable {
 
     /// The unique device identifier for this mock device.
-    @MainActor var deviceIdentifier: MWDATCore.DeviceIdentifier { get }
+    var deviceIdentifier: MWDATCore.DeviceIdentifier { get }
 
     /// Powers on the mock device.
-    @MainActor func powerOn()
+    func powerOn()
 
     /// Powers off the mock device.
-    @MainActor func powerOff()
+    func powerOff()
 
     /// Simulates putting on (donning) the device.
-    @MainActor func don()
+    func don()
 
     /// Simulates taking off (doffing) the device.
-    @MainActor func doff()
+    func doff()
 }
 
 /// The entry-point to the MockDeviceKit for managing simulated Meta Wearables devices.
 /// Use this in testing and development scenarios to simulate real hardware behavior.
-@MainActor public enum MockDeviceKit {
+public enum MockDeviceKit : Sendable {
 
     /// The shared instance of MockDeviceKit for managing simulated devices.
-    @MainActor public static let shared: any MWDATMockDevice.MockDeviceKitInterface
+    public static let shared: any MWDATMockDevice.MockDeviceKitInterface
 }
 
-extension MockDeviceKit : Sendable {
+/// Configuration options for MockDeviceKit.
+@frozen public struct MockDeviceKitConfig : Sendable {
+
+    /// Whether the mock device should start in a registered state.
+    /// When `true` (default), `enable()` immediately transitions to `.registered`.
+    /// When `false`, the state starts as `.unavailable`, allowing `startRegistration()` to be tested.
+    public let initiallyRegistered: Bool
+
+    /// Whether permissions should start as granted.
+    /// When `true` (default), all permissions are granted after `enable()`.
+    /// When `false`, all permissions start denied — tests must explicitly grant via `set(_ permission:, .granted)`.
+    /// Forced to `false` when `initiallyRegistered` is `false` (can't have permissions without registration).
+    public let initialPermissionsGranted: Bool
+
+    public init(initiallyRegistered: Bool = true, initialPermissionsGranted: Bool = true)
 }
 
-@frozen public enum MockDeviceKitError : Error {
-
-    case unknown
-
-    /// Returns a Boolean value indicating whether two values are equal.
-    ///
-    /// Equality is the inverse of inequality. For any values `a` and `b`,
-    /// `a == b` implies that `a != b` is `false`.
-    ///
-    /// - Parameters:
-    ///   - lhs: A value to compare.
-    ///   - rhs: Another value to compare.
-    public static func == (a: MWDATMockDevice.MockDeviceKitError, b: MWDATMockDevice.MockDeviceKitError) -> Bool
-
-    /// Hashes the essential components of this value by feeding them into the
-    /// given hasher.
-    ///
-    /// Implement this method to conform to the `Hashable` protocol. The
-    /// components used for hashing must be the same as the components compared
-    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
-    /// with each of these components.
-    ///
-    /// - Important: In your implementation of `hash(into:)`,
-    ///   don't call `finalize()` on the `hasher` instance provided,
-    ///   or replace it with a different instance.
-    ///   Doing so may become a compile-time error in the future.
-    ///
-    /// - Parameter hasher: The hasher to use when combining the components
-    ///   of this instance.
-    public func hash(into hasher: inout Hasher)
-
-    /// The hash value.
-    ///
-    /// Hash values are not guaranteed to be equal across different executions of
-    /// your program. Do not save hash values to use during a future execution.
-    ///
-    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
-    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
-    ///   The compiler provides an implementation for `hashValue` for you.
-    public var hashValue: Int { get }
-}
-
-extension MockDeviceKitError : Equatable {
-}
-
-extension MockDeviceKitError : Hashable {
-}
-
-extension MockDeviceKitError : BitwiseCopyable {
+extension MockDeviceKitConfig : BitwiseCopyable {
 }
 
 /// Interface for managing mock Meta Wearables devices for testing and development.
-@MainActor public protocol MockDeviceKitInterface {
+public protocol MockDeviceKitInterface : Sendable {
+
+    /// Whether MockDeviceKit is currently enabled.
+    var isEnabled: Bool { get }
+
+    /// Enables MockDeviceKit, injecting fake providers into the registration and device layers.
+    ///
+    /// Safe to call regardless of whether `Wearables.configure()` has been called —
+    /// MockDeviceKit will auto-configure Wearables if needed.
+    ///
+    /// - Parameter config: Configuration options for MockDeviceKit behavior.
+    func enable(config: MWDATMockDevice.MockDeviceKitConfig)
+
+    /// Disables MockDeviceKit, restoring real providers and unpairing all mock devices.
+    func disable()
 
     /// Pairs a simulated Ray-Ban Meta device.
     /// MockDeviceKit must be enabled before calling this method.
     /// - Returns: A mock Ray-Ban Meta device instance.
-    @MainActor func pairRaybanMeta() -> any MWDATMockDevice.MockRaybanMeta
+    func pairRaybanMeta() -> any MWDATMockDevice.MockRaybanMeta
 
     /// Unpairs a simulated device.
     /// - Parameter device: The mock device to unpair.
-    @MainActor func unpairDevice(_ device: any MWDATMockDevice.MockDevice)
+    func unpairDevice(_ device: any MWDATMockDevice.MockDevice)
 
     /// The list of all currently paired mock devices.
-    @MainActor var pairedDevices: [any MWDATMockDevice.MockDevice] { get }
+    var pairedDevices: [any MWDATMockDevice.MockDevice] { get }
+
+    /// Interface for configuring mock permission behavior.
+    var permissions: any MWDATMockDevice.MockPermissions { get }
+}
+
+extension MockDeviceKitInterface {
+
+    /// Enables MockDeviceKit with the default `MockDeviceKitConfig()`.
+    public func enable()
 }
 
 /// Protocol for simulating displayless smart glasses behavior in testing and development.
 /// Provides functionality for simulating folding/unfolding actions and camera capabilities.
-@MainActor public protocol MockDisplaylessGlasses : MWDATMockDevice.MockDevice {
+public protocol MockDisplaylessGlasses : MWDATMockDevice.MockDevice {
 
     /// Simulates folding the glasses into a closed position.
-    @MainActor func fold()
+    func fold()
 
     /// Simulates unfolding the glasses into an open position.
-    @MainActor func unfold()
+    func unfold()
 
-    @MainActor func getCameraKit() -> any MWDATMockDevice.MockCameraKit
+    /// Container for services available on this device.
+    var services: any MWDATMockDevice.MockDisplaylessGlassesServices { get }
+}
+
+/// Container for accessing mock device service kits.
+public protocol MockDisplaylessGlassesServices : Sendable {
+
+    /// The suite for mocking camera functionality.
+    var camera: any MWDATMockDevice.MockCameraKit { get }
+}
+
+/// Interface for configuring mock permission behavior during testing.
+///
+/// Use this to simulate granted/denied permission states and control
+/// the outcome of `requestPermission()` calls without launching the
+/// Meta AI companion app.
+public protocol MockPermissions : Sendable {
+
+    /// Sets the status of a permission on the mock device.
+    ///
+    /// This affects both `checkPermissionStatus()` (via the DataX service)
+    /// and subsequent `requestPermission()` calls.
+    ///
+    /// - Parameters:
+    ///   - permission: The permission to configure.
+    ///   - status: The status to assign to the permission.
+    func set(_ permission: MWDATCore.Permission, _ status: MWDATCore.PermissionStatus)
+
+    /// Configures the result that `requestPermission()` will return for a
+    /// specific permission.
+    ///
+    /// - Parameters:
+    ///   - permission: The permission to configure.
+    ///   - result: The status to return when the permission is requested.
+    func setRequestResult(_ permission: MWDATCore.Permission, result: MWDATCore.PermissionStatus)
 }
 
 /// Protocol for simulating Ray-Ban Meta smart glasses behavior in testing and development.
 /// Inherits all functionality from MockDisplaylessGlasses while providing a specific type
 /// for Ray-Ban Meta device simulation.
-@MainActor public protocol MockRaybanMeta : MWDATMockDevice.MockDisplaylessGlasses {
+public protocol MockRaybanMeta : MWDATMockDevice.MockDisplaylessGlasses {
 }
 
-@objc(MockCameraKit) final public class ObjC_MockCameraKit : NSObject {
+@objc(MockCameraKit) final public class ObjC_MockCameraKit : NSObject, Sendable {
 
-    @objc final public func setCameraFeed(fileURL: URL) async
+    /// Set camera feed from a video file. Supported codecs: h.265
+    /// - Parameter fileURL: URL of the file containing video stream
+    @objc final public func setCameraFeed(fileURL: URL)
 
-    @objc final public func setCapturedImage(fileURL: URL) async
+    /// Set the camera source to stream live from the phone's camera.
+    /// - Parameter cameraFacing: 0 for front camera, 1 for back camera.
+    @objc final public func setCameraFeed(cameraFacing: Int) async
+
+    /// Set captured image from an image file.
+    /// - Parameter fileURL: URL of the file containing image
+    @objc final public func setCapturedImage(fileURL: URL)
 
     @objc deinit
 }
 
-@MainActor @objc(MockDevice) public protocol ObjC_MockDevice {
+@objc(MockDevice) public protocol ObjC_MockDevice : Sendable {
 
     /// Returns the device identifier
-    @MainActor @objc var deviceIdentifier: String { get }
+    @objc var deviceIdentifier: String { get }
 
     /// Powers on the mock device.
-    @MainActor @objc func powerOn()
+    @objc func powerOn()
 
     /// Powers off the mock device.
-    @MainActor @objc func powerOff()
+    @objc func powerOff()
 
     /// Simulates putting on (donning) the device.
-    @MainActor @objc func don()
+    @objc func don()
 
     /// Simulates taking off (doffing) the device.
-    @MainActor @objc func doff()
+    @objc func doff()
 }
 
-@MainActor @objc(MWDATMockDeviceKit) final public class ObjC_MockDeviceKit : NSObject {
+@objc(MWDATMockDeviceKit) final public class ObjC_MockDeviceKit : NSObject, Sendable {
 
-    @MainActor @objc public static let sharedInstance: MWDATMockDevice.ObjC_MockDeviceKit
+    @objc public static let sharedInstance: MWDATMockDevice.ObjC_MockDeviceKit
+
+    /// Whether MockDeviceKit is currently enabled.
+    @objc final public var isEnabled: Bool { get }
+
+    /// Enables MockDeviceKit with the default configuration (initially registered).
+    @objc final public func enable()
+
+    /// Enables MockDeviceKit with the specified initial registration state.
+    /// - Parameter initiallyRegistered: When `true`, enables in `.registered` state.
+    ///   When `false`, enables in `.unavailable` state, allowing `startRegistration()` to be tested.
+    @objc final public func enable(initiallyRegistered: Bool)
+
+    /// Disables MockDeviceKit and unpairs all devices.
+    @objc final public func disable()
 
     /// All paired devices.
-    @MainActor @objc final public var pairedDevices: [any MWDATMockDevice.ObjC_MockDevice] { get }
+    @objc final public var pairedDevices: [any MWDATMockDevice.ObjC_MockDevice] { get }
 
     /// Pair simulated RBM glasses
-    @MainActor @objc final public func pairRaybanMeta() -> any MWDATMockDevice.ObjC_MockRaybanMeta
+    @objc final public func pairRaybanMeta() -> any MWDATMockDevice.ObjC_MockRaybanMeta
 
     /// Unpair simulated device
-    @MainActor @objc final public func unpairDevice(_ device: any MWDATMockDevice.ObjC_MockDevice)
+    @objc final public func unpairDevice(_ device: any MWDATMockDevice.ObjC_MockDevice)
 
     @objc deinit
 }
 
-extension ObjC_MockDeviceKit : Sendable {
-}
-
-@MainActor @objc(MockDisplaylessGlasses) public protocol ObjC_MockDisplaylessGlasses : MWDATMockDevice.ObjC_MockDevice {
+@objc(MockDisplaylessGlasses) public protocol ObjC_MockDisplaylessGlasses : MWDATMockDevice.ObjC_MockDevice {
 
     /// Simulates folding the glasses into a closed position.
-    @MainActor @objc func fold()
+    @objc func fold()
 
     /// Simulates unfolding the glasses into an open position.
-    @MainActor @objc func unfold()
+    @objc func unfold()
 
-    @MainActor @objc func getCameraKit() -> MWDATMockDevice.ObjC_MockCameraKit
+    /// Container for accessing mock device service kits (camera, voice invocation, etc.).
+    @objc var services: MWDATMockDevice.ObjC_MockDisplaylessGlassesServices { get }
 }
 
-@MainActor @objc(MockRaybanMeta) public protocol ObjC_MockRaybanMeta : MWDATMockDevice.ObjC_MockDisplaylessGlasses {
+@objc(MockDisplaylessGlassesServices) final public class ObjC_MockDisplaylessGlassesServices : NSObject, Sendable {
+
+    @objc final public let camera: MWDATMockDevice.ObjC_MockCameraKit
+
+    @objc deinit
 }
 
+@objc(MockRaybanMeta) public protocol ObjC_MockRaybanMeta : MWDATMockDevice.ObjC_MockDisplaylessGlasses {
+}
