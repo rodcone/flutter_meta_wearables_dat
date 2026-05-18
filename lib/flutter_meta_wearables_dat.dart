@@ -1,8 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/rendering.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_meta_wearables_dat/meta_wearables_dat_platform_interface.dart';
 
 /// Represents the current state of user registration with the Meta Wearables platform.
@@ -107,9 +106,24 @@ enum StreamSessionState {
 class StreamSessionError {
   /// The error code identifying the type of error.
   ///
-  /// Known codes: `internalError`, `deviceNotFound`, `deviceNotConnected`,
-  /// `timeout`, `videoStreamingError`, `permissionDenied`, `hingesClosed`,
-  /// `thermalCritical`.
+  /// **Stream-level codes** (originate from the DAT SDK's `StreamError`):
+  /// `internalError`, `deviceNotFound`, `deviceNotConnected`, `timeout`,
+  /// `videoStreamingError`, `permissionDenied`, `hingesClosed`,
+  /// `thermalCritical`, `thermalEmergency`, `peakPowerShutdown`,
+  /// `batteryCritical`.
+  ///
+  /// **Device-session codes** (originate from the SDK's `DeviceSessionError`,
+  /// surfaced on the same channel so consumers don't need a second
+  /// subscription): `noEligibleDevice`, `sessionAlreadyStopped`,
+  /// `sessionAlreadyExists`, `sessionIdle`, `capabilityAlreadyActive`,
+  /// `capabilityNotFound`, `unexpectedError`, `deviceThermalCritical`,
+  /// `deviceThermalEmergency`, `devicePeakPowerShutdown`,
+  /// `deviceBatteryCritical`, `datAppOnTheGlassesUpdateRequired`,
+  /// `dwaUnavailable`.
+  ///
+  /// When this is `datAppOnTheGlassesUpdateRequired`, call
+  /// [MetaWearablesDat.openDATGlassesAppUpdate] to prompt the user to update
+  /// the DAT app on the glasses — streaming won't work until they do.
   final String code;
 
   /// A human-readable description of the error.
@@ -128,6 +142,78 @@ class StreamSessionError {
 
   @override
   String toString() => 'StreamSessionError($code): $message';
+}
+
+/// Per-device thermal state reported by the DAT SDK.
+///
+/// Values escalate from [none] (cool) up to [shutdown] (the device is forced
+/// off). Streaming-affecting transitions also surface as
+/// [StreamSessionError]s (`thermalCritical` / `thermalEmergency` / etc.) on
+/// [MetaWearablesDat.streamSessionErrorStream] — use this stream when you
+/// want to react *before* streaming has to stop (e.g. show a "device is
+/// getting hot" hint at [moderate] or [severe]).
+enum ThermalLevel {
+  /// State not yet known (no reading from the device).
+  unknown(0),
+
+  /// Cool — no thermal concerns.
+  none(1),
+
+  /// Slightly warm. Safe.
+  light(2),
+
+  /// Warming up. Still safe but worth surfacing in UI.
+  moderate(3),
+
+  /// Hot. Streaming may degrade soon.
+  severe(4),
+
+  /// Critical — DAT will pause streaming shortly.
+  critical(5),
+
+  /// Emergency — streaming has already been stopped to protect the device.
+  emergency(6),
+
+  /// Device has shut down due to thermal overload.
+  shutdown(7);
+
+  const ThermalLevel(this.value);
+
+  /// Integer value sent over the platform channel.
+  final int value;
+
+  /// Converts an integer value to a thermal level.
+  static ThermalLevel fromInt(int value) {
+    return ThermalLevel.values.firstWhere(
+      (level) => level.value == value,
+      orElse: () => ThermalLevel.unknown,
+    );
+  }
+}
+
+/// Snapshot of per-device state emitted by
+/// [MetaWearablesDat.deviceStateStream].
+///
+/// Currently carries only [thermalLevel]; this is a value type rather than a
+/// raw `ThermalLevel` so additional state fields can be added later without
+/// breaking the public API.
+@immutable
+class DeviceState {
+  const DeviceState({required this.thermalLevel});
+
+  /// Current thermal level of the active device.
+  final ThermalLevel thermalLevel;
+
+  @override
+  String toString() => 'DeviceState(thermalLevel: $thermalLevel)';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DeviceState && other.thermalLevel == thermalLevel;
+
+  @override
+  int get hashCode => thermalLevel.hashCode;
 }
 
 /// Dimensions of the active video stream, reported from the native layer
@@ -587,5 +673,34 @@ class MetaWearablesDat {
   /// native side short-circuits serialization so there is no per-frame cost.
   static Stream<VideoFrame> videoFramesStream() {
     return MetaWearablesDatPlatform.instance.videoFramesStream();
+  }
+
+  /// Opens the Meta AI app to the DAT-app-update screen on the connected
+  /// glasses. Call this in response to a
+  /// `datAppOnTheGlassesUpdateRequired` error code on
+  /// [streamSessionErrorStream] — streaming won't work until the user
+  /// updates the on-device DAT app.
+  ///
+  /// Returns `true` if the navigation succeeded. Throws a `PlatformException`
+  /// with code `metaAINotInstalled` if the Meta AI app isn't installed, or
+  /// `notRegistered` if the app hasn't completed registration. iOS only in
+  /// this release; Android support follows once the Android binary is bumped.
+  static Future<bool> openDATGlassesAppUpdate() {
+    return MetaWearablesDatPlatform.instance.openDATGlassesAppUpdate();
+  }
+
+  /// Stream of [DeviceState] snapshots for the active device.
+  ///
+  /// Currently emits whenever the device's [ThermalLevel] changes. Subscribe
+  /// to drive thermal warnings in your UI — by the time a critical-level
+  /// thermal error reaches [streamSessionErrorStream] the stream has already
+  /// stopped, so reacting to [ThermalLevel.moderate] / [ThermalLevel.severe]
+  /// gives you a chance to warn the user before that happens.
+  ///
+  /// The stream switches its underlying subscription automatically when the
+  /// active device changes. iOS only in this release; emits nothing on
+  /// Android until the Android binary is bumped.
+  static Stream<DeviceState> deviceStateStream() {
+    return MetaWearablesDatPlatform.instance.deviceStateStream();
   }
 }

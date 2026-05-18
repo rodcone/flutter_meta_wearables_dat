@@ -2,19 +2,18 @@ import Flutter
 import MWDATCamera
 import MWDATCore
 
-/// Stream handler for stream-related errors (both `StreamSession` errors and
-/// the `DeviceSession` errors that gate the stream). They share the same
-/// Flutter event channel because the Dart side exposes a single
-/// `streamSessionErrorStream()` API — consumers don't need to care which
-/// layer produced the error.
+/// Stream handler for stream-related errors (both `Stream` errors and the
+/// `DeviceSession` errors that gate the stream). They share the same Flutter
+/// event channel because the Dart side exposes a single `streamErrorStream()`
+/// API — consumers don't need to care which layer produced the error.
 ///
-/// Set `session` when a `StreamSession` is created; clear it on teardown.
-/// Pre-stream failures (createSession / DeviceSession.start / addStream
-/// throws) are forwarded via `sendError(code:message:)`.
-class StreamSessionErrorStreamHandler: NSObject, FlutterStreamHandler {
-  /// The active stream session to observe. Setting this property
-  /// re-subscribes to the session's error publisher.
-  var session: StreamSession? {
+/// Set `session` when a `Stream` is created; clear it on teardown. Pre-stream
+/// failures (createSession / DeviceSession.start / addStream throws) are
+/// forwarded via `sendError(code:message:)`.
+class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
+  /// The active stream to observe. Setting this property re-subscribes to the
+  /// stream's error publisher.
+  var session: MWDATCamera.Stream? {
     didSet { resubscribe() }
   }
 
@@ -34,7 +33,7 @@ class StreamSessionErrorStreamHandler: NSObject, FlutterStreamHandler {
   }
 
   /// Pushes a synthesised error onto the event channel. Used by the plugin
-  /// to surface errors that happen before a `StreamSession` exists (e.g.
+  /// to surface errors that happen before a `Stream` exists (e.g.
   /// `DeviceSession.start()` throwing `.noEligibleDevice`).
   func sendError(code: String, message: String) {
     guard let events = eventSink else { return }
@@ -70,8 +69,8 @@ class StreamSessionErrorStreamHandler: NSObject, FlutterStreamHandler {
     }
   }
 
-  /// Converts a StreamSessionError to a dictionary for the platform channel.
-  private static func errorToMap(_ error: StreamSessionError) -> [String: Any] {
+  /// Converts a `StreamError` to a dictionary for the platform channel.
+  private static func errorToMap(_ error: StreamError) -> [String: Any] {
     let code: String
     let message: String
 
@@ -100,6 +99,15 @@ class StreamSessionErrorStreamHandler: NSObject, FlutterStreamHandler {
     case .thermalCritical:
       code = "thermalCritical"
       message = "Device is overheating. Streaming has been paused to protect the device."
+    case .thermalEmergency:
+      code = "thermalEmergency"
+      message = "Device thermal state is emergency — streaming stopped."
+    case .peakPowerShutdown:
+      code = "peakPowerShutdown"
+      message = "Device exceeded peak power limit and shut down streaming."
+    case .batteryCritical:
+      code = "batteryCritical"
+      message = "Device battery is critically low — streaming stopped."
     @unknown default:
       code = "unknown"
       message = "An unknown streaming error occurred."
@@ -124,6 +132,21 @@ class StreamSessionErrorStreamHandler: NSObject, FlutterStreamHandler {
       return ("capabilityNotFound", "The requested capability is not attached to the session.")
     case .unexpectedError(let description):
       return ("unexpectedError", "Unexpected device session error: \(description)")
+    case .thermalCritical:
+      return ("deviceThermalCritical", "Device thermal state is critical.")
+    case .thermalEmergency:
+      return ("deviceThermalEmergency", "Device thermal state is emergency.")
+    case .peakPowerShutdown:
+      return ("devicePeakPowerShutdown", "Device exceeded peak power limit and shut down.")
+    case .batteryCritical:
+      return ("deviceBatteryCritical", "Device battery is critically low.")
+    case .datAppOnTheGlassesUpdateRequired:
+      return (
+        "datAppOnTheGlassesUpdateRequired",
+        "The DAT app on the glasses needs to be updated. Call MetaWearablesDat.openDATGlassesAppUpdate() to prompt the user."
+      )
+    case .dwaUnavailable:
+      return ("dwaUnavailable", "The DAT Wearables App is unavailable.")
     @unknown default:
       return ("unknown", "An unknown device session error occurred.")
     }

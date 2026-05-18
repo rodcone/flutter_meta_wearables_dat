@@ -7,10 +7,10 @@ import CoreMedia
 import VideoToolbox
 
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
-  // Device session (0.6.0): created lazily on first startStreamSession call
-  // using the shared AutoDeviceSelector. Kept alive across stream start/stop
-  // so toggling streaming is fast. Torn down only when the underlying device
-  // disappears or when the plugin is disabled.
+  // Device session (DAT 0.7.0): created lazily on first startStreamSession
+  // call using the shared AutoDeviceSelector. Kept alive across stream
+  // start/stop so toggling streaming is fast. Torn down only when the
+  // underlying device disappears or when the plugin is disabled.
   private lazy var deviceSelector: AutoDeviceSelector = {
     AutoDeviceSelector(wearables: Wearables.shared)
   }()
@@ -20,7 +20,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var deviceAvailabilityTask: Task<Void, Never>?
 
   // Stream session state (single session at a time)
-  private var streamSession: StreamSession?
+  private var streamSession: MWDATCamera.Stream?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
   private var errorListenerToken: (any MWDATCore.AnyListenerToken)?
   private var frameCounter: Int = 0
@@ -34,9 +34,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var isInBackground: Bool = false
   // Texture registry
   private var textureRegistry: FlutterTextureRegistry?
-  // Stream session event handlers
-  private var streamStateHandler = StreamSessionStateStreamHandler()
-  private var streamErrorHandler = StreamSessionErrorStreamHandler()
+  // Stream event handlers
+  private var streamStateHandler = StreamStateStreamHandler()
+  private var streamErrorHandler = StreamErrorStreamHandler()
   private var videoStreamSizeHandler = VideoStreamSizeStreamHandler()
 
   // Background streaming — opt-in AVAudioSession keep-alive + software
@@ -79,6 +79,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // that don't opt in to background streaming.
     let videoFramesChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/video_frames", binaryMessenger: registrar.messenger())
     videoFramesChannel.setStreamHandler(instance.videoFrameHandler)
+    // Event channel for per-device state (thermal level). Tracks the active
+    // device and switches subscription on device change.
+    let deviceStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/device_state", binaryMessenger: registrar.messenger())
+    deviceStateChannel.setStreamHandler(DeviceStateStreamHandler(deviceSelectorProvider: { [weak instance] in
+      instance?.deviceSelector ?? AutoDeviceSelector(wearables: Wearables.shared)
+    }))
 
     Task { @MainActor in
       try? Wearables.configure()
@@ -116,8 +122,43 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         enableBackgroundStreaming(result: result)
       case "disableBackgroundStreaming":
         disableBackgroundStreaming(result: result)
+      case "openDATGlassesAppUpdate":
+        openDATGlassesAppUpdate(result: result)
       default:
         result(FlutterMethodNotImplemented)
+    }
+  }
+
+  // MARK: - Navigation APIs (0.7.0)
+
+  /// Opens the Meta AI app to the DAT-app-update screen for the connected
+  /// glasses. The companion to the `datAppOnTheGlassesUpdateRequired`
+  /// `DeviceSessionError` surfaced on `streamSessionErrorStream()` — apps
+  /// receiving that error should call this method to prompt the user to
+  /// update the on-device DAT app before retrying.
+  private func openDATGlassesAppUpdate(result: @escaping FlutterResult) {
+    Task { @MainActor in
+      do {
+        try await Wearables.shared.openDATGlassesAppUpdate()
+        result(true)
+      } catch let e as MWDATCore.NavigationError {
+        let code: String
+        let message: String
+        switch e {
+        case .metaAINotInstalled:
+          code = "metaAINotInstalled"
+          message = "Meta AI app is not installed. Please install it to update the glasses app."
+        case .notRegistered:
+          code = "notRegistered"
+          message = "App is not registered with Meta AI glasses. Complete registration first."
+        @unknown default:
+          code = "unknown"
+          message = "Unknown navigation error: \(e)"
+        }
+        result(FlutterError(code: code, message: message, details: e.rawValue))
+      } catch {
+        result(FlutterError(code: "NAVIGATION_ERROR", message: error.localizedDescription, details: nil))
+      }
     }
   }
 
@@ -413,7 +454,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Strategy: invalidate the decoder on background, skip frame processing
   // while backgrounded, let the lazy-init path in decodeCompressedFrame()
   // recreate the decoder on the first frame after foregrounding. The
-  // underlying StreamSession stays alive throughout.
+  // underlying Stream stays alive throughout.
 
   public func applicationDidEnterBackground(_ application: UIApplication) {
     isInBackground = true
@@ -653,15 +694,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       lastFrameSendTime = nil
       NSLog("[MWDAT] Registered texture \(texId)")
 
-      // 3. Add a StreamSession capability.
+      // 3. Add a Stream capability.
       let fpsValue = UInt(max(1, Int(fps.rounded())))
-      let streamConfig = StreamSessionConfig(
+      let streamConfig = StreamConfiguration(
         videoCodec: videoCodec,
         resolution: Self.resolution(for: streamQuality),
         frameRate: fpsValue
       )
 
-      let stream: StreamSession?
+      let stream: MWDATCamera.Stream?
       do {
         stream = try deviceSession.addStream(config: streamConfig)
       } catch let e as DeviceSessionError {
@@ -683,7 +724,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
       // 4. Wire listeners.
       errorListenerToken = session.errorPublisher.listen { error in
-        NSLog("[MWDAT] StreamSession error: \(error)")
+        NSLog("[MWDAT] Stream error: \(error)")
       }
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }

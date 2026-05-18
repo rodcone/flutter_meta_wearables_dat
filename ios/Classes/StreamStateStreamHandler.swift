@@ -2,14 +2,14 @@ import Flutter
 import MWDATCamera
 import MWDATCore
 
-/// Stream handler for stream session state updates.
+/// Stream handler for stream state updates.
 ///
-/// Set the `session` property when a stream session is created.
-/// Clear it when the session is torn down.
-class StreamSessionStateStreamHandler: NSObject, FlutterStreamHandler {
-  /// The active stream session to observe. Setting this property
-  /// re-subscribes to the session's state publisher.
-  var session: StreamSession? {
+/// Set the `session` property when a `Stream` is created.
+/// Clear it when the stream is torn down.
+class StreamStateStreamHandler: NSObject, FlutterStreamHandler {
+  /// The active stream to observe. Setting this property
+  /// re-subscribes to the stream's state publisher.
+  var session: MWDATCamera.Stream? {
     didSet { resubscribe() }
   }
 
@@ -50,8 +50,8 @@ class StreamSessionStateStreamHandler: NSObject, FlutterStreamHandler {
     }
   }
 
-  /// Maps StreamSessionState to the int values expected by Dart.
-  private static func stateToInt(_ state: StreamSessionState) -> Int {
+  /// Maps StreamState to the int values expected by Dart.
+  private static func stateToInt(_ state: StreamState) -> Int {
     switch state {
     case .stopping:         return 0
     case .stopped:          return 1

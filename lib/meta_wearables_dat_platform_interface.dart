@@ -138,4 +138,14 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
   Stream<VideoFrame> videoFramesStream() {
     throw UnimplementedError('videoFramesStream() has not been implemented.');
   }
+
+  Future<bool> openDATGlassesAppUpdate() {
+    throw UnimplementedError(
+      'openDATGlassesAppUpdate() has not been implemented.',
+    );
+  }
+
+  Stream<DeviceState> deviceStateStream() {
+    throw UnimplementedError('deviceStateStream() has not been implemented.');
+  }
 }

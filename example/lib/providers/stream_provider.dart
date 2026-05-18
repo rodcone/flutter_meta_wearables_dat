@@ -18,6 +18,7 @@ class StreamSessionProvider extends ChangeNotifier {
   StreamSubscription<StreamSessionState>? _sessionStateSubscription;
   StreamSubscription<StreamSessionError>? _sessionErrorSubscription;
   StreamSubscription<VideoStreamSize>? _videoStreamSizeSubscription;
+  StreamSubscription<DeviceState>? _deviceStateSubscription;
   VideoStreamSize? _videoStreamSize;
   bool _hasActiveDevice = false;
   bool _isStreaming = false;
@@ -26,6 +27,7 @@ class StreamSessionProvider extends ChangeNotifier {
   VideoCodec _videoCodec = VideoCodec.raw;
   StreamSessionState? _sessionState;
   StreamSessionError? _lastError;
+  ThermalLevel? _thermalLevel;
   String? _selectedVideo;
   String? _selectedImage;
   bool _isLoadingVideo = false;
@@ -35,6 +37,7 @@ class StreamSessionProvider extends ChangeNotifier {
 
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
     _initializeActiveDeviceMonitoring();
+    _initializeDeviceStateMonitoring();
   }
 
   bool get hasActiveDevice => _hasActiveDevice;
@@ -53,18 +56,69 @@ class StreamSessionProvider extends ChangeNotifier {
   bool get supportsHvc1 => Platform.isIOS;
   bool get backgroundStreamingEnabled => _backgroundStreamingEnabled;
 
+  /// Current thermal level of the active device, or `null` if no device is
+  /// active or the SDK hasn't reported a level yet. Updated live via
+  /// [MetaWearablesDat.deviceStateStream].
+  ThermalLevel? get thermalLevel => _thermalLevel;
+
+  /// True when the latest error from the SDK signals the on-device DAT app
+  /// needs updating — pair with [openDATGlassesAppUpdate] to surface a
+  /// "Update glasses app" action to the user.
+  bool get requiresDATGlassesAppUpdate =>
+      _lastError?.code == 'datAppOnTheGlassesUpdateRequired';
+
   void _initializeActiveDeviceMonitoring() {
     _activeDeviceSubscription = MetaWearablesDat.activeDeviceStream().listen(
       (hasActiveDevice) {
         _hasActiveDevice = hasActiveDevice;
+        // Reset thermal readout when device goes away so the UI doesn't show
+        // stale data; the next active device will repopulate it.
+        if (!hasActiveDevice) {
+          _thermalLevel = null;
+        }
         notifyListeners();
       },
       onError: (dynamic error) {
         debugPrint('[MetaWearablesDAT] Error in active device stream: $error');
         _hasActiveDevice = false;
+        _thermalLevel = null;
         notifyListeners();
       },
     );
+  }
+
+  void _initializeDeviceStateMonitoring() {
+    _deviceStateSubscription = MetaWearablesDat.deviceStateStream().listen(
+      (state) {
+        if (_thermalLevel != state.thermalLevel) {
+          _thermalLevel = state.thermalLevel;
+          notifyListeners();
+        }
+      },
+      onError: (dynamic error) {
+        debugPrint('[MetaWearablesDAT] Device state stream error: $error');
+      },
+    );
+  }
+
+  /// Opens the Meta AI app to the DAT-app-update screen on the connected
+  /// glasses. Call this when [requiresDATGlassesAppUpdate] is true to prompt
+  /// the user to update the on-device DAT app.
+  Future<bool> openDATGlassesAppUpdate() async {
+    unawaited(HapticFeedback.mediumImpact());
+    try {
+      final ok = await MetaWearablesDat.openDATGlassesAppUpdate();
+      if (ok) {
+        // Clear the error so the banner goes away once the user has been
+        // handed off to the Meta AI app.
+        _lastError = null;
+        notifyListeners();
+      }
+      return ok;
+    } catch (e) {
+      debugPrint('[MetaWearablesDAT] openDATGlassesAppUpdate failed: $e');
+      return false;
+    }
   }
 
   @override
@@ -73,6 +127,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _sessionStateSubscription?.cancel();
     _sessionErrorSubscription?.cancel();
     _videoStreamSizeSubscription?.cancel();
+    _deviceStateSubscription?.cancel();
     super.dispose();
   }
 
