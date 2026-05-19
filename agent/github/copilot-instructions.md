@@ -20,7 +20,9 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 - `registrationStateStream()` — RegistrationState: unavailable(0), available(1), registering(2), registered(3)
 - `activeDeviceStream()` — bool, device availability
 - `streamSessionStateStream()` — stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
-- `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, hingesClosed, permissionDenied, deviceNotConnected, etc.
+- `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, thermalEmergency, peakPowerShutdown, batteryCritical, hingesClosed, permissionDenied, deviceNotConnected, datAppOnTheGlassesUpdateRequired (recover via `openDATGlassesAppUpdate()`), dwaUnavailable, plus device-session variants (deviceThermalCritical etc.).
+- `deviceStateStream()` — `Stream<DeviceState>` of live `ThermalLevel` (unknown, none, light, moderate, severe, critical, emergency, shutdown). Use to warn the user *before* a thermal error stops the stream.
+- `openDATGlassesAppUpdate()` — opens the Meta AI app to the DAT-app-update screen. Pair with the `datAppOnTheGlassesUpdateRequired` error code to drive a "tap to update" UI.
 - `videoStreamSizeStream()` — VideoStreamSize (width/height/aspectRatio) emitted on stream start and resolution changes
 - `stopStreamSession(deviceUUID)` — end session
 - `capturePhoto(deviceUUID, format:)` — PhotoCaptureFormat.jpeg or .heic
@@ -33,7 +35,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 
 Mock support lives in the optional add-on `flutter_meta_wearables_dat_mock_device` (since 0.4.0). Production builds that omit it skip `MWDATMockDevice` linkage and don't need `NSCameraUsageDescription` / `CAMERA`.
 
-- Add `flutter_meta_wearables_dat_mock_device: ^0.4.0` to dev/staging `pubspec.yaml`.
+- Add `flutter_meta_wearables_dat_mock_device: ^0.5.0` to dev/staging `pubspec.yaml`.
 - Import: `import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';`
 - Optional bypass for registration/permission flows: `MetaWearablesDatMockDevice.configure(initiallyRegistered: true, initialPermissionsGranted: true)`
 - Lifecycle: `MetaWearablesDatMockDevice.pairRayBanMeta()` → UUID, then `.powerOn(uuid)` + `.don(uuid)`, optionally `.setCameraFacing(uuid, CameraFacing.back)`

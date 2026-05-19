@@ -45,6 +45,7 @@ Communication:
 | `StreamSessionState` | `stopping(0)`, `stopped(1)`, `waitingForDevice(2)`, `starting(3)`, `streaming(4)`, `paused(5)` |
 | `PhotoCaptureFormat` | `heic('heic')`, `jpeg('jpeg')` |
 | `FrameFormat` | `rawRgba`, `rawStraightRgba`, `png` |
+| `ThermalLevel` | `unknown(0)`, `none(1)`, `light(2)`, `moderate(3)`, `severe(4)`, `critical(5)`, `emergency(6)`, `shutdown(7)` |
 
 ### Classes
 
@@ -57,6 +58,7 @@ Communication:
 | `VideoStreamSize` | `width`, `height`, `aspectRatio` |
 | `VideoFrame` | `codec` (VideoCodec), `bytes` (Uint8List), `width`, `height`, `presentationTimestampUs`, `isKeyframe` |
 | `BackgroundNotification` | `title`, `text`, `channelId`, `channelName`, `iconResourceName?` (Android only) |
+| `DeviceState` | `thermalLevel` (ThermalLevel) |
 
 ### Error codes (StreamSessionError)
 
@@ -69,7 +71,13 @@ Communication:
 | `videoStreamingError` | Video stream failed |
 | `permissionDenied` | Camera permission denied |
 | `hingesClosed` | User folded the glasses |
-| `thermalCritical` | Device overheating — streaming pauses automatically |
+| `thermalCritical` | Device thermal state is critical — streaming pauses |
+| `thermalEmergency` | Device thermal state is emergency — streaming stopped |
+| `peakPowerShutdown` | Device exceeded peak power limit — streaming stopped |
+| `batteryCritical` | Device battery critically low — streaming stopped |
+| `deviceThermalCritical` / `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants of the above (session is torn down, not just the stream) |
+| `datAppOnTheGlassesUpdateRequired` | The on-device DAT app needs updating. Call `MetaWearablesDat.openDATGlassesAppUpdate()` to prompt the user. |
+| `dwaUnavailable` | The DAT Wearables App is unavailable on the glasses |
 
 ## API reference
 
@@ -108,6 +116,16 @@ static Future<void> enableBackgroundStreaming({
 })
 static Future<void> disableBackgroundStreaming()
 static Stream<VideoFrame> videoFramesStream()   // foreground + background
+
+// Device state (thermal) — live ThermalLevel updates from the active device.
+// Useful for warning the user *before* a thermalCritical error stops the stream.
+static Stream<DeviceState> deviceStateStream()
+
+// Navigation — opens the Meta AI app to the DAT-app-update screen on the
+// glasses. Pair with the `datAppOnTheGlassesUpdateRequired` error code to drive
+// a "tap to update" UI; the SDK refuses to stream until the on-device DAT app
+// is current. Throws `metaAINotInstalled` or `notRegistered` PlatformException.
+static Future<bool> openDATGlassesAppUpdate()
 
 // Photo capture
 static Future<CapturedPhoto> capturePhoto(
@@ -446,8 +464,8 @@ Develop and test without physical Meta glasses. Mock support lives in the option
 ```yaml
 # pubspec.yaml — add only in dev/staging configs
 dependencies:
-  flutter_meta_wearables_dat: ^0.4.0
-  flutter_meta_wearables_dat_mock_device: ^0.4.0
+  flutter_meta_wearables_dat: ^0.5.0
+  flutter_meta_wearables_dat_mock_device: ^0.5.0
 ```
 
 ```dart

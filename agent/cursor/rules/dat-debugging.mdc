@@ -10,7 +10,9 @@ description: Diagnosing common DAT integration issues — registration failures,
 - **Android: permissions fail silently**: MainActivity must extend `FlutterFragmentActivity`, not `FlutterActivity`.
 - **Android: dependency resolution fails**: Set `GITHUB_TOKEN` env var or `github_token` in `local.properties`.
 - **Android: device not discovered**: `requestAndroidPermissions()` must be called and granted before any DAT call.
-- **thermalCritical error**: Device overheating, streaming pauses automatically.
+- **thermalCritical / thermalEmergency error**: Device thermal limit reached; streaming pauses (critical) or stops (emergency). Use `deviceStateStream()` to react to `ThermalLevel.severe` *before* the stream gets killed.
+- **batteryCritical / peakPowerShutdown error**: Glasses ran out of power or hit a peak-power limit; stream stopped.
+- **datAppOnTheGlassesUpdateRequired error**: The on-device DAT app needs updating before streaming can work. Call `MetaWearablesDat.openDATGlassesAppUpdate()` to bounce the user to Meta AI.
 - **hingesClosed error**: User folded the glasses.
 
 ## Glasses restart

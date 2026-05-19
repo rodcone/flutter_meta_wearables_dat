@@ -683,8 +683,7 @@ class MetaWearablesDat {
   ///
   /// Returns `true` if the navigation succeeded. Throws a `PlatformException`
   /// with code `metaAINotInstalled` if the Meta AI app isn't installed, or
-  /// `notRegistered` if the app hasn't completed registration. iOS only in
-  /// this release; Android support follows once the Android binary is bumped.
+  /// `notRegistered` if the app hasn't completed registration.
   static Future<bool> openDATGlassesAppUpdate() {
     return MetaWearablesDatPlatform.instance.openDATGlassesAppUpdate();
   }
@@ -698,8 +697,7 @@ class MetaWearablesDat {
   /// gives you a chance to warn the user before that happens.
   ///
   /// The stream switches its underlying subscription automatically when the
-  /// active device changes. iOS only in this release; emits nothing on
-  /// Android until the Android binary is bumped.
+  /// active device changes.
   static Stream<DeviceState> deviceStateStream() {
     return MetaWearablesDatPlatform.instance.deviceStateStream();
   }

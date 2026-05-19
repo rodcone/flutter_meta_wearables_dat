@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,9 +8,6 @@ import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dar
     as stream_providers;
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/sheet_handle_bar.dart';
 import 'package:provider/provider.dart';
-
-const String _packageVersion = '0.5.0';
-const String _datVersion = '0.6.0';
 
 class SettingsSheet extends StatelessWidget {
   const SettingsSheet({super.key});
@@ -40,8 +36,6 @@ class SettingsSheet extends StatelessWidget {
             const _StreamSettingsSection(),
             const SizedBox(height: 24),
             _DisconnectSection(),
-            const SizedBox(height: 24),
-            _AboutSection(),
             SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
           ],
         ),
@@ -521,62 +515,6 @@ class _DisconnectSection extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _AboutSection extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const _SectionTitle(title: 'About', icon: Icons.info_outline),
-        const SizedBox(height: 12),
-        const _VersionRow(label: 'Package', value: _packageVersion),
-        const _VersionRow(label: 'DAT SDK', value: _datVersion),
-        _VersionRow(
-          label: 'Platform',
-          value: Platform.isIOS ? 'iOS' : 'Android',
-        ),
-        const SizedBox(height: 12),
-        
-      ],
-    );
-  }
-}
-
-class _VersionRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _VersionRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withOpacity(0.7),
-                  ),
-            ),
-          ),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontFamily: 'monospace',
-                ),
-          ),
-        ],
-      ),
     );
   }
 }

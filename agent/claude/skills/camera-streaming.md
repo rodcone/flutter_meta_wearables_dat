@@ -15,8 +15,15 @@ final stateSub = MetaWearablesDat.streamSessionStateStream().listen((state) {
 
 final errorSub = MetaWearablesDat.streamSessionErrorStream().listen((error) {
   // StreamSessionError: code + message
-  if (error.isThermalCritical) { /* device overheating */ }
+  if (error.isThermalCritical) { /* device overheating — stream paused */ }
   if (error.isHingesClosed) { /* glasses folded */ }
+  if (error.code == 'datAppOnTheGlassesUpdateRequired') {
+    // On-device DAT app needs updating — bounce user to Meta AI
+    MetaWearablesDat.openDATGlassesAppUpdate();
+  }
+  // Other 0.5.0 codes: thermalEmergency, peakPowerShutdown, batteryCritical,
+  // deviceThermalCritical, deviceThermalEmergency, devicePeakPowerShutdown,
+  // deviceBatteryCritical, dwaUnavailable.
 });
 
 // Start streaming — returns texture ID
@@ -97,6 +104,18 @@ Payload layout:
 **Valid FPS values:** 2, 7, 15, 24, 30
 
 Lower resolution and frame rate yield higher visual quality due to less Bluetooth compression.
+
+## Device thermal monitoring (optional)
+
+`deviceStateStream()` emits `DeviceState` whenever the active device's thermal level changes. Subscribe to drive a "device is getting hot" indicator *before* a thermal error stops the stream.
+
+```dart
+final thermalSub = MetaWearablesDat.deviceStateStream().listen((state) {
+  // state.thermalLevel: unknown, none, light, moderate, severe, critical, emergency, shutdown
+});
+```
+
+The stream switches its underlying subscription automatically when the active device changes; emits nothing while no device is active. Surface UI at `severe` / `critical` — by `emergency` the stream has already stopped.
 
 ## StreamSessionState values
 

@@ -259,6 +259,8 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - Render the live video feed using Flutter's `Texture` widget with the returned ID
 - Monitor session state via `MetaWearablesDat.streamSessionStateStream()`
 - Monitor errors via `MetaWearablesDat.streamSessionErrorStream()`
+- (Optional) Monitor device thermal level via `MetaWearablesDat.deviceStateStream()` to warn the user *before* a thermal error stops the stream
+- (Optional) On `datAppOnTheGlassesUpdateRequired`, call `MetaWearablesDat.openDATGlassesAppUpdate()` to drive a "tap to update" UI
 - Call `MetaWearablesDat.stopStreamSession(deviceUUID)` to end the session
 
 ```dart
@@ -279,12 +281,23 @@ MetaWearablesDat.streamSessionStateStream().listen((state) {
   print('Session state: $state');
 });
 
-// Monitor errors (e.g., thermalCritical, hingesClosed, permissionDenied)
+// Monitor errors (e.g., thermalCritical, hingesClosed, permissionDenied,
+// datAppOnTheGlassesUpdateRequired, batteryCritical, peakPowerShutdown, …)
 MetaWearablesDat.streamSessionErrorStream().listen((error) {
   print('Session error: ${error.code} — ${error.message}');
   if (error.isThermalCritical) {
     // Device overheating — streaming paused automatically
+  } else if (error.code == 'datAppOnTheGlassesUpdateRequired') {
+    // Glasses need an app update — bounce the user to Meta AI to handle it
+    MetaWearablesDat.openDATGlassesAppUpdate();
   }
+});
+
+// (Optional) Live thermal level — drive a "device is getting hot" indicator
+// before a thermal error stops the stream entirely.
+MetaWearablesDat.deviceStateStream().listen((state) {
+  // state.thermalLevel: unknown, none, light, moderate, severe, critical, emergency, shutdown
+  print('Thermal: ${state.thermalLevel}');
 });
 
 // Capture a photo during streaming
@@ -429,8 +442,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.4.0
-  flutter_meta_wearables_dat_mock_device: ^0.4.0
+  flutter_meta_wearables_dat: ^0.5.0
+  flutter_meta_wearables_dat_mock_device: ^0.5.0
 ```
 
 ```dart
