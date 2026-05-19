@@ -318,7 +318,9 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
       (dynamic event) {
         final map = Map<String, dynamic>.from(event as Map);
         return DeviceState(
-          thermalLevel: ThermalLevel.fromInt((map['thermalLevel'] as num).toInt()),
+          thermalLevel: ThermalLevel.fromInt(
+            (map['thermalLevel'] as num).toInt(),
+          ),
         );
       },
     );
