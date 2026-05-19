@@ -10,7 +10,7 @@ import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dar
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/sheet_handle_bar.dart';
 import 'package:provider/provider.dart';
 
-const String _packageVersion = '0.4.0';
+const String _packageVersion = '0.5.0';
 const String _datVersion = '0.6.0';
 
 class SettingsSheet extends StatelessWidget {

@@ -1,3 +1,9 @@
+## 0.5.0
+
+* Update to DAT SDK 0.7.0. Drop-in upgrade — no API changes.
+* Inherits DAT 0.7.0 fixes: fold/unfold-and-don/doff cycles now keep consistent device state on both platforms.
+* Captouch simulation (`tap`, `tapAndHold`) is new in DAT 0.7.0 but not yet exposed — flagged for a follow-up.
+
 ## 0.4.0
 
 * Initial release. Extracted from `flutter_meta_wearables_dat` 0.3.x to keep MockDeviceKit (and its `AVFoundation` / `Camera` linkage) out of production apps.
