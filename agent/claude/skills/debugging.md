@@ -44,7 +44,13 @@ If `startRegistration()` opens Meta AI but the app never returns:
 
 | Error code | Meaning | Action |
 |------------|---------|--------|
-| `thermalCritical` | Device overheating | Streaming pauses automatically. Wait for device to cool down. |
+| `thermalCritical` | Device thermal state critical | Streaming pauses automatically. Wait for device to cool down. |
+| `thermalEmergency` | Device thermal emergency | Stream stopped. Wait for cool down before retrying. |
+| `peakPowerShutdown` | Device exceeded peak power limit | Stream stopped. Reduce streaming intensity / wait. |
+| `batteryCritical` | Device battery critically low | Stream stopped. Charge the glasses. |
+| `deviceThermalCritical` / `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants (the session itself tore down, not just the stream) | Same actions as the stream-level variants; the plugin will recreate the session on the next `startStreamSession()`. |
+| `datAppOnTheGlassesUpdateRequired` | The on-device DAT app needs updating before streaming can work | Call `MetaWearablesDat.openDATGlassesAppUpdate()` to bounce the user to Meta AI. |
+| `dwaUnavailable` | The DAT Wearables App is unavailable on the glasses | Restart the glasses; check firmware. |
 | `hingesClosed` | User folded the glasses | Inform user to open the hinges. |
 | `permissionDenied` | Camera permission denied | Request permission again or guide user to settings. |
 | `deviceNotConnected` | Device disconnected | Check Bluetooth connection, restart glasses if needed. |

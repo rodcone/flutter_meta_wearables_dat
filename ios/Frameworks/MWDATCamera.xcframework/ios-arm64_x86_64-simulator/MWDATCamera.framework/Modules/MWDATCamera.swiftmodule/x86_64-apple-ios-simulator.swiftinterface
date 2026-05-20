@@ -11,22 +11,25 @@ import UIKit
 import _Concurrency
 import _StringProcessing
 import _SwiftConcurrencyShims
-extension MWDATCamera.StreamSession : MWDATCore.Capability {
+extension MWDATCamera.Stream : MWDATCore.Capability {
   final public var capabilityState: MWDATCore.CapabilityState {
     get
   }
 }
 extension MWDATCore.DeviceSession {
   #if compiler(>=5.3) && $NonescapableTypes
-  final public func addStream(config: MWDATCamera.StreamSessionConfig = StreamSessionConfig()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.StreamSession?
+  final public func addStream(config: MWDATCamera.StreamConfiguration = StreamConfiguration()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.Stream?
   #endif
+}
+extension Foundation.NSNotification.Name {
+  public static let mwdatStreamSessionCreated: Foundation.Notification.Name
 }
 extension MWDATCore.ObjC_DeviceSession {
   #if compiler(>=5.3) && $NonescapableTypes
-  @objc(addStreamWithError:) final public func addStream(_ error: Foundation.NSErrorPointer = nil) -> MWDATCamera.ObjC_StreamSession?
+  @objc(addStreamWithError:) final public func addStream(_ error: Foundation.NSErrorPointer = nil) -> MWDATCamera.ObjC_Stream?
   #endif
   #if compiler(>=5.3) && $NonescapableTypes
-  @objc(addStreamWithConfig:error:) final public func addStream(config: MWDATCamera.ObjC_StreamSessionConfig, error: Foundation.NSErrorPointer = nil) -> MWDATCamera.ObjC_StreamSession?
+  @objc(addStreamWithConfig:error:) final public func addStream(config: MWDATCamera.ObjC_StreamConfiguration, error: Foundation.NSErrorPointer = nil) -> MWDATCamera.ObjC_Stream?
   #endif
 }
 @_hasMissingDesignatedInitializers @objc(MWDATCameraListenerToken) final public class ObjC_CameraListenerToken : ObjectiveC.NSObject, Swift.Sendable {
@@ -41,28 +44,58 @@ extension MWDATCore.ObjC_DeviceSession {
   @objc override dynamic public init()
   @objc deinit
 }
-@_hasMissingDesignatedInitializers @objc(MWDATStreamSession) final public class ObjC_StreamSession : ObjectiveC.NSObject, Swift.Sendable {
-  @objc final public let config: MWDATCamera.ObjC_StreamSessionConfig
-  @objc final public var state: MWDATCamera.ObjC_StreamSessionState {
+@_hasMissingDesignatedInitializers @objc(MWDATStream) final public class ObjC_Stream : ObjectiveC.NSObject, Swift.Sendable {
+  @objc final public let config: MWDATCamera.ObjC_StreamConfiguration
+  @objc final public var state: MWDATCamera.ObjC_StreamState {
     @objc get
   }
+  #if compiler(>=5.3) && $NonescapableTypes
+  @objc final public var onStateChanged: (@convention(block) (MWDATCamera.ObjC_StreamState) -> Swift.Void)? {
+    @objc get
+    @objc set
+  }
+  #endif
+  #if compiler(>=5.3) && $NonescapableTypes
+  @objc final public var onVideoFrame: (@convention(block) (MWDATCamera.ObjC_VideoFrame) -> Swift.Void)? {
+    @objc get
+    @objc set
+  }
+  #endif
+  #if compiler(>=5.3) && $NonescapableTypes
+  @objc final public var onPhotoData: (@convention(block) (MWDATCamera.ObjC_PhotoData) -> Swift.Void)? {
+    @objc get
+    @objc set
+  }
+  #endif
+  #if compiler(>=5.3) && $NonescapableTypes
+  @objc final public var onError: (@convention(block) (MWDATCamera.ObjC_StreamError) -> Swift.Void)? {
+    @objc get
+    @objc set
+  }
+  #endif
   @objc deinit
   @objc final public func start()
+  #if compiler(>=5.3) && $NonescapableTypes
+  @objc(startWithCompletion:) final public func start(completion: (@convention(block) () -> Swift.Void)?)
+  #endif
   @objc final public func stop()
+  #if compiler(>=5.3) && $NonescapableTypes
+  @objc(stopWithCompletion:) final public func stop(completion: (@convention(block) () -> Swift.Void)?)
+  #endif
   @discardableResult
   @objc final public func capturePhoto(format: MWDATCamera.ObjC_PhotoCaptureFormat) -> Swift.Bool
-  @objc final public func addStateListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamSessionState) -> Swift.Void) -> MWDATCamera.ObjC_CameraListenerToken
+  @objc final public func addStateListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamState) -> Swift.Void) -> MWDATCamera.ObjC_CameraListenerToken
   @objc final public func addVideoFrameListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_VideoFrame) -> Swift.Void) -> MWDATCamera.ObjC_CameraListenerToken
   @objc final public func addPhotoDataListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_PhotoData) -> Swift.Void) -> MWDATCamera.ObjC_CameraListenerToken
-  @objc final public func addErrorListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamSessionError) -> Swift.Void) -> MWDATCamera.ObjC_CameraListenerToken
+  @objc final public func addErrorListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamError) -> Swift.Void) -> MWDATCamera.ObjC_CameraListenerToken
 }
 @objc extension Foundation.NSNotification {
-  @objc public static let streamSessionStateChanged: Foundation.Notification.Name
-  @objc public static let streamSessionFrameReceived: Foundation.Notification.Name
-  @objc public static let streamSessionPhotoCaptured: Foundation.Notification.Name
-  @objc public static let streamSessionErrorOccurred: Foundation.Notification.Name
+  @objc public static let streamStateChanged: Foundation.Notification.Name
+  @objc public static let streamFrameReceived: Foundation.Notification.Name
+  @objc public static let streamPhotoCaptured: Foundation.Notification.Name
+  @objc public static let streamErrorOccurred: Foundation.Notification.Name
 }
-@objc(MWDATStreamSessionState) @frozen public enum ObjC_StreamSessionState : Swift.Int, Swift.Sendable {
+@objc(MWDATStreamState) @frozen public enum ObjC_StreamState : Swift.Int, Swift.Sendable {
   case stopped
   case waitingForDevice
   case starting
@@ -77,7 +110,7 @@ extension MWDATCore.ObjC_DeviceSession {
     get
   }
 }
-@objc(MWDATStreamSessionError) @frozen public enum ObjC_StreamSessionError : Swift.Int, Swift.Sendable {
+@objc(MWDATStreamError) @frozen public enum ObjC_StreamError : Swift.Int, Swift.Sendable {
   case internalError
   case deviceNotFound
   case deviceNotConnected
@@ -86,6 +119,9 @@ extension MWDATCore.ObjC_DeviceSession {
   case permissionDenied
   case hingesClosed
   case thermalCritical
+  case thermalEmergency
+  case peakPowerShutdown
+  case batteryCritical
   #if compiler(>=5.3) && $NonescapableTypes
   public init?(rawValue: Swift.Int)
   #endif
@@ -134,7 +170,7 @@ extension MWDATCore.ObjC_DeviceSession {
     get
   }
 }
-@_inheritsConvenienceInitializers @_hasMissingDesignatedInitializers @objc(MWDATStreamSessionConfig) final public class ObjC_StreamSessionConfig : ObjectiveC.NSObject, Swift.Sendable {
+@_inheritsConvenienceInitializers @_hasMissingDesignatedInitializers @objc(MWDATStreamConfiguration) final public class ObjC_StreamConfiguration : ObjectiveC.NSObject, Swift.Sendable {
   @objc final public var videoCodec: MWDATCamera.ObjC_VideoCodec {
     @objc get
   }
@@ -187,14 +223,14 @@ public struct PhotoData : Swift.Sendable {
   public let format: MWDATCamera.PhotoCaptureFormat
   public init(data: Foundation.Data, format: MWDATCamera.PhotoCaptureFormat)
 }
-@frozen public enum StreamSessionState : Swift.Sendable {
+@frozen public enum StreamState : Swift.Sendable {
   case stopping
   case stopped
   case waitingForDevice
   case starting
   case streaming
   case paused
-  public static func == (a: MWDATCamera.StreamSessionState, b: MWDATCamera.StreamSessionState) -> Swift.Bool
+  public static func == (a: MWDATCamera.StreamState, b: MWDATCamera.StreamState) -> Swift.Bool
   public func hash(into hasher: inout Swift.Hasher)
   public var hashValue: Swift.Int {
     get
@@ -231,20 +267,19 @@ public enum StreamingResolution : Swift.Sendable, Swift.CaseIterable {
     get
   }
 }
-public struct StreamSessionConfig : Swift.Sendable {
+public struct StreamConfiguration : Swift.Sendable {
   public let videoCodec: MWDATCamera.VideoCodec
   public let resolution: MWDATCamera.StreamingResolution
   public let frameRate: Swift.UInt
-  public let skipAppLaunch: Swift.Bool
-  public init(videoCodec: MWDATCamera.VideoCodec, resolution: MWDATCamera.StreamingResolution, frameRate: Swift.UInt, skipAppLaunch: Swift.Bool = false)
+  public init(videoCodec: MWDATCamera.VideoCodec, resolution: MWDATCamera.StreamingResolution, frameRate: Swift.UInt)
   public init()
 }
-@_hasMissingDesignatedInitializers final public class StreamSession : Swift.Sendable {
-  final public let streamSessionConfig: MWDATCamera.StreamSessionConfig
-  final public var state: MWDATCamera.StreamSessionState {
+@_hasMissingDesignatedInitializers final public class Stream : Swift.Sendable {
+  final public let streamConfiguration: MWDATCamera.StreamConfiguration
+  final public var state: MWDATCamera.StreamState {
     get
   }
-  final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.StreamSessionState> {
+  final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.StreamState> {
     get
   }
   final public var videoFramePublisher: any MWDATCore.Announcer<MWDATCamera.VideoFrame> {
@@ -253,7 +288,7 @@ public struct StreamSessionConfig : Swift.Sendable {
   final public var photoDataPublisher: any MWDATCore.Announcer<MWDATCamera.PhotoData> {
     get
   }
-  final public var errorPublisher: any MWDATCore.Announcer<MWDATCamera.StreamSessionError> {
+  final public var errorPublisher: any MWDATCore.Announcer<MWDATCamera.StreamError> {
     get
   }
   @objc deinit
@@ -262,7 +297,7 @@ public struct StreamSessionConfig : Swift.Sendable {
   @discardableResult
   final public func capturePhoto(format: MWDATCamera.PhotoCaptureFormat) -> Swift.Bool
 }
-public enum StreamSessionError : Swift.Error, Swift.Equatable {
+public enum StreamError : Swift.Error, Swift.Equatable, Foundation.LocalizedError {
   case internalError
   case deviceNotFound(MWDATCore.DeviceIdentifier)
   case deviceNotConnected(MWDATCore.DeviceIdentifier)
@@ -271,7 +306,15 @@ public enum StreamSessionError : Swift.Error, Swift.Equatable {
   case permissionDenied
   case hingesClosed
   case thermalCritical
-  public static func == (a: MWDATCamera.StreamSessionError, b: MWDATCamera.StreamSessionError) -> Swift.Bool
+  case thermalEmergency
+  case peakPowerShutdown
+  case batteryCritical
+  #if compiler(>=5.3) && $NonescapableTypes
+  public var errorDescription: Swift.String? {
+    get
+  }
+  #endif
+  public static func == (a: MWDATCamera.StreamError, b: MWDATCamera.StreamError) -> Swift.Bool
 }
 public struct VideoFrame : Swift.Sendable {
   public var sampleBuffer: CoreMedia.CMSampleBuffer {
@@ -285,14 +328,14 @@ public struct VideoFrame : Swift.Sendable {
   #endif
   #endif
 }
-extension MWDATCamera.ObjC_StreamSessionState : Swift.Equatable {}
-extension MWDATCamera.ObjC_StreamSessionState : Swift.Hashable {}
-extension MWDATCamera.ObjC_StreamSessionState : Swift.RawRepresentable {}
-extension MWDATCamera.ObjC_StreamSessionState : Swift.BitwiseCopyable {}
-extension MWDATCamera.ObjC_StreamSessionError : Swift.Equatable {}
-extension MWDATCamera.ObjC_StreamSessionError : Swift.Hashable {}
-extension MWDATCamera.ObjC_StreamSessionError : Swift.RawRepresentable {}
-extension MWDATCamera.ObjC_StreamSessionError : Swift.BitwiseCopyable {}
+extension MWDATCamera.ObjC_StreamState : Swift.Equatable {}
+extension MWDATCamera.ObjC_StreamState : Swift.Hashable {}
+extension MWDATCamera.ObjC_StreamState : Swift.RawRepresentable {}
+extension MWDATCamera.ObjC_StreamState : Swift.BitwiseCopyable {}
+extension MWDATCamera.ObjC_StreamError : Swift.Equatable {}
+extension MWDATCamera.ObjC_StreamError : Swift.Hashable {}
+extension MWDATCamera.ObjC_StreamError : Swift.RawRepresentable {}
+extension MWDATCamera.ObjC_StreamError : Swift.BitwiseCopyable {}
 extension MWDATCamera.ObjC_PhotoCaptureFormat : Swift.Equatable {}
 extension MWDATCamera.ObjC_PhotoCaptureFormat : Swift.Hashable {}
 extension MWDATCamera.ObjC_PhotoCaptureFormat : Swift.RawRepresentable {}
@@ -307,9 +350,9 @@ extension MWDATCamera.ObjC_VideoCodec : Swift.RawRepresentable {}
 extension MWDATCamera.ObjC_VideoCodec : Swift.BitwiseCopyable {}
 extension MWDATCamera.PhotoCaptureFormat : Swift.Equatable {}
 extension MWDATCamera.PhotoCaptureFormat : Swift.Hashable {}
-extension MWDATCamera.StreamSessionState : Swift.Equatable {}
-extension MWDATCamera.StreamSessionState : Swift.Hashable {}
-extension MWDATCamera.StreamSessionState : Swift.BitwiseCopyable {}
+extension MWDATCamera.StreamState : Swift.Equatable {}
+extension MWDATCamera.StreamState : Swift.Hashable {}
+extension MWDATCamera.StreamState : Swift.BitwiseCopyable {}
 extension MWDATCamera.VideoCodec : Swift.Equatable {}
 extension MWDATCamera.VideoCodec : Swift.Hashable {}
 extension MWDATCamera.StreamingResolution : Swift.Equatable {}

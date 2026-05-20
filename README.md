@@ -259,6 +259,8 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - Render the live video feed using Flutter's `Texture` widget with the returned ID
 - Monitor session state via `MetaWearablesDat.streamSessionStateStream()`
 - Monitor errors via `MetaWearablesDat.streamSessionErrorStream()`
+- (Optional) Monitor device thermal level via `MetaWearablesDat.deviceStateStream()` to warn the user *before* a thermal error stops the stream
+- (Optional) On `datAppOnTheGlassesUpdateRequired`, call `MetaWearablesDat.openDATGlassesAppUpdate()` to drive a "tap to update" UI
 - Call `MetaWearablesDat.stopStreamSession(deviceUUID)` to end the session
 
 ```dart
@@ -279,12 +281,23 @@ MetaWearablesDat.streamSessionStateStream().listen((state) {
   print('Session state: $state');
 });
 
-// Monitor errors (e.g., thermalCritical, hingesClosed, permissionDenied)
+// Monitor errors (e.g., thermalCritical, hingesClosed, permissionDenied,
+// datAppOnTheGlassesUpdateRequired, batteryCritical, peakPowerShutdown, …)
 MetaWearablesDat.streamSessionErrorStream().listen((error) {
   print('Session error: ${error.code} — ${error.message}');
   if (error.isThermalCritical) {
     // Device overheating — streaming paused automatically
+  } else if (error.code == 'datAppOnTheGlassesUpdateRequired') {
+    // Glasses need an app update — bounce the user to Meta AI to handle it
+    MetaWearablesDat.openDATGlassesAppUpdate();
   }
+});
+
+// (Optional) Live thermal level — drive a "device is getting hot" indicator
+// before a thermal error stops the stream entirely.
+MetaWearablesDat.deviceStateStream().listen((state) {
+  // state.thermalLevel: unknown, none, light, moderate, severe, critical, emergency, shutdown
+  print('Thermal: ${state.thermalLevel}');
 });
 
 // Capture a photo during streaming
@@ -350,7 +363,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
 
 **Android — no manual manifest changes needed.** The plugin's manifest auto-merges the required permissions (`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`) and declares the internal foreground service. On Android 13+ (API 33+), the first call to `enableBackgroundStreaming()` prompts the user for `POST_NOTIFICATIONS` — if denied, the foreground service still runs (so the stream survives), but its notification is suppressed by the OS until the user enables notifications for your app in system settings.
 
-**How it works.** On iOS the plugin activates an `AVAudioSession` configured for Bluetooth HFP + mixing (which keeps the process scheduled in background) and forces software HEVC decoding so the decoder survives the background → foreground transition without stutter. On Android the plugin starts a foreground service of type `connectedDevice` with your notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
+**How it works.** On iOS the plugin activates an `AVAudioSession` configured for Bluetooth HFP + mixing, which keeps the process scheduled in background. The HEVC hardware decoder is invalidated on background entry (iOS forbids GPU access from backgrounded apps) and lazily recreated on the first frame after foreground — you'll see a brief stall while the decoder waits for the next keyframe, then streaming resumes cleanly. While backgrounded, the raw hvc1 NAL bytes still reach `videoFramesStream()` for recording. On Android the plugin starts a foreground service of type `connectedDevice` with your notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
 
 **Accessing frames while backgrounded.** The normal `Texture` widget can't render in background (no GPU access), but the plugin exposes every decoded frame to Dart via `videoFramesStream()`, in both foreground and background. Useful for recording to disk, running ML, or re-muxing:
 
@@ -429,8 +442,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.4.0
-  flutter_meta_wearables_dat_mock_device: ^0.4.0
+  flutter_meta_wearables_dat: ^0.5.0
+  flutter_meta_wearables_dat_mock_device: ^0.5.0
 ```
 
 ```dart

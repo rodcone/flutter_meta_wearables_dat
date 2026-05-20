@@ -25,6 +25,10 @@ public protocol MockCameraKit : Swift.Sendable {
   func setCameraFeed(cameraFacing: MWDATMockDevice.CameraFacing) async
   func setCapturedImage(fileURL: Foundation.URL)
 }
+public protocol MockCaptouchKit : Swift.Sendable {
+  func tap()
+  func tapAndHold()
+}
 public protocol MockDevice : Swift.Sendable {
   var deviceIdentifier: MWDATCore.DeviceIdentifier { get }
   func powerOn()
@@ -40,6 +44,10 @@ public protocol MockDeviceKitInterface : Swift.Sendable {
   func unpairDevice(_ device: any MWDATMockDevice.MockDevice)
   var pairedDevices: [any MWDATMockDevice.MockDevice] { get }
   var permissions: any MWDATMockDevice.MockPermissions { get }
+  #if compiler(>=5.3) && $NonescapableTypes
+  func startTestServer(portFilePath: Swift.String?) async throws -> Swift.UInt16
+  #endif
+  func stopTestServer() async
 }
 extension MWDATMockDevice.MockDeviceKitInterface {
   public func enable()
@@ -59,6 +67,7 @@ public protocol MockDisplaylessGlasses : MWDATMockDevice.MockDevice {
 }
 public protocol MockDisplaylessGlassesServices : Swift.Sendable {
   var camera: any MWDATMockDevice.MockCameraKit { get }
+  var captouch: any MWDATMockDevice.MockCaptouchKit { get }
 }
 public protocol MockPermissions : Swift.Sendable {
   func set(_ permission: MWDATCore.Permission, _ status: MWDATCore.PermissionStatus)
@@ -70,6 +79,11 @@ public protocol MockRaybanMeta : MWDATMockDevice.MockDisplaylessGlasses {
   @objc final public func setCameraFeed(fileURL: Foundation.URL)
   @objc final public func setCameraFeed(cameraFacing: Swift.Int) async
   @objc final public func setCapturedImage(fileURL: Foundation.URL)
+  @objc deinit
+}
+@_hasMissingDesignatedInitializers @objc(MockCaptouchKit) final public class ObjC_MockCaptouchKit : ObjectiveC.NSObject, Swift.Sendable {
+  @objc final public func tap()
+  @objc final public func tapAndHold()
   @objc deinit
 }
 @objc(MockDevice) public protocol ObjC_MockDevice : Swift.Sendable {
@@ -101,6 +115,7 @@ public protocol MockRaybanMeta : MWDATMockDevice.MockDisplaylessGlasses {
 }
 @_hasMissingDesignatedInitializers @objc(MockDisplaylessGlassesServices) final public class ObjC_MockDisplaylessGlassesServices : ObjectiveC.NSObject, Swift.Sendable {
   @objc final public let camera: MWDATMockDevice.ObjC_MockCameraKit
+  @objc final public let captouch: MWDATMockDevice.ObjC_MockCaptouchKit
   @objc deinit
 }
 @objc(MockRaybanMeta) public protocol ObjC_MockRaybanMeta : MWDATMockDevice.ObjC_MockDisplaylessGlasses {

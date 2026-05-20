@@ -15,8 +15,15 @@ final stateSub = MetaWearablesDat.streamSessionStateStream().listen((state) {
 
 final errorSub = MetaWearablesDat.streamSessionErrorStream().listen((error) {
   // StreamSessionError: code + message
-  if (error.isThermalCritical) { /* device overheating */ }
+  if (error.isThermalCritical) { /* device overheating — stream paused */ }
   if (error.isHingesClosed) { /* glasses folded */ }
+  if (error.code == 'datAppOnTheGlassesUpdateRequired') {
+    // On-device DAT app needs updating — bounce user to Meta AI
+    MetaWearablesDat.openDATGlassesAppUpdate();
+  }
+  // Other 0.5.0 codes: thermalEmergency, peakPowerShutdown, batteryCritical,
+  // deviceThermalCritical, deviceThermalEmergency, devicePeakPowerShutdown,
+  // deviceBatteryCritical, dwaUnavailable.
 });
 
 // Start streaming — returns texture ID
@@ -64,7 +71,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
 
 **Android manifest**: nothing to change — the plugin manifest auto-merges `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK` and the internal foreground service. `BackgroundNotification` is required on Android (OS mandate).
 
-**How it works.** iOS activates an `AVAudioSession` and forces software HEVC decoding so the decoder survives background→foreground without stutter. Android starts a foreground service of type `connectedDevice` with a customizable notification and a `PARTIAL_WAKE_LOCK`.
+**How it works.** iOS activates an `AVAudioSession` to keep the process scheduled in background; the HEVC hardware decoder is invalidated on background and recreated on the first frame after foreground (brief keyframe-wait stall, no freeze). Raw hvc1 NAL bytes still flow to `videoFramesStream()` while backgrounded for recording. Android starts a foreground service of type `connectedDevice` with a customizable notification and a `PARTIAL_WAKE_LOCK`.
 
 **Frames in background.** The `Texture` widget can't render in background (no GPU access), but every frame is still emitted on `videoFramesStream()`:
 
@@ -97,6 +104,18 @@ Payload layout:
 **Valid FPS values:** 2, 7, 15, 24, 30
 
 Lower resolution and frame rate yield higher visual quality due to less Bluetooth compression.
+
+## Device thermal monitoring (optional)
+
+`deviceStateStream()` emits `DeviceState` whenever the active device's thermal level changes. Subscribe to drive a "device is getting hot" indicator *before* a thermal error stops the stream.
+
+```dart
+final thermalSub = MetaWearablesDat.deviceStateStream().listen((state) {
+  // state.thermalLevel: unknown, none, light, moderate, severe, critical, emergency, shutdown
+});
+```
+
+The stream switches its underlying subscription automatically when the active device changes; emits nothing while no device is active. Surface UI at `severe` / `critical` — by `emergency` the stream has already stopped.
 
 ## StreamSessionState values
 

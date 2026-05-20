@@ -18,7 +18,7 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSessionState
-import com.meta.wearable.dat.core.session.Session
+import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -81,15 +81,21 @@ class MetaWearablesDatPlugin :
     private lateinit var streamSessionErrorChannel: EventChannel
     private lateinit var videoStreamSizeChannel: EventChannel
     private lateinit var videoFramesChannel: EventChannel
+    private lateinit var deviceStateChannel: EventChannel
     private var application: Application? = null
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private var activeDeviceStreamHandler: ActiveDeviceStreamHandler? = null
     private var registrationStateStreamHandler: RegistrationStateStreamHandler? = null
-    private var streamSessionStateStreamHandler: StreamSessionStateStreamHandler? = null
+    private var streamStateStreamHandler: StreamStateStreamHandler? = null
     private var streamSessionErrorStreamHandler: StreamSessionErrorStreamHandler? = null
     private var videoStreamSizeStreamHandler: VideoStreamSizeStreamHandler? = null
     private val videoFrameStreamHandler = VideoFrameStreamHandler()
+    private var deviceStateStreamHandler: DeviceStateStreamHandler? = null
+    // Forward DeviceSession.errors (0.7.0 SharedFlow<DeviceSessionError>) onto
+    // the same Flutter event channel that Stream.errorStream uses. Cancelled
+    // and recreated alongside the session lifecycle.
+    private var sessionErrorsJob: Job? = null
 
     // Background streaming — tracks whether the foreground service has been
     // started so we can idempotently re-start / stop it, and so we can tear
@@ -119,12 +125,12 @@ class MetaWearablesDatPlugin :
     // crashes the plugin class load, which silently drops method-channel registration.
     private val deviceSelector: DeviceSelector by lazy { AutoDeviceSelector() }
 
-    // Streaming state — 0.6.0 splits what was one `StreamSession` into a
-    // `Session` (device lifecycle) and a `Stream` (a capability added to a
-    // started session). The `Session` is reused across stream start/stop
-    // toggles; it's only torn down when the device disappears or the plugin
-    // is disposed. See the plan for the internal state machine.
-    private var session: Session? = null
+    // Streaming state — the DAT SDK splits what was historically one
+    // `StreamSession` into a `DeviceSession` (device lifecycle) and a `Stream`
+    // (a capability added to a started session). The `DeviceSession` is
+    // reused across stream start/stop toggles; it's only torn down when the
+    // device disappears or the plugin is disposed.
+    private var session: DeviceSession? = null
     private var stream: Stream? = null
     private var sessionKey: String? = null
     private var videoJob: Job? = null
@@ -173,8 +179,8 @@ class MetaWearablesDatPlugin :
                         flutterPluginBinding.binaryMessenger,
                         "flutter_meta_wearables_dat/stream_session_state"
                 )
-        streamSessionStateStreamHandler = StreamSessionStateStreamHandler()
-        streamSessionStateChannel.setStreamHandler(streamSessionStateStreamHandler)
+        streamStateStreamHandler = StreamStateStreamHandler()
+        streamSessionStateChannel.setStreamHandler(streamStateStreamHandler)
 
         streamSessionErrorChannel =
                 EventChannel(
@@ -198,6 +204,18 @@ class MetaWearablesDatPlugin :
                         "flutter_meta_wearables_dat/video_frames",
                 )
         videoFramesChannel.setStreamHandler(videoFrameStreamHandler)
+
+        deviceStateChannel =
+                EventChannel(
+                        flutterPluginBinding.binaryMessenger,
+                        "flutter_meta_wearables_dat/device_state",
+                )
+        deviceStateStreamHandler =
+                DeviceStateStreamHandler(
+                        deviceSelectorProvider = { deviceSelector },
+                        isInitialized = { btPermissionsGranted },
+                )
+        deviceStateChannel.setStreamHandler(deviceStateStreamHandler)
 
         textureRegistry = flutterPluginBinding.textureRegistry
 
@@ -239,6 +257,7 @@ class MetaWearablesDatPlugin :
             "capturePhoto" -> capturePhoto(call, result)
             "enableBackgroundStreaming" -> enableBackgroundStreaming(call, result)
             "disableBackgroundStreaming" -> disableBackgroundStreaming(result)
+            "openDATGlassesAppUpdate" -> openDATGlassesAppUpdate(result)
             else -> result.notImplemented()
         }
     }
@@ -252,8 +271,8 @@ class MetaWearablesDatPlugin :
         registrationStateStreamHandler?.dispose()
         registrationStateStreamHandler = null
         streamSessionStateChannel.setStreamHandler(null)
-        streamSessionStateStreamHandler?.dispose()
-        streamSessionStateStreamHandler = null
+        streamStateStreamHandler?.dispose()
+        streamStateStreamHandler = null
         streamSessionErrorChannel.setStreamHandler(null)
         streamSessionErrorStreamHandler?.dispose()
         streamSessionErrorStreamHandler = null
@@ -262,6 +281,9 @@ class MetaWearablesDatPlugin :
         videoStreamSizeStreamHandler = null
         videoFramesChannel.setStreamHandler(null)
         videoFrameStreamHandler.dispose()
+        deviceStateChannel.setStreamHandler(null)
+        deviceStateStreamHandler?.dispose()
+        deviceStateStreamHandler = null
 
         // Tear down any active session and stream
         teardownSession()
@@ -341,6 +363,7 @@ class MetaWearablesDatPlugin :
                     // Start monitoring now that SDK is properly initialized with permissions
                     registrationStateStreamHandler?.restartMonitoring()
                     activeDeviceStreamHandler?.restartMonitoring()
+                    deviceStateStreamHandler?.restartMonitoring()
                 } else {
                     Log.d(TAG, "BT permissions denied by user")
                 }
@@ -404,6 +427,7 @@ class MetaWearablesDatPlugin :
             ensureWearablesInitialized()
             registrationStateStreamHandler?.restartMonitoring()
             activeDeviceStreamHandler?.restartMonitoring()
+            deviceStateStreamHandler?.restartMonitoring()
             result.success(true)
             return
         }
@@ -564,6 +588,37 @@ class MetaWearablesDatPlugin :
         // Note: handleUri is not available in the Android SDK (iOS only)
         // Deep link handling on Android is typically done at the app level
         result.success(false)
+    }
+
+    /**
+     * Opens the Meta AI app to the DAT-app-update screen on the connected
+     * glasses. Companion to the `datAppOnTheGlassesUpdateRequired`
+     * `DeviceSessionError` surfaced on `streamSessionErrorStream()` — apps
+     * receiving that error should call this method to prompt the user to
+     * update the on-device DAT app before retrying. Cross-platform parity
+     * with iOS `Wearables.shared.openDATGlassesAppUpdate()`.
+     */
+    private fun openDATGlassesAppUpdate(result: Result) {
+        val act = activity
+        if (act == null) {
+            result.error("NO_ACTIVITY", "No activity bound to plugin", null)
+            return
+        }
+        Wearables.openDATGlassesAppUpdate(act)
+                .onSuccess { result.success(true) }
+                .onFailure { error, _ ->
+                    val identifier = error.toString().uppercase()
+                    val code =
+                            when {
+                                identifier.contains("META_AI") ||
+                                        identifier.contains("META AI") ||
+                                        identifier.contains("NOT_INSTALLED") ->
+                                        "metaAINotInstalled"
+                                identifier.contains("NOT_REGISTERED") -> "notRegistered"
+                                else -> "NAVIGATION_ERROR"
+                            }
+                    result.error(code, error.description, null)
+                }
     }
 
     // endregion
@@ -794,7 +849,7 @@ class MetaWearablesDatPlugin :
                 }
 
                 stream = newStream
-                streamSessionStateStreamHandler?.stream = newStream
+                streamStateStreamHandler?.stream = newStream
 
                 videoJob =
                         scope.launch(Dispatchers.Default) {
@@ -857,11 +912,11 @@ class MetaWearablesDatPlugin :
     }
 
     /**
-     * Lazily create and start a [Session], reusing an existing one across
-     * stream start/stop toggles. Returns `null` if creation or start-up
-     * failed (an error has already been pushed onto the error stream).
+     * Lazily create and start a [DeviceSession], reusing an existing one
+     * across stream start/stop toggles. Returns `null` if creation or
+     * start-up failed (an error has already been pushed onto the error stream).
      */
-    private suspend fun ensureSessionStarted(): Session? {
+    private suspend fun ensureSessionStarted(): DeviceSession? {
         val existing = session
         if (existing != null) {
             val currentState = existing.state.firstOrNull()
@@ -870,7 +925,7 @@ class MetaWearablesDatPlugin :
             }
         }
 
-        var created: Session? = null
+        var created: DeviceSession? = null
         Wearables.createSession(deviceSelector)
                 .onSuccess { created = it }
                 .onFailure { error, _ ->
@@ -888,6 +943,19 @@ class MetaWearablesDatPlugin :
         val newSession = created ?: return null
         session = newSession
         newSession.start()
+
+        // 0.7.0: subscribe to DeviceSession.errors so session-scoped errors
+        // (thermal, battery, peakPower, datAppUpdate, dwaUnavailable) reach
+        // Dart on the same event channel as stream errors. Replace any
+        // previous subscription — sessions are reused across start/stop
+        // toggles, but this is the canonical point to (re-)attach.
+        sessionErrorsJob?.cancel()
+        sessionErrorsJob =
+                scope.launch {
+                    newSession.errors.collect { error ->
+                        streamSessionErrorStreamHandler?.send(error)
+                    }
+                }
 
         // Wait until the session transitions to STARTED before we try to add
         // a stream — mirrors the reference app pattern.
@@ -995,6 +1063,12 @@ class MetaWearablesDatPlugin :
      * on-device recording and keeps per-frame cost low.
      */
     private fun emitVideoFrame(videoFrame: com.meta.wearable.dat.camera.types.VideoFrame) {
+        // 0.7.0 added VideoFrame.isCodecConfig to flag parameter-set frames
+        // (codec headers) vs payload frames. Recording consumers should never
+        // see codec-config frames as payload, so skip them defensively. In
+        // practice raw I420 streams shouldn't emit codec-config frames at
+        // all — this guard is mostly future-proofing.
+        if (videoFrame.isCodecConfig) return
         val buffer = videoFrame.buffer
         val remaining = buffer.remaining()
         if (remaining <= 0) return
@@ -1028,7 +1102,7 @@ class MetaWearablesDatPlugin :
         streamStateJob = null
         streamErrorJob?.cancel()
         streamErrorJob = null
-        streamSessionStateStreamHandler?.stream = null
+        streamStateStreamHandler?.stream = null
         try {
             stream?.stop()
         } catch (e: Exception) {
@@ -1055,6 +1129,8 @@ class MetaWearablesDatPlugin :
      */
     private fun teardownSession() {
         teardownStreamOnly()
+        sessionErrorsJob?.cancel()
+        sessionErrorsJob = null
         deviceAvailabilityJob?.cancel()
         deviceAvailabilityJob = null
         try {
@@ -1087,12 +1163,18 @@ class MetaWearablesDatPlugin :
     private fun mapRegistrationState(
             state: com.meta.wearable.dat.core.types.RegistrationState
     ): Int {
+        // 0.7.0 reshaped RegistrationState from a sealed class hierarchy
+        // (Unavailable / Available / Registering / Registered / Unregistering)
+        // to a plain enum with UPPER_CASE values. Error payload that used to
+        // live on the sealed-class subtypes now flows on
+        // `Wearables.registrationErrorStream` — we don't subscribe (plugin
+        // didn't surface it before either).
         return when (state) {
-            is com.meta.wearable.dat.core.types.RegistrationState.Unavailable -> 0
-            is com.meta.wearable.dat.core.types.RegistrationState.Available -> 1
-            is com.meta.wearable.dat.core.types.RegistrationState.Registering -> 2
-            is com.meta.wearable.dat.core.types.RegistrationState.Registered -> 3
-            is com.meta.wearable.dat.core.types.RegistrationState.Unregistering -> 2
+            com.meta.wearable.dat.core.types.RegistrationState.UNAVAILABLE -> 0
+            com.meta.wearable.dat.core.types.RegistrationState.AVAILABLE -> 1
+            com.meta.wearable.dat.core.types.RegistrationState.REGISTERING -> 2
+            com.meta.wearable.dat.core.types.RegistrationState.REGISTERED -> 3
+            com.meta.wearable.dat.core.types.RegistrationState.UNREGISTERING -> 2
         }
     }
 

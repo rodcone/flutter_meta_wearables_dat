@@ -19,6 +19,80 @@ class StreamScreen extends StatefulWidget {
 }
 
 class _StreamScreenState extends State<StreamScreen> {
+  stream_providers.StreamSessionProvider? _streamProvider;
+  StreamSessionError? _shownError;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _streamProvider = context.read<stream_providers.StreamSessionProvider>();
+      _streamProvider!.addListener(_onStreamProviderChanged);
+      _onStreamProviderChanged();
+    });
+  }
+
+  @override
+  void dispose() {
+    _streamProvider?.removeListener(_onStreamProviderChanged);
+    super.dispose();
+  }
+
+  void _onStreamProviderChanged() {
+    final error = _streamProvider?.lastError;
+    if (error == null || identical(error, _shownError)) return;
+    _shownError = error;
+    _showErrorSnackBar(error);
+    _streamProvider?.clearError();
+  }
+
+  void _showErrorSnackBar(StreamSessionError error) {
+    if (!mounted) return;
+
+    final isDatUpdate = error.code == 'datAppOnTheGlassesUpdateRequired';
+    final isTransient = error.code == 'noEligibleDevice';
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                error.isThermalCritical
+                    ? Icons.thermostat
+                    : isDatUpdate
+                        ? Icons.system_update
+                        : Icons.error_outline,
+                color: Colors.white,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(error.message),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red.shade900,
+          duration: isTransient
+              ? const Duration(seconds: 3)
+              : isDatUpdate
+                  ? const Duration(seconds: 10)
+                  : const Duration(seconds: 6),
+          action: isDatUpdate
+              ? SnackBarAction(
+                  label: 'Update',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    unawaited(_streamProvider?.openDATGlassesAppUpdate());
+                  },
+                )
+              : null,
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer3<
@@ -79,52 +153,19 @@ class _StreamScreenState extends State<StreamScreen> {
                       ),
                     ),
             ),
-            // Error banner at the top
-            if (streamProvider.lastError != null)
+            // Thermal indicator (top-left) while streaming. Hidden for
+            // unknown/none levels since those aren't actionable for the user.
+            if (streamProvider.isStreaming &&
+                streamProvider.thermalLevel != null &&
+                streamProvider.thermalLevel != ThermalLevel.unknown &&
+                streamProvider.thermalLevel != ThermalLevel.none)
               Positioned(
                 top: 0,
                 left: 0,
-                right: 0,
                 child: SafeArea(
-                  child: Container(
-                    margin: const EdgeInsets.all(16),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade900.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          streamProvider.lastError!.isThermalCritical
-                              ? Icons.thermostat
-                              : Icons.error_outline,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            streamProvider.lastError!.message,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: streamProvider.dismissError,
-                          child: const Icon(
-                            Icons.close,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                      ],
-                    ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: _ThermalChip(level: streamProvider.thermalLevel!),
                   ),
                 ),
               ),
@@ -259,6 +300,70 @@ String _sessionStateLabel(StreamSessionState state) {
     StreamSessionState.paused => 'Paused',
     _ => '',
   };
+}
+
+/// Compact thermal-level indicator shown while streaming. Color escalates
+/// from amber → red as the SDK reports hotter readings, mirroring the
+/// `ThermalLevel` enum from `MetaWearablesDat.deviceStateStream()`.
+class _ThermalChip extends StatelessWidget {
+  final ThermalLevel level;
+
+  const _ThermalChip({required this.level});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _colorFor(level);
+    final label = _labelFor(level);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.85),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.thermostat, color: Colors.white, size: 14),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _colorFor(ThermalLevel level) {
+    return switch (level) {
+      ThermalLevel.unknown ||
+      ThermalLevel.none ||
+      ThermalLevel.light =>
+        Colors.green.shade700,
+      ThermalLevel.moderate => Colors.amber.shade800,
+      ThermalLevel.severe => Colors.orange.shade800,
+      ThermalLevel.critical => Colors.red.shade700,
+      ThermalLevel.emergency || ThermalLevel.shutdown => Colors.red.shade900,
+    };
+  }
+
+  String _labelFor(ThermalLevel level) {
+    return switch (level) {
+      ThermalLevel.unknown => 'Thermal: unknown',
+      ThermalLevel.none => 'Cool',
+      ThermalLevel.light => 'Warm',
+      ThermalLevel.moderate => 'Warming',
+      ThermalLevel.severe => 'Hot',
+      ThermalLevel.critical => 'Critical',
+      ThermalLevel.emergency => 'Emergency',
+      ThermalLevel.shutdown => 'Shutdown',
+    };
+  }
 }
 
 /// Renders the video stream using Flutter's Texture API (zero-copy).

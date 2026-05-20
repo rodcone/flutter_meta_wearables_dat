@@ -45,6 +45,7 @@ Communication:
 | `StreamSessionState` | `stopping(0)`, `stopped(1)`, `waitingForDevice(2)`, `starting(3)`, `streaming(4)`, `paused(5)` |
 | `PhotoCaptureFormat` | `heic('heic')`, `jpeg('jpeg')` |
 | `FrameFormat` | `rawRgba`, `rawStraightRgba`, `png` |
+| `ThermalLevel` | `unknown(0)`, `none(1)`, `light(2)`, `moderate(3)`, `severe(4)`, `critical(5)`, `emergency(6)`, `shutdown(7)` |
 
 ### Classes
 
@@ -57,6 +58,7 @@ Communication:
 | `VideoStreamSize` | `width`, `height`, `aspectRatio` |
 | `VideoFrame` | `codec` (VideoCodec), `bytes` (Uint8List), `width`, `height`, `presentationTimestampUs`, `isKeyframe` |
 | `BackgroundNotification` | `title`, `text`, `channelId`, `channelName`, `iconResourceName?` (Android only) |
+| `DeviceState` | `thermalLevel` (ThermalLevel) |
 
 ### Error codes (StreamSessionError)
 
@@ -69,7 +71,13 @@ Communication:
 | `videoStreamingError` | Video stream failed |
 | `permissionDenied` | Camera permission denied |
 | `hingesClosed` | User folded the glasses |
-| `thermalCritical` | Device overheating — streaming pauses automatically |
+| `thermalCritical` | Device thermal state is critical — streaming pauses |
+| `thermalEmergency` | Device thermal state is emergency — streaming stopped |
+| `peakPowerShutdown` | Device exceeded peak power limit — streaming stopped |
+| `batteryCritical` | Device battery critically low — streaming stopped |
+| `deviceThermalCritical` / `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants of the above (session is torn down, not just the stream) |
+| `datAppOnTheGlassesUpdateRequired` | The on-device DAT app needs updating. Call `MetaWearablesDat.openDATGlassesAppUpdate()` to prompt the user. |
+| `dwaUnavailable` | The DAT Wearables App is unavailable on the glasses |
 
 ## API reference
 
@@ -108,6 +116,16 @@ static Future<void> enableBackgroundStreaming({
 })
 static Future<void> disableBackgroundStreaming()
 static Stream<VideoFrame> videoFramesStream()   // foreground + background
+
+// Device state (thermal) — live ThermalLevel updates from the active device.
+// Useful for warning the user *before* a thermalCritical error stops the stream.
+static Stream<DeviceState> deviceStateStream()
+
+// Navigation — opens the Meta AI app to the DAT-app-update screen on the
+// glasses. Pair with the `datAppOnTheGlassesUpdateRequired` error code to drive
+// a "tap to update" UI; the SDK refuses to stream until the on-device DAT app
+// is current. Throws `metaAINotInstalled` or `notRegistered` PlatformException.
+static Future<bool> openDATGlassesAppUpdate()
 
 // Photo capture
 static Future<CapturedPhoto> capturePhoto(
@@ -385,7 +403,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
 
 **Android manifest:** nothing to change — the plugin manifest auto-merges `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK` permissions and the internal foreground service. `BackgroundNotification` is required on Android (the OS requires a visible notification for the foreground service).
 
-**How it works.** iOS activates an `AVAudioSession` (`.playAndRecord` / `.videoRecording` + `.allowBluetoothHFP` + `.mixWithOthers`) to keep the process scheduled, and forces software HEVC decoding so the decoder survives background→foreground without stutter. Android starts a foreground service of type `connectedDevice` with the provided notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
+**How it works.** iOS activates an `AVAudioSession` (`.playAndRecord` / `.videoRecording` + `.allowBluetoothHFP` + `.mixWithOthers`) to keep the process scheduled. The HEVC hardware decoder is invalidated on background entry (iOS forbids GPU access while backgrounded) and lazily recreated on the first frame after foreground — there's a brief stall waiting for the next keyframe but no permanent freeze. While backgrounded, the raw hvc1 NAL bytes are still forwarded to `videoFramesStream()` for recording. Android starts a foreground service of type `connectedDevice` with the provided notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
 
 **Frames in background.** The `Texture` widget can't render in background (no GPU access). Subscribe to `videoFramesStream()` to receive every frame in both foreground and background — useful for recording, ML, re-muxing:
 
@@ -430,7 +448,7 @@ final frame = await MetaWearablesDat.captureStreamFrame(
 |---------|-----|---------|
 | Video codec `raw` | Yes (BGRA on the `videoFramesStream`) | Yes (I420 planar YUV on the `videoFramesStream`) |
 | Video codec `hvc1` | Yes — without `enableBackgroundStreaming()`, also survives a brief background transition (decoder auto-paused, session stays alive) | No (ignored, falls back to raw) |
-| `enableBackgroundStreaming()` | Activates `AVAudioSession` + forces software HEVC decoding. Requires `audio` + `bluetooth-central` in `UIBackgroundModes` | Starts a foreground service (type `connectedDevice`) + holds a `PARTIAL_WAKE_LOCK`. Requires `BackgroundNotification`. Manifest permissions auto-merge |
+| `enableBackgroundStreaming()` | Activates `AVAudioSession` to keep the process alive in background. HEVC hardware decoder is invalidated on background and recreated on foreground (brief keyframe-wait stall, no freeze). Requires `audio` + `bluetooth-central` in `UIBackgroundModes` | Starts a foreground service (type `connectedDevice`) + holds a `PARTIAL_WAKE_LOCK`. Requires `BackgroundNotification`. Manifest permissions auto-merge |
 | `videoFramesStream()` | Emits BGRA (`raw`) or HEVC NAL units (`hvc1`) | Emits I420 planar YUV (`raw` only) |
 | `requestAndroidPermissions()` | No-op | Required before any DAT call |
 | `restartActiveDeviceMonitoring()` | No-op | Required after registration |
@@ -446,8 +464,8 @@ Develop and test without physical Meta glasses. Mock support lives in the option
 ```yaml
 # pubspec.yaml — add only in dev/staging configs
 dependencies:
-  flutter_meta_wearables_dat: ^0.4.0
-  flutter_meta_wearables_dat_mock_device: ^0.4.0
+  flutter_meta_wearables_dat: ^0.5.0
+  flutter_meta_wearables_dat_mock_device: ^0.5.0
 ```
 
 ```dart

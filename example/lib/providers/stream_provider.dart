@@ -18,14 +18,16 @@ class StreamSessionProvider extends ChangeNotifier {
   StreamSubscription<StreamSessionState>? _sessionStateSubscription;
   StreamSubscription<StreamSessionError>? _sessionErrorSubscription;
   StreamSubscription<VideoStreamSize>? _videoStreamSizeSubscription;
+  StreamSubscription<DeviceState>? _deviceStateSubscription;
   VideoStreamSize? _videoStreamSize;
   bool _hasActiveDevice = false;
   bool _isStreaming = false;
-  double _fps = 24;
-  StreamQuality _streamQuality = StreamQuality.low;
+  double _fps = 15;
+  StreamQuality _streamQuality = StreamQuality.medium;
   VideoCodec _videoCodec = VideoCodec.raw;
   StreamSessionState? _sessionState;
   StreamSessionError? _lastError;
+  ThermalLevel? _thermalLevel;
   String? _selectedVideo;
   String? _selectedImage;
   bool _isLoadingVideo = false;
@@ -35,6 +37,7 @@ class StreamSessionProvider extends ChangeNotifier {
 
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
     _initializeActiveDeviceMonitoring();
+    _initializeDeviceStateMonitoring();
   }
 
   bool get hasActiveDevice => _hasActiveDevice;
@@ -53,18 +56,55 @@ class StreamSessionProvider extends ChangeNotifier {
   bool get supportsHvc1 => Platform.isIOS;
   bool get backgroundStreamingEnabled => _backgroundStreamingEnabled;
 
+  /// Current thermal level of the active device, or `null` if no device is
+  /// active or the SDK hasn't reported a level yet. Updated live via
+  /// [MetaWearablesDat.deviceStateStream].
+  ThermalLevel? get thermalLevel => _thermalLevel;
+
   void _initializeActiveDeviceMonitoring() {
     _activeDeviceSubscription = MetaWearablesDat.activeDeviceStream().listen(
       (hasActiveDevice) {
         _hasActiveDevice = hasActiveDevice;
+        // Reset thermal readout when device goes away so the UI doesn't show
+        // stale data; the next active device will repopulate it.
+        if (!hasActiveDevice) {
+          _thermalLevel = null;
+        }
         notifyListeners();
       },
       onError: (dynamic error) {
         debugPrint('[MetaWearablesDAT] Error in active device stream: $error');
         _hasActiveDevice = false;
+        _thermalLevel = null;
         notifyListeners();
       },
     );
+  }
+
+  void _initializeDeviceStateMonitoring() {
+    _deviceStateSubscription = MetaWearablesDat.deviceStateStream().listen(
+      (state) {
+        if (_thermalLevel != state.thermalLevel) {
+          _thermalLevel = state.thermalLevel;
+          notifyListeners();
+        }
+      },
+      onError: (dynamic error) {
+        debugPrint('[MetaWearablesDAT] Device state stream error: $error');
+      },
+    );
+  }
+
+  /// Opens the Meta AI app to the DAT-app-update screen on the connected
+  /// glasses when the SDK reports `datAppOnTheGlassesUpdateRequired`.
+  Future<bool> openDATGlassesAppUpdate() async {
+    unawaited(HapticFeedback.mediumImpact());
+    try {
+      return await MetaWearablesDat.openDATGlassesAppUpdate();
+    } catch (e) {
+      debugPrint('[MetaWearablesDAT] openDATGlassesAppUpdate failed: $e');
+      return false;
+    }
   }
 
   @override
@@ -73,6 +113,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _sessionStateSubscription?.cancel();
     _sessionErrorSubscription?.cancel();
     _videoStreamSizeSubscription?.cancel();
+    _deviceStateSubscription?.cancel();
     super.dispose();
   }
 
@@ -123,8 +164,15 @@ class StreamSessionProvider extends ChangeNotifier {
     }
   }
 
-  void dismissError() {
+  /// Clears the pending error after the UI has shown it (e.g. via SnackBar).
+  void clearError() {
+    if (_lastError == null) return;
     _lastError = null;
+    notifyListeners();
+  }
+
+  void _setError(StreamSessionError error) {
+    _lastError = error;
     notifyListeners();
   }
 
@@ -166,10 +214,7 @@ class StreamSessionProvider extends ChangeNotifier {
       unawaited(_sessionErrorSubscription?.cancel());
       _sessionErrorSubscription =
           MetaWearablesDat.streamSessionErrorStream().listen(
-        (error) {
-          _lastError = error;
-          notifyListeners();
-        },
+        _setError,
         onError: (dynamic error) {
           debugPrint('[MetaWearablesDAT] Session error stream error: $error');
         },

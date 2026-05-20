@@ -49,6 +49,13 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     'flutter_meta_wearables_dat/video_frames',
   );
 
+  /// The event channel used to receive per-device state updates
+  /// (thermal level). Tracks the active device on the native side.
+  @visibleForTesting
+  final deviceStateEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/device_state',
+  );
+
   @override
   Future<bool> requestAndroidPermissions() async {
     final ok = await methodChannel.invokeMethod<bool>(
@@ -292,6 +299,28 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
           presentationTimestampUs: (map['ptsUs'] as num).toInt(),
           isKeyframe: (map['isKeyframe'] as bool?) ?? true,
           bytesPerRow: bytesPerRow,
+        );
+      },
+    );
+  }
+
+  @override
+  Future<bool> openDATGlassesAppUpdate() async {
+    final ok = await methodChannel.invokeMethod<bool>(
+      'openDATGlassesAppUpdate',
+    );
+    return ok ?? false;
+  }
+
+  @override
+  Stream<DeviceState> deviceStateStream() {
+    return deviceStateEventChannel.receiveBroadcastStream().map(
+      (dynamic event) {
+        final map = Map<String, dynamic>.from(event as Map);
+        return DeviceState(
+          thermalLevel: ThermalLevel.fromInt(
+            (map['thermalLevel'] as num).toInt(),
+          ),
         );
       },
     );

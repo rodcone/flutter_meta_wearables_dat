@@ -1,6 +1,8 @@
 import CoreBluetooth
 import CryptoKit
+import Darwin
 import Foundation
+import MachO
 import UIKit
 
 final public class Analytics : MWDATCore.AnalyticsProtocol, Sendable {
@@ -23,12 +25,16 @@ final public class Analytics : MWDATCore.AnalyticsProtocol, Sendable {
 
 extension Analytics {
 
+    /// Start a QPL marker
     final public func markerStart(markerId: Int32, instanceKey: Int32)
 
+    /// Annotate a QPL marker with any supported value type
     final public func markerAnnotate<T>(markerId: Int32, instanceKey: Int32, key: String, value: T) where T : MWDATCore.QPLAnnotatable
 
+    /// End a QPL marker with an action ID
     final public func markerEnd(markerId: Int32, instanceKey: Int32, actionId: Int16)
 
+    /// Add a point to a tracked QPL marker
     final public func markerPoint(markerId: Int32, instanceKey: Int32, name: String, level: MWDATCore.QPLLogLevel)
 }
 
@@ -58,6 +64,18 @@ public protocol AnalyticsProtocol : Sendable {
     /// Logs an analytics event.
     /// - Parameter event: The event to log.
     func log(event: any MWDATCore.AnalyticsEvent)
+
+    /// Start a QPL marker
+    func markerStart(markerId: Int32, instanceKey: Int32)
+
+    /// Annotate a QPL marker with any supported value type
+    func markerAnnotate<T>(markerId: Int32, instanceKey: Int32, key: String, value: T) where T : MWDATCore.QPLAnnotatable
+
+    /// End a QPL marker with an action ID
+    func markerEnd(markerId: Int32, instanceKey: Int32, actionId: Int16)
+
+    /// Add a point to a tracked QPL marker
+    func markerPoint(markerId: Int32, instanceKey: Int32, name: String, level: MWDATCore.QPLLogLevel)
 }
 
 extension AnalyticsProtocol {
@@ -243,8 +261,11 @@ final public class AutoDeviceSelector : MWDATCore.DeviceSelector {
     final public func activeDeviceStream() -> MWDATCore.AnyAsyncSequence<MWDATCore.DeviceIdentifier?>
 
     /// Creates an auto device selector that monitors the given wearables interface for device changes.
-    /// - Parameter wearables: The wearables interface to monitor for available devices.
-    public init(wearables: any MWDATCore.WearablesInterface)
+    /// - Parameters:
+    ///   - wearables: The wearables interface to monitor for available devices.
+    ///   - filter: An optional closure to apply additional filtering beyond connected and compatible.
+    ///     Return `true` to include a device, `false` to exclude it.
+    public init(wearables: any MWDATCore.WearablesInterface, filter: MWDATCore.DeviceFilter? = nil)
 
     @objc deinit
 }
@@ -610,8 +631,16 @@ final public class Device : Sendable {
     /// Returns true if the version of this device is compatible with the Wearables Device Access Toolkit.
     final public func compatibility() -> MWDATCore.Compatibility
 
+    /// Returns whether this device has a built-in display.
+    /// - Returns: `true` if the device type supports a display, `false` otherwise.
+    final public func supportsDisplay() -> Bool
+
     @objc deinit
 }
+
+/// A closure that filters devices during auto-selection.
+/// Return `true` to include the device, `false` to exclude it.
+public typealias DeviceFilter = @Sendable (MWDATCore.Device) -> Bool
 
 /// A unique identifier for a Meta Wearables device.
 public typealias DeviceIdentifier = String
@@ -638,7 +667,7 @@ final public class DeviceManagerImpl : MWDATCore.DeviceManager {
 
     @objc deinit
 
-    final public func attachFake(appManager: Any)
+    final public func attachFake(appManager: Any, linkAvailabilityChecker: Any)
 
     final public func detachFake()
 }
@@ -766,14 +795,6 @@ final public class DeviceSession : Sendable {
 
     /// Creates an ``AsyncStream`` for observing session errors.
     final public func errorStream() -> AsyncStream<MWDATCore.DeviceSessionError>
-
-    /// Creates a DeviceSession for testing purposes only.
-    /// - Parameters:
-    ///   - deviceId: The identifier of the device.
-    ///   - deviceManager: The device manager to use.
-    ///   - appId: The app identifier. Defaults to `"com.test.app"`.
-    /// - Returns: A new ``DeviceSession`` in ``DeviceSessionState/idle`` state.
-    public static func create_FOR_TESTING(deviceId: MWDATCore.DeviceIdentifier, deviceManager: any MWDATCore.DeviceManager, appId: String = "com.test.app") -> MWDATCore.DeviceSession
 }
 
 /// Errors that can occur during ``DeviceSession`` operations.
@@ -799,6 +820,24 @@ final public class DeviceSession : Sendable {
 
     /// An unexpected error occurred.
     case unexpectedError(description: String)
+
+    /// The device thermal state has reached a critical level.
+    case thermalCritical
+
+    /// The device thermal state has reached an emergency level and the device is shutting down.
+    case thermalEmergency
+
+    /// The device has entered peak power shutdown.
+    case peakPowerShutdown
+
+    /// The device battery has reached a critically low level.
+    case batteryCritical
+
+    /// The app on the glasses needs an update before the session can start.
+    case datAppOnTheGlassesUpdateRequired
+
+    /// The DAT Wearables App on the glasses is not reachable.
+    case dwaUnavailable
 
     /// A localized description of the error, suitable for display in UI or logging.
     public var errorDescription: String? { get }
@@ -882,25 +921,28 @@ extension DeviceSessionState : Hashable {
 extension DeviceSessionState : BitwiseCopyable {
 }
 
-/// Manages a session for monitoring device state changes.
-final public class DeviceStateSession : Sendable {
+/// Represents the current state of a connected device.
+///
+/// Contains observable device state metrics such as the device's thermal level.
+/// Use ``WearablesInterface/deviceStateStream(for:)`` to observe changes.
+public struct DeviceState : Sendable, Equatable {
 
-    /// The current state of the device session.
-    final public var state: MWDATCore.SessionState { get }
+    /// The current thermal level of the device.
+    public let thermalLevel: MWDATCore.ThermalLevel
 
-    /// Starts the device state session.
+    /// Creates a new device state.
+    /// - Parameter thermalLevel: The thermal level of the device. Defaults to ``ThermalLevel/unknown``.
+    public init(thermalLevel: MWDATCore.ThermalLevel = .unknown)
+
+    /// Returns a Boolean value indicating whether two values are equal.
     ///
-    /// Begins monitoring the selected device for state changes.
-    final public func start() async throws
-
-    /// Stops the device state session.
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
     ///
-    /// Releases resources and stops monitoring device state changes.
-    final public func stop() async throws
-
-    public convenience init(deviceSelector: any MWDATCore.DeviceSelector)
-
-    @objc deinit
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.DeviceState, b: MWDATCore.DeviceState) -> Bool
 }
 
 /// Represents the types of Meta Wearables devices supported by the Wearables Device Access Toolkit.
@@ -977,6 +1019,12 @@ public enum DeviceType : String, CaseIterable, Sendable {
     public var rawValue: String { get }
 }
 
+extension DeviceType {
+
+    /// Returns whether this device type has a built-in display.
+    public var supportsDisplay: Bool { get }
+}
+
 extension DeviceType : Equatable {
 }
 
@@ -1024,7 +1072,7 @@ public protocol FakeRegistrationHandling : Sendable {
 
     func open(url: URL)
 
-    func handleUnregisterUrl(_ url: URL) async throws
+    func handleUnregister() async throws
 
     func finishRegistration(authorityKey: String, constellationGroupID: String) throws
 
@@ -1171,11 +1219,151 @@ public struct Mutex<Value> : ~Copyable where Value : ~Copyable {
 extension Mutex : @unchecked Sendable where Value : ~Copyable {
 }
 
+/// Errors that can occur when navigating to a screen in the Meta AI companion app.
+@objc(MWDATNavigationError) @frozen public enum NavigationError : Int, Error {
+
+    /// The Meta AI app is not installed on the device.
+    case metaAINotInstalled
+
+    /// The app is not registered with AI glasses.
+    case notRegistered
+
+    public var description: String { get }
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The NSError domain to which this type is bridged.
+    public static var _nsErrorDomain: String { get }
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension NavigationError : Equatable {
+}
+
+extension NavigationError : Hashable {
+}
+
+extension NavigationError : RawRepresentable {
+}
+
+extension NavigationError : BitwiseCopyable {
+}
+
 @objc public class ObjC_AnyListenerToken : NSObject {
 
     @objc public func cancel()
 
     @objc deinit
+}
+
+/// ObjC-compatible mirror of ``Compatibility``.
+@objc(MWDATCompatibility) @frozen public enum ObjC_Compatibility : Int {
+
+    case undefined
+
+    case compatible
+
+    case deviceUpdateRequired
+
+    case sdkUpdateRequired
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension ObjC_Compatibility : Equatable {
+}
+
+extension ObjC_Compatibility : Hashable {
+}
+
+extension ObjC_Compatibility : RawRepresentable {
+}
+
+extension ObjC_Compatibility : Sendable {
+}
+
+extension ObjC_Compatibility : BitwiseCopyable {
 }
 
 @objc(MWDATDevice) public class ObjC_Device : NSObject {
@@ -1188,7 +1376,23 @@ extension Mutex : @unchecked Sendable where Value : ~Copyable {
 
     public var linkState: MWDATCore.LinkState { get }
 
+    /// ObjC-accessible mirror of ``linkState``. Visible from ObjC as `linkState`.
+    @objc(linkState) public var objcLinkState: MWDATCore.ObjC_LinkState { get }
+
     public func addLinkStateListener(_ listener: @escaping @Sendable (MWDATCore.LinkState) -> Void) -> MWDATCore.ObjC_AnyListenerToken
+
+    /// ObjC-accessible variant of ``addLinkStateListener(_:)``. Visible from ObjC as `addLinkStateListener:`.
+    @objc(addLinkStateListener:) public func objcAddLinkStateListener(_ listener: @escaping @Sendable (MWDATCore.ObjC_LinkState) -> Void) -> MWDATCore.ObjC_AnyListenerToken
+
+    public func compatibility() -> MWDATCore.Compatibility
+
+    /// ObjC-accessible mirror of ``compatibility()``. Visible from ObjC as `compatibility`.
+    @objc(compatibility) public var objcCompatibility: MWDATCore.ObjC_Compatibility { get }
+
+    public func addCompatibilityListener(_ listener: @escaping @Sendable (MWDATCore.Compatibility) -> Void) -> MWDATCore.ObjC_AnyListenerToken
+
+    /// ObjC-accessible variant of ``addCompatibilityListener(_:)``. Visible from ObjC as `addCompatibilityListener:`.
+    @objc(addCompatibilityListener:) public func objcAddCompatibilityListener(_ listener: @escaping @Sendable (MWDATCore.ObjC_Compatibility) -> Void) -> MWDATCore.ObjC_AnyListenerToken
 
     public func deviceType() -> MWDATCore.DeviceType
 
@@ -1199,9 +1403,10 @@ extension Mutex : @unchecked Sendable where Value : ~Copyable {
 
 @objc(MWDATDeviceSession) final public class ObjC_DeviceSession : NSObject, Sendable {
 
-    final public var wrappedSession: MWDATCore.DeviceSession { get }
-
     @objc final public var deviceIdentifier: MWDATCore.DeviceIdentifier { get }
+
+    /// The current state of this session.
+    @objc final public var state: MWDATCore.ObjC_DeviceSessionState { get }
 
     @objc(start:) final public func start(_ error: NSErrorPointer = nil)
 
@@ -1209,9 +1414,158 @@ extension Mutex : @unchecked Sendable where Value : ~Copyable {
 
     @objc final public func stop()
 
-    public static func create_FOR_TESTING(swiftSession: MWDATCore.DeviceSession) -> MWDATCore.ObjC_DeviceSession
+    /// Adds a listener for session state changes.
+    ///
+    /// - Parameter listener: A block called with the new state value.
+    /// - Returns: A token that must be retained to keep the listener active.
+    @objc final public func addStateListener(_ listener: @escaping @Sendable (MWDATCore.ObjC_DeviceSessionState) -> Void) -> MWDATCore.ObjC_AnyListenerToken
 
     @objc deinit
+}
+
+/// Represents the current state of a device session.
+@objc(MWDATDeviceSessionState) @frozen public enum ObjC_DeviceSessionState : Int, Sendable {
+
+    /// The session has been created but not yet started.
+    case idle
+
+    /// The session is connecting to the device.
+    case starting
+
+    /// The session is connected and active.
+    case started
+
+    /// The session is temporarily paused.
+    case paused
+
+    /// The session is stopping and cleaning up resources.
+    case stopping
+
+    /// The session has ended. Create a new session to reconnect.
+    case stopped
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension ObjC_DeviceSessionState : Equatable {
+}
+
+extension ObjC_DeviceSessionState : Hashable {
+}
+
+extension ObjC_DeviceSessionState : RawRepresentable {
+}
+
+extension ObjC_DeviceSessionState : BitwiseCopyable {
+}
+
+/// ObjC-compatible mirror of ``LinkState``.
+@objc(MWDATLinkState) @frozen public enum ObjC_LinkState : Int {
+
+    case disconnected
+
+    case connecting
+
+    case connected
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension ObjC_LinkState : Equatable {
+}
+
+extension ObjC_LinkState : Hashable {
+}
+
+extension ObjC_LinkState : RawRepresentable {
+}
+
+extension ObjC_LinkState : Sendable {
+}
+
+extension ObjC_LinkState : BitwiseCopyable {
 }
 
 @objc(MWDATPermission) @frozen public enum ObjC_Permission : Int {
@@ -1351,9 +1705,8 @@ extension ObjC_PermissionStatus : BitwiseCopyable {
 
     @objc(configure:) public static func configure(_ error: NSErrorPointer = nil)
 
-    /// Reset the shared state for testing purposes. This allows tests to call configure() multiple times.
-    /// WARNING: This method is only intended for use in tests and should not be called in production code.
-    @objc public static func resetForTesting()
+    /// Reset the shared state, allowing `configure()` to be called again.
+    @objc public static func reset()
 
     @objc public static var sharedInstance: MWDATCore.ObjC_Wearables { get }
 
@@ -1367,6 +1720,10 @@ extension ObjC_PermissionStatus : BitwiseCopyable {
 
     @objc final public func startUnregistration() async throws
 
+    @objc final public func openFirmwareUpdate() async throws
+
+    @objc final public func openDATGlassesAppUpdate() async throws
+
     @objc final public var devices: [MWDATCore.DeviceIdentifier] { get }
 
     @objc final public func deviceForIdentifier(_ identifier: MWDATCore.DeviceIdentifier) -> MWDATCore.ObjC_Device?
@@ -1376,8 +1733,6 @@ extension ObjC_PermissionStatus : BitwiseCopyable {
     @objc final public func requestPermission(_ permission: MWDATCore.ObjC_Permission) async throws -> MWDATCore.ObjC_PermissionStatus
 
     @objc(createSessionForDeviceIdentifier:error:) final public func createSession(forDeviceIdentifier deviceIdentifier: MWDATCore.DeviceIdentifier, error: NSErrorPointer = nil) -> MWDATCore.ObjC_DeviceSession?
-
-    @objc final public func addDeviceSessionStateListener(forDeviceId deviceId: MWDATCore.DeviceIdentifier, listener: @escaping @Sendable (MWDATCore.SessionState) -> Void) async -> MWDATCore.ObjC_AnyListenerToken
 }
 
 /// Represents the types of permissions that can be requested from AI glasses.
@@ -1615,10 +1970,10 @@ final public class PermissionsManager : Sendable {
     /// - Throws: PermissionError if there is an error creating or opening the permission request URL.
     final public func requestPermission(_ permission: MWDATCore.Permission) async throws(MWDATCore.PermissionError) -> MWDATCore.PermissionStatus
 
-    /// Handles a URL response from the FWA app for a permission request
-    /// - Parameter url: The URL to handle
-    /// - Returns: Boolean indicating if the URL was handled
-    final public func handlePermissionUrl(_ url: URL) -> Bool
+    /// Handles a parsed URL response from the FWA app for a permission request
+    /// - Parameter params: The parsed URL parameters to handle
+    /// - Returns: Boolean indicating if the response was handled
+    final public func handlePermission(params: [String : String]) -> Bool
 
     @objc deinit
 }
@@ -1793,9 +2148,9 @@ final public class RegistrationManager : Sendable {
 
     final public func startRegistrationInternal() async throws(MWDATCore.RegistrationError)
 
-    final public func handleFinishRegistrationUrl(_ url: URL) throws -> Bool
+    final public func handleFinishRegistration(params: [String : String]) throws -> Bool
 
-    final public func handleDeleteRegistrationUrl(_ url: URL) async throws -> Bool
+    final public func handleDeleteRegistration() async throws -> Bool
 
     final public func startUnregistration() async throws(MWDATCore.UnregistrationError)
 }
@@ -1889,8 +2244,6 @@ final public class SessionChannel : Sendable {
 public protocol SessionManager : Sendable {
 
     func requestSessionHandle(forDeviceId: MWDATCore.DeviceIdentifier, listener: @escaping @Sendable (MWDATCore.SessionState) -> Void) async -> any MWDATCore.AnyListenerToken
-
-    func addDeviceSessionStateListener(forDeviceId: MWDATCore.DeviceIdentifier, listener: @escaping @Sendable (MWDATCore.SessionState) -> Void) async -> any MWDATCore.AnyListenerToken
 }
 
 /// Represents the current state of a device session in the Wearables Device Access Toolkit.
@@ -1987,6 +2340,81 @@ final public class SpecificDeviceSelector : MWDATCore.DeviceSelector {
     @objc deinit
 }
 
+/// Represents the thermal level reported by the connected device.
+///
+/// The thermal level indicates the current temperature state of the glasses.
+/// Higher levels indicate progressively more severe thermal conditions, which
+/// may affect device performance or trigger protective shutdowns.
+@frozen public enum ThermalLevel : Sendable, Equatable {
+
+    /// The thermal level is unknown or has not been reported.
+    case unknown
+
+    /// No thermal concern.
+    case none
+
+    /// Light thermal activity detected.
+    case light
+
+    /// Moderate thermal activity — some features may be throttled.
+    case moderate
+
+    /// Severe thermal activity — significant throttling expected.
+    case severe
+
+    /// Critical thermal level — device performance is heavily restricted.
+    case critical
+
+    /// Emergency thermal level — device is preparing for shutdown.
+    case emergency
+
+    /// The device is shutting down due to thermal conditions.
+    case shutdown
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.ThermalLevel, b: MWDATCore.ThermalLevel) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension ThermalLevel : Hashable {
+}
+
+extension ThermalLevel : BitwiseCopyable {
+}
+
 /// Error conditions that can occur during the unregistration process.
 @objc(MWDATUnregistrationError) @frozen public enum UnregistrationError : Int, Error {
 
@@ -2067,6 +2495,8 @@ extension UnregistrationError : BitwiseCopyable {
 public struct VersionData {
 
     public static let minMWAVersion: Int
+
+    public static let minDWAVersion: String
 
     public static let FirmwareVersions: [MWDATCore.DeviceType : String]
 }
@@ -2290,6 +2720,24 @@ public protocol WearablesInterface : Sendable {
     /// - Throws: ``UnregistrationError`` if there is an error starting the unregistration process.
     func startUnregistration() async throws(MWDATCore.UnregistrationError)
 
+    /// Opens the firmware update screen in the Meta AI app for the connected device.
+    ///
+    /// This method launches the Meta AI app and navigates directly to the firmware update screen.
+    /// The user can then check for and install any available firmware updates.
+    ///
+    /// - Throws: ``NavigationError/notRegistered`` if the app is not registered with AI glasses.
+    /// - Throws: ``NavigationError/metaAINotInstalled`` if the Meta AI app is not installed.
+    func openFirmwareUpdate() async throws(MWDATCore.NavigationError)
+
+    /// Opens the DAT glasses app update screen in the Meta AI app.
+    ///
+    /// Developer mode apps are routed to the developer app management surface, while
+    /// production apps are routed to the app connections page for the configured Meta app identifier.
+    ///
+    /// - Throws: ``NavigationError/notRegistered`` if the app is not registered with AI glasses.
+    /// - Throws: ``NavigationError/metaAINotInstalled`` if the Meta AI app is not installed.
+    func openDATGlassesAppUpdate() async throws(MWDATCore.NavigationError)
+
     /// The current list of devices available.
     var devices: [MWDATCore.DeviceIdentifier] { get }
 
@@ -2327,6 +2775,8 @@ public protocol WearablesInterface : Sendable {
     ///
     /// Fails if a non-stopped session already exists for the resolved device.
     /// After the session has stopped or been released, a new one can be created.
+    /// Call ``DeviceSession/start()`` to connect, then add capabilities such as
+    /// ``DeviceSession/addStream(config:)`` once the session reaches ``DeviceSessionState/started``.
     ///
     /// - Parameter deviceSelector: The selector that determines which device to connect to.
     /// - Returns: A new ``DeviceSession``.
@@ -2334,12 +2784,11 @@ public protocol WearablesInterface : Sendable {
     /// - Throws: ``DeviceSessionError/sessionAlreadyExists`` if an active session already exists for this device.
     func createSession(deviceSelector: any MWDATCore.DeviceSelector) throws(MWDATCore.DeviceSessionError) -> MWDATCore.DeviceSession
 
-    /// Adds a listener to receive callbacks when the session state changes for a specific device. The listener is immediately called with the current session state.
-    /// - Parameters:
-    ///   - forDeviceId: The identifier of the device to listen for session state changes.
-    ///   - listener: The callback to execute when the session state changes.
-    /// - Returns: A token that can be used to cancel the listener. When the token deinits the listener is also canceled.
-    func addDeviceSessionStateListener(forDeviceId: MWDATCore.DeviceIdentifier, listener: @escaping @Sendable (MWDATCore.SessionState) -> Void) async -> any MWDATCore.AnyListenerToken
+    /// Creates an ``AsyncStream`` for observing device state changes on a specific device.
+    ///
+    /// - Parameter identifier: The device to observe.
+    /// - Returns: A stream that yields ``DeviceState`` values when the device state changes (e.g. thermal level).
+    func deviceStateStream(for identifier: MWDATCore.DeviceIdentifier) -> AsyncStream<MWDATCore.DeviceState>
 }
 
 extension WearablesInterface {
@@ -2364,918 +2813,18 @@ public protocol WearablesPrivate : Sendable {
     var permissionsManager: MWDATCore.PermissionsManager { get }
 }
 
-/// Analytics event for WearablesSDKAttestationEvent
-public struct WearablesSDKAttestationEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(attestationSessionId: String? = nil, errorType: String? = nil, eventType: MWDATCore.WearablesSDKAttestationEventType? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setAttestationSessionId(_ attestationSessionId: String?) -> MWDATCore.WearablesSDKAttestationEvent
-
-    @discardableResult
-    public mutating func setErrorType(_ errorType: String?) -> MWDATCore.WearablesSDKAttestationEvent
-
-    @discardableResult
-    public mutating func setEventType(_ eventType: MWDATCore.WearablesSDKAttestationEventType?) -> MWDATCore.WearablesSDKAttestationEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(attestationSessionId: String? = nil, errorType: String? = nil, eventType: MWDATCore.WearablesSDKAttestationEventType? = nil) -> MWDATCore.WearablesSDKAttestationEvent
-}
-
-/**
- * Enum for WearablesSDKAttestationEventType
- */
-public enum WearablesSDKAttestationEventType : String, Codable, Sendable {
-
-    case started_attestation
-
-    case completed_attestation
-
-    case failed_attestation
-
-    case challenge_requested
-
-    case key_generated
-
-    case attestation_object_created
-
-    case assertion_object_created
-
-    case certificate_chain_created
-
-    /// Creates a new instance with the specified raw value.
-    ///
-    /// If there is no value of the type that corresponds with the specified raw
-    /// value, this initializer returns `nil`. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     print(PaperSize(rawValue: "Legal"))
-    ///     // Prints "Optional(PaperSize.Legal)"
-    ///
-    ///     print(PaperSize(rawValue: "Tabloid"))
-    ///     // Prints "nil"
-    ///
-    /// - Parameter rawValue: The raw value to use for the new instance.
-    public init?(rawValue: String)
-
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    ///
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    public typealias RawValue = String
-
-    /// The corresponding value of the raw type.
-    ///
-    /// A new instance initialized with `rawValue` will be equivalent to this
-    /// instance. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     let selectedSize = PaperSize.Letter
-    ///     print(selectedSize.rawValue)
-    ///     // Prints "Letter"
-    ///
-    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
-    ///     // Prints "true"
-    public var rawValue: String { get }
-}
-
-extension WearablesSDKAttestationEventType : Equatable {
-}
-
-extension WearablesSDKAttestationEventType : Hashable {
-}
-
-extension WearablesSDKAttestationEventType : RawRepresentable {
-}
-
-/// Analytics event for WearablesSDKCheckPermissionEvent
-public struct WearablesSDKCheckPermissionEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(deviceSocBuildVersion: String? = nil, error: String? = nil, hasPermission: Bool? = nil, permission: String? = nil, success: Bool? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setDeviceSocBuildVersion(_ deviceSocBuildVersion: String?) -> MWDATCore.WearablesSDKCheckPermissionEvent
-
-    @discardableResult
-    public mutating func setError(_ error: String?) -> MWDATCore.WearablesSDKCheckPermissionEvent
-
-    @discardableResult
-    public mutating func setHasPermission(_ hasPermission: Bool?) -> MWDATCore.WearablesSDKCheckPermissionEvent
-
-    @discardableResult
-    public mutating func setPermission(_ permission: String?) -> MWDATCore.WearablesSDKCheckPermissionEvent
-
-    @discardableResult
-    public mutating func setSuccess(_ success: Bool?) -> MWDATCore.WearablesSDKCheckPermissionEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(deviceSocBuildVersion: String? = nil, error: String? = nil, hasPermission: Bool? = nil, permission: String? = nil, success: Bool? = nil) -> MWDATCore.WearablesSDKCheckPermissionEvent
-}
-
-/// Analytics event for WearablesSDKDeviceAnalyticsEvent
-public struct WearablesSDKDeviceAnalyticsEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(deviceIdentifier: String? = nil, deviceSocBuildVersion: String? = nil, error: String? = nil, eventType: MWDATCore.WearablesSDKDeviceAnalyticsEventType? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setDeviceIdentifier(_ deviceIdentifier: String?) -> MWDATCore.WearablesSDKDeviceAnalyticsEvent
-
-    @discardableResult
-    public mutating func setDeviceSocBuildVersion(_ deviceSocBuildVersion: String?) -> MWDATCore.WearablesSDKDeviceAnalyticsEvent
-
-    @discardableResult
-    public mutating func setError(_ error: String?) -> MWDATCore.WearablesSDKDeviceAnalyticsEvent
-
-    @discardableResult
-    public mutating func setEventType(_ eventType: MWDATCore.WearablesSDKDeviceAnalyticsEventType?) -> MWDATCore.WearablesSDKDeviceAnalyticsEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(deviceIdentifier: String? = nil, deviceSocBuildVersion: String? = nil, error: String? = nil, eventType: MWDATCore.WearablesSDKDeviceAnalyticsEventType? = nil) -> MWDATCore.WearablesSDKDeviceAnalyticsEvent
-}
-
-/**
- * Enum for WearablesSDKDeviceAnalyticsEventType
- */
-public enum WearablesSDKDeviceAnalyticsEventType : String, Codable, Sendable {
-
-    case device_discovered
-
-    case device_forgotten
-
-    case error
-
-    /// Creates a new instance with the specified raw value.
-    ///
-    /// If there is no value of the type that corresponds with the specified raw
-    /// value, this initializer returns `nil`. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     print(PaperSize(rawValue: "Legal"))
-    ///     // Prints "Optional(PaperSize.Legal)"
-    ///
-    ///     print(PaperSize(rawValue: "Tabloid"))
-    ///     // Prints "nil"
-    ///
-    /// - Parameter rawValue: The raw value to use for the new instance.
-    public init?(rawValue: String)
-
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    ///
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    public typealias RawValue = String
-
-    /// The corresponding value of the raw type.
-    ///
-    /// A new instance initialized with `rawValue` will be equivalent to this
-    /// instance. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     let selectedSize = PaperSize.Letter
-    ///     print(selectedSize.rawValue)
-    ///     // Prints "Letter"
-    ///
-    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
-    ///     // Prints "true"
-    public var rawValue: String { get }
-}
-
-extension WearablesSDKDeviceAnalyticsEventType : Equatable {
-}
-
-extension WearablesSDKDeviceAnalyticsEventType : Hashable {
-}
-
-extension WearablesSDKDeviceAnalyticsEventType : RawRepresentable {
-}
-
-/// Analytics event for WearablesSDKGetPermissionsEvent
-public struct WearablesSDKGetPermissionsEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(deviceSocBuildVersion: String? = nil, error: String? = nil, permissions: [String : String]? = nil, success: Bool? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setDeviceSocBuildVersion(_ deviceSocBuildVersion: String?) -> MWDATCore.WearablesSDKGetPermissionsEvent
-
-    @discardableResult
-    public mutating func setError(_ error: String?) -> MWDATCore.WearablesSDKGetPermissionsEvent
-
-    @discardableResult
-    public mutating func setPermissions(_ permissions: [String : String]?) -> MWDATCore.WearablesSDKGetPermissionsEvent
-
-    @discardableResult
-    public mutating func setSuccess(_ success: Bool?) -> MWDATCore.WearablesSDKGetPermissionsEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(deviceSocBuildVersion: String? = nil, error: String? = nil, permissions: [String : String]? = nil, success: Bool? = nil) -> MWDATCore.WearablesSDKGetPermissionsEvent
-}
-
-/// Analytics event for WearablesSDKMockDeviceEvent
-public struct WearablesSDKMockDeviceEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(deviceIdentifier: String? = nil, deviceType: Int64? = nil, eventType: MWDATCore.WearablesSDKMockDeviceEventType? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setDeviceIdentifier(_ deviceIdentifier: String?) -> MWDATCore.WearablesSDKMockDeviceEvent
-
-    @discardableResult
-    public mutating func setDeviceType(_ deviceType: Int64?) -> MWDATCore.WearablesSDKMockDeviceEvent
-
-    @discardableResult
-    public mutating func setEventType(_ eventType: MWDATCore.WearablesSDKMockDeviceEventType?) -> MWDATCore.WearablesSDKMockDeviceEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(deviceIdentifier: String? = nil, deviceType: Int64? = nil, eventType: MWDATCore.WearablesSDKMockDeviceEventType? = nil) -> MWDATCore.WearablesSDKMockDeviceEvent
-}
-
-/**
- * Enum for WearablesSDKMockDeviceEventType
- */
-public enum WearablesSDKMockDeviceEventType : String, Codable, Sendable {
-
-    case doff
-
-    case don
-
-    case fold
-
-    case pair
-
-    case power_off
-
-    case power_on
-
-    case set_camera_feed
-
-    case set_captured_image
-
-    case unfold
-
-    case unpair
-
-    /// Creates a new instance with the specified raw value.
-    ///
-    /// If there is no value of the type that corresponds with the specified raw
-    /// value, this initializer returns `nil`. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     print(PaperSize(rawValue: "Legal"))
-    ///     // Prints "Optional(PaperSize.Legal)"
-    ///
-    ///     print(PaperSize(rawValue: "Tabloid"))
-    ///     // Prints "nil"
-    ///
-    /// - Parameter rawValue: The raw value to use for the new instance.
-    public init?(rawValue: String)
-
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    ///
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    public typealias RawValue = String
-
-    /// The corresponding value of the raw type.
-    ///
-    /// A new instance initialized with `rawValue` will be equivalent to this
-    /// instance. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     let selectedSize = PaperSize.Letter
-    ///     print(selectedSize.rawValue)
-    ///     // Prints "Letter"
-    ///
-    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
-    ///     // Prints "true"
-    public var rawValue: String { get }
-}
-
-extension WearablesSDKMockDeviceEventType : Equatable {
-}
-
-extension WearablesSDKMockDeviceEventType : Hashable {
-}
-
-extension WearablesSDKMockDeviceEventType : RawRepresentable {
-}
-
-/// Analytics event for WearablesSDKMockServiceEvent
-public struct WearablesSDKMockServiceEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(error: String? = nil, eventType: MWDATCore.WearablesSDKMockServiceEventType? = nil, serviceId: Int64? = nil, success: Bool? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setError(_ error: String?) -> MWDATCore.WearablesSDKMockServiceEvent
-
-    @discardableResult
-    public mutating func setEventType(_ eventType: MWDATCore.WearablesSDKMockServiceEventType?) -> MWDATCore.WearablesSDKMockServiceEvent
-
-    @discardableResult
-    public mutating func setServiceId(_ serviceId: Int64?) -> MWDATCore.WearablesSDKMockServiceEvent
-
-    @discardableResult
-    public mutating func setSuccess(_ success: Bool?) -> MWDATCore.WearablesSDKMockServiceEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(error: String? = nil, eventType: MWDATCore.WearablesSDKMockServiceEventType? = nil, serviceId: Int64? = nil, success: Bool? = nil) -> MWDATCore.WearablesSDKMockServiceEvent
-}
-
-/**
- * Enum for WearablesSDKMockServiceEventType
- */
-public enum WearablesSDKMockServiceEventType : String, Codable, Sendable {
-
-    case capture
-
-    case handle_message
-
-    case service_connect
-
-    case service_disconnect
-
-    case stream_start
-
-    case stream_stop
-
-    /// Creates a new instance with the specified raw value.
-    ///
-    /// If there is no value of the type that corresponds with the specified raw
-    /// value, this initializer returns `nil`. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     print(PaperSize(rawValue: "Legal"))
-    ///     // Prints "Optional(PaperSize.Legal)"
-    ///
-    ///     print(PaperSize(rawValue: "Tabloid"))
-    ///     // Prints "nil"
-    ///
-    /// - Parameter rawValue: The raw value to use for the new instance.
-    public init?(rawValue: String)
-
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    ///
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    public typealias RawValue = String
-
-    /// The corresponding value of the raw type.
-    ///
-    /// A new instance initialized with `rawValue` will be equivalent to this
-    /// instance. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     let selectedSize = PaperSize.Letter
-    ///     print(selectedSize.rawValue)
-    ///     // Prints "Letter"
-    ///
-    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
-    ///     // Prints "true"
-    public var rawValue: String { get }
-}
-
-extension WearablesSDKMockServiceEventType : Equatable {
-}
-
-extension WearablesSDKMockServiceEventType : Hashable {
-}
-
-extension WearablesSDKMockServiceEventType : RawRepresentable {
-}
-
-/// Analytics event for WearablesSDKRegisterEvent
-public struct WearablesSDKRegisterEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(appLinkingFlowId: String? = nil, registrationStep: MWDATCore.WearablesSDKRegisterEventType? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setAppLinkingFlowId(_ appLinkingFlowId: String?) -> MWDATCore.WearablesSDKRegisterEvent
-
-    @discardableResult
-    public mutating func setRegistrationStep(_ registrationStep: MWDATCore.WearablesSDKRegisterEventType?) -> MWDATCore.WearablesSDKRegisterEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(appLinkingFlowId: String? = nil, registrationStep: MWDATCore.WearablesSDKRegisterEventType? = nil) -> MWDATCore.WearablesSDKRegisterEvent
-}
-
-/**
- * Enum for WearablesSDKRegisterEventType
- */
-public enum WearablesSDKRegisterEventType : String, Codable, Sendable {
-
-    case started_registration
-
-    case started_unregistration
-
-    case completed_registration
-
-    case completed_unregistration
-
-    case failed_registration
-
-    case failed_unregistration
-
-    /// Creates a new instance with the specified raw value.
-    ///
-    /// If there is no value of the type that corresponds with the specified raw
-    /// value, this initializer returns `nil`. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     print(PaperSize(rawValue: "Legal"))
-    ///     // Prints "Optional(PaperSize.Legal)"
-    ///
-    ///     print(PaperSize(rawValue: "Tabloid"))
-    ///     // Prints "nil"
-    ///
-    /// - Parameter rawValue: The raw value to use for the new instance.
-    public init?(rawValue: String)
-
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    ///
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    public typealias RawValue = String
-
-    /// The corresponding value of the raw type.
-    ///
-    /// A new instance initialized with `rawValue` will be equivalent to this
-    /// instance. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     let selectedSize = PaperSize.Letter
-    ///     print(selectedSize.rawValue)
-    ///     // Prints "Letter"
-    ///
-    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
-    ///     // Prints "true"
-    public var rawValue: String { get }
-}
-
-extension WearablesSDKRegisterEventType : Equatable {
-}
-
-extension WearablesSDKRegisterEventType : Hashable {
-}
-
-extension WearablesSDKRegisterEventType : RawRepresentable {
-}
-
-/// Analytics event for WearablesSDKSessionEvent
-public struct WearablesSDKSessionEvent : MWDATCore.AnalyticsEvent {
-
-    public init(deviceIdentifier: String, sessionState: MWDATCore.WearablesSDKSessionState)
-
-    /// Initializer with optional parameters
-    public init(deviceIdentifier: String, sessionState: MWDATCore.WearablesSDKSessionState, deviceSocBuildVersion: String? = nil, error: String? = nil, previousSessionState: MWDATCore.WearablesSDKSessionState? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setDeviceSocBuildVersion(_ deviceSocBuildVersion: String?) -> MWDATCore.WearablesSDKSessionEvent
-
-    @discardableResult
-    public mutating func setError(_ error: String?) -> MWDATCore.WearablesSDKSessionEvent
-
-    @discardableResult
-    public mutating func setPreviousSessionState(_ previousSessionState: MWDATCore.WearablesSDKSessionState?) -> MWDATCore.WearablesSDKSessionEvent
-}
-
-/**
- * Enum for WearablesSDKSessionState
- */
-public enum WearablesSDKSessionState : String, Codable, Sendable {
-
-    case stopped
-
-    case waiting_for_device
-
-    case running
-
-    case paused
-
-    case unknown
-
-    /// Creates a new instance with the specified raw value.
-    ///
-    /// If there is no value of the type that corresponds with the specified raw
-    /// value, this initializer returns `nil`. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     print(PaperSize(rawValue: "Legal"))
-    ///     // Prints "Optional(PaperSize.Legal)"
-    ///
-    ///     print(PaperSize(rawValue: "Tabloid"))
-    ///     // Prints "nil"
-    ///
-    /// - Parameter rawValue: The raw value to use for the new instance.
-    public init?(rawValue: String)
-
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    ///
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    public typealias RawValue = String
-
-    /// The corresponding value of the raw type.
-    ///
-    /// A new instance initialized with `rawValue` will be equivalent to this
-    /// instance. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     let selectedSize = PaperSize.Letter
-    ///     print(selectedSize.rawValue)
-    ///     // Prints "Letter"
-    ///
-    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
-    ///     // Prints "true"
-    public var rawValue: String { get }
-}
-
-extension WearablesSDKSessionState : Equatable {
-}
-
-extension WearablesSDKSessionState : Hashable {
-}
-
-extension WearablesSDKSessionState : RawRepresentable {
-}
-
-/// Analytics event for WearablesSDKStreamSessionEvent
-public struct WearablesSDKStreamSessionEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(audioCodec: String? = nil, deviceIdentifier: String? = nil, deviceSocBuildVersion: String? = nil, durationSeconds: Int64? = nil, errorType: String? = nil, eventType: MWDATCore.WearablesSDKStreamSessionEventType? = nil, frameDelivery: String? = nil, resolution: String? = nil, sessionId: String? = nil, videoCodec: String? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setAudioCodec(_ audioCodec: String?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setDeviceIdentifier(_ deviceIdentifier: String?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setDeviceSocBuildVersion(_ deviceSocBuildVersion: String?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setDurationSeconds(_ durationSeconds: Int64?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setErrorType(_ errorType: String?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setEventType(_ eventType: MWDATCore.WearablesSDKStreamSessionEventType?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setFrameDelivery(_ frameDelivery: String?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setResolution(_ resolution: String?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setSessionId(_ sessionId: String?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    @discardableResult
-    public mutating func setVideoCodec(_ videoCodec: String?) -> MWDATCore.WearablesSDKStreamSessionEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(audioCodec: String? = nil, deviceIdentifier: String? = nil, deviceSocBuildVersion: String? = nil, durationSeconds: Int64? = nil, errorType: String? = nil, eventType: MWDATCore.WearablesSDKStreamSessionEventType? = nil, frameDelivery: String? = nil, resolution: String? = nil, sessionId: String? = nil, videoCodec: String? = nil) -> MWDATCore.WearablesSDKStreamSessionEvent
-}
-
-/**
- * Enum for WearablesSDKStreamSessionEventType
- */
-public enum WearablesSDKStreamSessionEventType : String, Codable, Sendable {
-
-    case stream_session_duration
-
-    case stream_session_error
-
-    case stream_session_prepare_completed
-
-    case stream_session_prepare_started
-
-    case stream_session_start_completed
-
-    case stream_session_start_started
-
-    case stream_session_stop_completed
-
-    case stream_session_stop_started
-
-    /// Creates a new instance with the specified raw value.
-    ///
-    /// If there is no value of the type that corresponds with the specified raw
-    /// value, this initializer returns `nil`. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     print(PaperSize(rawValue: "Legal"))
-    ///     // Prints "Optional(PaperSize.Legal)"
-    ///
-    ///     print(PaperSize(rawValue: "Tabloid"))
-    ///     // Prints "nil"
-    ///
-    /// - Parameter rawValue: The raw value to use for the new instance.
-    public init?(rawValue: String)
-
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    ///
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    public typealias RawValue = String
-
-    /// The corresponding value of the raw type.
-    ///
-    /// A new instance initialized with `rawValue` will be equivalent to this
-    /// instance. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     let selectedSize = PaperSize.Letter
-    ///     print(selectedSize.rawValue)
-    ///     // Prints "Letter"
-    ///
-    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
-    ///     // Prints "true"
-    public var rawValue: String { get }
-}
-
-extension WearablesSDKStreamSessionEventType : Equatable {
-}
-
-extension WearablesSDKStreamSessionEventType : Hashable {
-}
-
-extension WearablesSDKStreamSessionEventType : RawRepresentable {
-}
-
-/// Analytics event for WearablesSDKVoiceInvocationsEvent
-public struct WearablesSDKVoiceInvocationsEvent : MWDATCore.AnalyticsEvent {
-
-    public init()
-
-    /// Initializer with optional parameters
-    public init(actionType: String? = nil, deviceIdentifier: String? = nil, deviceSocBuildVersion: String? = nil, durationSeconds: Int64? = nil, errorType: String? = nil, eventType: MWDATCore.WearablesSDKVoiceInvocationsEventType? = nil, interactionId: String? = nil, sessionId: String? = nil)
-
-    /// The name of the event.
-    public var name: String { get }
-
-    /// The data associated with the event.
-    public var data: [String : Any] { get }
-
-    public func toMap() -> [String : Any]
-
-    @discardableResult
-    public mutating func setActionType(_ actionType: String?) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-
-    @discardableResult
-    public mutating func setDeviceIdentifier(_ deviceIdentifier: String?) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-
-    @discardableResult
-    public mutating func setDeviceSocBuildVersion(_ deviceSocBuildVersion: String?) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-
-    @discardableResult
-    public mutating func setDurationSeconds(_ durationSeconds: Int64?) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-
-    @discardableResult
-    public mutating func setErrorType(_ errorType: String?) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-
-    @discardableResult
-    public mutating func setEventType(_ eventType: MWDATCore.WearablesSDKVoiceInvocationsEventType?) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-
-    @discardableResult
-    public mutating func setInteractionId(_ interactionId: String?) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-
-    @discardableResult
-    public mutating func setSessionId(_ sessionId: String?) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-
-    /// Create a new event instance with all parameters
-    public static func create(actionType: String? = nil, deviceIdentifier: String? = nil, deviceSocBuildVersion: String? = nil, durationSeconds: Int64? = nil, errorType: String? = nil, eventType: MWDATCore.WearablesSDKVoiceInvocationsEventType? = nil, interactionId: String? = nil, sessionId: String? = nil) -> MWDATCore.WearablesSDKVoiceInvocationsEvent
-}
-
-/**
- * Enum for WearablesSDKVoiceInvocationsEventType
- */
-public enum WearablesSDKVoiceInvocationsEventType : String, Codable, Sendable {
-
-    case voice_invocation_action_started
-
-    case voice_invocation_duration
-
-    case voice_invocation_error
-
-    case voice_invocation_response_success
-
-    case voice_invocation_start_completed
-
-    case voice_invocation_start_started
-
-    case voice_invocation_stop_completed
-
-    case voice_invocation_stop_started
-
-    /// Creates a new instance with the specified raw value.
-    ///
-    /// If there is no value of the type that corresponds with the specified raw
-    /// value, this initializer returns `nil`. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     print(PaperSize(rawValue: "Legal"))
-    ///     // Prints "Optional(PaperSize.Legal)"
-    ///
-    ///     print(PaperSize(rawValue: "Tabloid"))
-    ///     // Prints "nil"
-    ///
-    /// - Parameter rawValue: The raw value to use for the new instance.
-    public init?(rawValue: String)
-
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    ///
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    public typealias RawValue = String
-
-    /// The corresponding value of the raw type.
-    ///
-    /// A new instance initialized with `rawValue` will be equivalent to this
-    /// instance. For example:
-    ///
-    ///     enum PaperSize: String {
-    ///         case A4, A5, Letter, Legal
-    ///     }
-    ///
-    ///     let selectedSize = PaperSize.Letter
-    ///     print(selectedSize.rawValue)
-    ///     // Prints "Letter"
-    ///
-    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
-    ///     // Prints "true"
-    public var rawValue: String { get }
-}
-
-extension WearablesSDKVoiceInvocationsEventType : Equatable {
-}
-
-extension WearablesSDKVoiceInvocationsEventType : Hashable {
-}
-
-extension WearablesSDKVoiceInvocationsEventType : RawRepresentable {
-}
-
 @objc extension NSNotification {
 
     @objc public static let wearablesRegistrationStateChanged: Notification.Name
 
     @objc public static let wearablesDevicesChanged: Notification.Name
+}
+
+extension NSNotification.Name {
+
+    /// Posted when a DeviceSession is created via `createSession(deviceSelector:)`.
+    /// The `object` is the `DeviceSession` instance.
+    public static let mwdatDeviceSessionCreated: Notification.Name
 }
 
 extension String : MWDATCore.QPLAnnotatable {

@@ -120,17 +120,41 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
 /// Handles video streaming, photo capture, and provides real-time state updates.
 ///
 /// In addition to listener-based callbacks, this class also posts the following notifications:
-/// - `NSNotification.streamSessionStateChanged` - When session state changes
-/// - `NSNotification.streamSessionFrameReceived` - When a video frame is received
-/// - `NSNotification.streamSessionPhotoCaptured` - When a photo is captured
-/// - `NSNotification.streamSessionErrorOccurred` - When an error occurs
-@objc(MWDATStreamSession) final public class ObjC_StreamSession : NSObject, Sendable {
+/// - `NSNotification.streamStateChanged` - When session state changes
+/// - `NSNotification.streamFrameReceived` - When a video frame is received
+/// - `NSNotification.streamPhotoCaptured` - When a photo is captured
+/// - `NSNotification.streamErrorOccurred` - When an error occurs
+@objc(MWDATStream) final public class ObjC_Stream : NSObject, Sendable {
 
     /// The configuration used for this streaming session.
-    @objc final public let config: MWDATCamera.ObjC_StreamSessionConfig
+    @objc final public let config: MWDATCamera.ObjC_StreamConfiguration
 
     /// The current state of the streaming session.
-    @objc final public var state: MWDATCamera.ObjC_StreamSessionState { get }
+    @objc final public var state: MWDATCamera.ObjC_StreamState { get }
+
+    /// Callback invoked when the session state changes.
+    ///
+    /// - Note: The callback runs on the underlying publisher thread. Dispatch to the main queue
+    ///   before updating UI.
+    @objc final public var onStateChanged: (@convention(block) (MWDATCamera.ObjC_StreamState) -> Void)?
+
+    /// Callback invoked when a video frame is received.
+    ///
+    /// - Note: The callback runs on the underlying publisher thread and may fire at high frequency.
+    ///   Dispatch to the main queue before updating UI.
+    @objc final public var onVideoFrame: (@convention(block) (MWDATCamera.ObjC_VideoFrame) -> Void)?
+
+    /// Callback invoked when a photo is captured.
+    ///
+    /// - Note: The callback runs on the underlying publisher thread. Dispatch to the main queue
+    ///   before updating UI.
+    @objc final public var onPhotoData: (@convention(block) (MWDATCamera.ObjC_PhotoData) -> Void)?
+
+    /// Callback invoked when a streaming error occurs.
+    ///
+    /// - Note: The callback runs on the underlying publisher thread. Dispatch to the main queue
+    ///   before updating UI.
+    @objc final public var onError: (@convention(block) (MWDATCamera.ObjC_StreamError) -> Void)?
 
     @objc deinit
 
@@ -144,12 +168,22 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
     /// -> `.streaming` (with device).
     @objc final public func start()
 
+    /// Starts video streaming from the device and calls the completion handler when the start
+    /// request has been processed.
+    ///
+    /// The completion handler does not report streaming errors. Subscribe to `onError`,
+    /// `addErrorListener(_:)`, or `NSNotification.streamErrorOccurred` to observe failures.
+    @objc(startWithCompletion:) final public func start(completion: (@convention(block) () -> Void)?)
+
     /// Stops video streaming and releases all resources.
     ///
     /// Shuts down the streaming pipeline and transitions to `.stopped` state.
     ///
     /// State transitions: Any state -> `.stopping` -> `.stopped`
     @objc final public func stop()
+
+    /// Stops video streaming and calls the completion handler when the stop transition completes.
+    @objc(stopWithCompletion:) final public func stop(completion: (@convention(block) () -> Void)?)
 
     /// Captures a still photo during streaming.
     ///
@@ -165,35 +199,39 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
 
     /// Adds a listener for state changes.
     ///
-    /// The listener will be called on the main thread whenever the session state changes.
+    /// The listener will be called on the underlying publisher thread whenever the session state
+    /// changes. Dispatch to the main queue before updating UI.
     /// - Parameter listener: A block called with the new state value.
     /// - Returns: A token that must be retained to keep the listener active.
-    @objc final public func addStateListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamSessionState) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
+    @objc final public func addStateListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamState) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
 
     /// Adds a listener for video frames.
     ///
-    /// The listener will be called on the main thread for each video frame received.
+    /// The listener will be called on the underlying publisher thread for each video frame received.
+    /// Dispatch to the main queue before updating UI.
     /// - Parameter listener: A block called with each video frame.
     /// - Returns: A token that must be retained to keep the listener active.
     @objc final public func addVideoFrameListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_VideoFrame) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
 
     /// Adds a listener for captured photos.
     ///
-    /// The listener will be called on the main thread when a photo is captured.
+    /// The listener will be called on the underlying publisher thread when a photo is captured.
+    /// Dispatch to the main queue before updating UI.
     /// - Parameter listener: A block called with the captured photo data.
     /// - Returns: A token that must be retained to keep the listener active.
     @objc final public func addPhotoDataListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_PhotoData) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
 
     /// Adds a listener for errors.
     ///
-    /// The listener will be called on the main thread when an error occurs.
+    /// The listener will be called on the underlying publisher thread when an error occurs. Dispatch
+    /// to the main queue before updating UI.
     /// - Parameter listener: A block called with the error code.
     /// - Returns: A token that must be retained to keep the listener active.
-    @objc final public func addErrorListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamSessionError) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
+    @objc final public func addErrorListener(_ listener: @escaping @Sendable (MWDATCamera.ObjC_StreamError) -> Void) -> MWDATCamera.ObjC_CameraListenerToken
 }
 
 /// Configuration for a media streaming session with a Meta Wearables device.
-@objc(MWDATStreamSessionConfig) final public class ObjC_StreamSessionConfig : NSObject, Sendable {
+@objc(MWDATStreamConfiguration) final public class ObjC_StreamConfiguration : NSObject, Sendable {
 
     /// The video codec to use for streaming.
     @objc final public var videoCodec: MWDATCamera.ObjC_VideoCodec { get }
@@ -218,7 +256,7 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
 }
 
 /// Errors that can occur during streaming sessions.
-@objc(MWDATStreamSessionError) @frozen public enum ObjC_StreamSessionError : Int, Sendable {
+@objc(MWDATStreamError) @frozen public enum ObjC_StreamError : Int, Sendable {
 
     /// An internal error occurred.
     case internalError
@@ -243,6 +281,15 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
 
     /// The device thermal state has reached a critical level that may affect streaming performance.
     case thermalCritical
+
+    /// The device thermal state has reached an emergency level and the device is shutting down.
+    case thermalEmergency
+
+    /// The device has entered peak power shutdown.
+    case peakPowerShutdown
+
+    /// The device battery has reached a critically low level.
+    case batteryCritical
 
     /// Creates a new instance with the specified raw value.
     ///
@@ -288,20 +335,20 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
     public var rawValue: Int { get }
 }
 
-extension ObjC_StreamSessionError : Equatable {
+extension ObjC_StreamError : Equatable {
 }
 
-extension ObjC_StreamSessionError : Hashable {
+extension ObjC_StreamError : Hashable {
 }
 
-extension ObjC_StreamSessionError : RawRepresentable {
+extension ObjC_StreamError : RawRepresentable {
 }
 
-extension ObjC_StreamSessionError : BitwiseCopyable {
+extension ObjC_StreamError : BitwiseCopyable {
 }
 
 /// Represents the current state of a media streaming session.
-@objc(MWDATStreamSessionState) @frozen public enum ObjC_StreamSessionState : Int, Sendable {
+@objc(MWDATStreamState) @frozen public enum ObjC_StreamState : Int, Sendable {
 
     /// The session is completely stopped and not attempting to connect.
     case stopped
@@ -365,16 +412,16 @@ extension ObjC_StreamSessionError : BitwiseCopyable {
     public var rawValue: Int { get }
 }
 
-extension ObjC_StreamSessionState : Equatable {
+extension ObjC_StreamState : Equatable {
 }
 
-extension ObjC_StreamSessionState : Hashable {
+extension ObjC_StreamState : Hashable {
 }
 
-extension ObjC_StreamSessionState : RawRepresentable {
+extension ObjC_StreamState : RawRepresentable {
 }
 
-extension ObjC_StreamSessionState : BitwiseCopyable {
+extension ObjC_StreamState : BitwiseCopyable {
 }
 
 /// Valid streaming resolutions for live video from Meta Wearables devices.
@@ -599,18 +646,22 @@ public struct PhotoData : Sendable {
     public init(data: Data, format: MWDATCamera.PhotoCaptureFormat)
 }
 
-/// A class for managing media streaming sessions with Meta Wearables devices.
+/// A class for managing media streaming capabilities with Meta Wearables devices.
 /// Handles video streaming, photo capture, and provides real-time state updates.
-final public class StreamSession : Sendable {
+///
+/// In Swift, create a ``Stream`` by first creating and starting a ``DeviceSession``,
+/// then calling ``DeviceSession/addStream(config:)``. The returned stream is attached to that
+/// device session and stops automatically when the parent device session stops.
+final public class Stream : Sendable {
 
     /// The configuration used for this streaming session.
-    final public let streamSessionConfig: MWDATCamera.StreamSessionConfig
+    final public let streamConfiguration: MWDATCamera.StreamConfiguration
 
     /// The current state of the streaming session.
-    final public var state: MWDATCamera.StreamSessionState { get }
+    final public var state: MWDATCamera.StreamState { get }
 
     /// Publisher for streaming session state changes.
-    final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.StreamSessionState> { get }
+    final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.StreamState> { get }
 
     /// Publisher for video frames received from the streaming session.
     final public var videoFramePublisher: any MWDATCore.Announcer<MWDATCamera.VideoFrame> { get }
@@ -619,7 +670,7 @@ final public class StreamSession : Sendable {
     final public var photoDataPublisher: any MWDATCore.Announcer<MWDATCamera.PhotoData> { get }
 
     /// Publisher for errors that occur during the streaming session.
-    final public var errorPublisher: any MWDATCore.Announcer<MWDATCamera.StreamSessionError> { get }
+    final public var errorPublisher: any MWDATCore.Announcer<MWDATCamera.StreamError> { get }
 
     @objc deinit
 
@@ -637,12 +688,12 @@ final public class StreamSession : Sendable {
     /// an error occurs or when the device session ends externally (e.g., device powered off).
     ///
     /// Errors published to ``errorPublisher``:
-    /// - ``StreamSessionError/deviceNotFound(_:)``
-    /// - ``StreamSessionError/deviceNotConnected(_:)``
-    /// - ``StreamSessionError/timeout``
-    /// - ``StreamSessionError/permissionDenied``
-    /// - ``StreamSessionError/hingesClosed``
-    /// - ``StreamSessionError/internalError``
+    /// - ``StreamError/deviceNotFound(_:)``
+    /// - ``StreamError/deviceNotConnected(_:)``
+    /// - ``StreamError/timeout``
+    /// - ``StreamError/permissionDenied``
+    /// - ``StreamError/hingesClosed``
+    /// - ``StreamError/internalError``
     final public func start() async
 
     /// Stops video streaming and releases all resources.
@@ -665,7 +716,7 @@ final public class StreamSession : Sendable {
     final public func capturePhoto(format: MWDATCamera.PhotoCaptureFormat) -> Bool
 }
 
-extension StreamSession : MWDATCore.Capability {
+extension Stream : MWDATCore.Capability {
 
     /// The current state of this capability.
     final public var capabilityState: MWDATCore.CapabilityState { get }
@@ -673,7 +724,7 @@ extension StreamSession : MWDATCore.Capability {
 
 /// Configuration for a media streaming session with a Meta Wearables device.
 /// Defines video codec, resolution, frame delivery strategy, and target frame rate.
-public struct StreamSessionConfig : Sendable {
+public struct StreamConfiguration : Sendable {
 
     /// The video codec to use for streaming.
     public let videoCodec: MWDATCamera.VideoCodec
@@ -684,18 +735,12 @@ public struct StreamSessionConfig : Sendable {
     /// The target frame rate for the streaming session.
     public let frameRate: UInt
 
-    /// Whether to skip launching the native app on the device when starting the stream.
-    /// When `true`, the device will not launch the Livestream app via SNAM protocol,
-    /// allowing DAT to manage app lifecycle via DATSessionMessageHandler instead.
-    public let skipAppLaunch: Bool
-
     /// Creates a new stream session configuration with specified parameters.
     /// - Parameters:
     ///   - videoCodec: The video codec to use for streaming.
     ///   - resolution: The resolution for video streaming.
     ///   - frameRate: The target frame rate for streaming.
-    ///   - skipAppLaunch: Whether to skip launching the native app on the device. Defaults to `false`.
-    public init(videoCodec: MWDATCamera.VideoCodec, resolution: MWDATCamera.StreamingResolution, frameRate: UInt, skipAppLaunch: Bool = false)
+    public init(videoCodec: MWDATCamera.VideoCodec, resolution: MWDATCamera.StreamingResolution, frameRate: UInt)
 
     /// Creates a new stream session configuration with default settings.
     /// Uses raw video codec, medium resolution, deliver-all frame strategy, and 30 FPS.
@@ -703,7 +748,7 @@ public struct StreamSessionConfig : Sendable {
 }
 
 /// Errors that can occur during streaming sessions.
-public enum StreamSessionError : Error, Equatable {
+public enum StreamError : Error, Equatable, LocalizedError {
 
     /// An internal error occurred.
     case internalError
@@ -729,6 +774,18 @@ public enum StreamSessionError : Error, Equatable {
     /// The device thermal state has reached a critical level that may affect streaming performance.
     case thermalCritical
 
+    /// The device thermal state has reached an emergency level and the device is shutting down.
+    case thermalEmergency
+
+    /// The device has entered peak power shutdown.
+    case peakPowerShutdown
+
+    /// The device battery has reached a critically low level.
+    case batteryCritical
+
+    /// A description of the error
+    public var errorDescription: String? { get }
+
     /// Returns a Boolean value indicating whether two values are equal.
     ///
     /// Equality is the inverse of inequality. For any values `a` and `b`,
@@ -737,11 +794,11 @@ public enum StreamSessionError : Error, Equatable {
     /// - Parameters:
     ///   - lhs: A value to compare.
     ///   - rhs: Another value to compare.
-    public static func == (a: MWDATCamera.StreamSessionError, b: MWDATCamera.StreamSessionError) -> Bool
+    public static func == (a: MWDATCamera.StreamError, b: MWDATCamera.StreamError) -> Bool
 }
 
 /// Represents the current state of a media streaming session with a Meta Wearables device.
-@frozen public enum StreamSessionState : Sendable {
+@frozen public enum StreamState : Sendable {
 
     /// The session is in the process of stopping.
     case stopping
@@ -769,7 +826,7 @@ public enum StreamSessionError : Error, Equatable {
     /// - Parameters:
     ///   - lhs: A value to compare.
     ///   - rhs: Another value to compare.
-    public static func == (a: MWDATCamera.StreamSessionState, b: MWDATCamera.StreamSessionState) -> Bool
+    public static func == (a: MWDATCamera.StreamState, b: MWDATCamera.StreamState) -> Bool
 
     /// Hashes the essential components of this value by feeding them into the
     /// given hasher.
@@ -799,13 +856,13 @@ public enum StreamSessionError : Error, Equatable {
     public var hashValue: Int { get }
 }
 
-extension StreamSessionState : Equatable {
+extension StreamState : Equatable {
 }
 
-extension StreamSessionState : Hashable {
+extension StreamState : Hashable {
 }
 
-extension StreamSessionState : BitwiseCopyable {
+extension StreamState : BitwiseCopyable {
 }
 
 /// Valid Live Streaming resolutions. We are using 9:16 aspect ratio.
@@ -969,17 +1026,26 @@ public struct VideoFrameSize : Sendable {
 
 extension DeviceSession {
 
-    /// Creates and adds a ``StreamSession`` to this device session.
+    /// Creates and adds a ``Stream`` to this device session.
+    ///
+    /// This is the supported Swift entry point for camera streaming.
     ///
     /// The device session must be in ``DeviceSessionState/started`` state. The returned
     /// stream session is automatically added as a capability and will be stopped when
     /// this device session stops.
     ///
-    /// - Parameter config: Configuration for the streaming session. Defaults to ``StreamSessionConfig()``.
-    /// - Returns: A configured ``StreamSession`` added to this device session, or `nil`
+    /// - Parameter config: Configuration for the streaming session. Defaults to ``StreamConfiguration()``.
+    /// - Returns: A configured ``Stream`` added to this device session, or `nil`
     ///   if the session is not in the started state.
-    /// - Throws: ``DeviceSessionError/capabilityAlreadyActive`` if a StreamSession is already attached.
-    final public func addStream(config: MWDATCamera.StreamSessionConfig = StreamSessionConfig()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.StreamSession?
+    /// - Throws: ``DeviceSessionError/capabilityAlreadyActive`` if a Stream is already attached.
+    final public func addStream(config: MWDATCamera.StreamConfiguration = StreamConfiguration()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.Stream?
+}
+
+extension NSNotification.Name {
+
+    /// Posted when a Stream is created via `addStream(config:)`.
+    /// The `object` is the `Stream` instance.
+    public static let mwdatStreamSessionCreated: Notification.Name
 }
 
 extension ObjC_DeviceSession {
@@ -987,12 +1053,12 @@ extension ObjC_DeviceSession {
     /// Creates a stream capability with the default configuration.
     ///
     /// Returns `nil` without setting `error` when the device session is not started yet.
-    @objc(addStreamWithError:) final public func addStream(_ error: NSErrorPointer = nil) -> MWDATCamera.ObjC_StreamSession?
+    @objc(addStreamWithError:) final public func addStream(_ error: NSErrorPointer = nil) -> MWDATCamera.ObjC_Stream?
 
     /// Creates a stream capability with the provided configuration.
     ///
     /// Returns `nil` without setting `error` when the device session is not started yet.
-    @objc(addStreamWithConfig:error:) final public func addStream(config: MWDATCamera.ObjC_StreamSessionConfig, error: NSErrorPointer = nil) -> MWDATCamera.ObjC_StreamSession?
+    @objc(addStreamWithConfig:error:) final public func addStream(config: MWDATCamera.ObjC_StreamConfiguration, error: NSErrorPointer = nil) -> MWDATCamera.ObjC_Stream?
 }
 
 /// Notification names for stream session events.
@@ -1010,26 +1076,26 @@ extension ObjC_DeviceSession {
 
     /// Posted when stream session state changes.
     /// - Note: Delivered on a background thread. Dispatch to main queue for UI updates.
-    /// - object: The `MWDATStreamSession` instance that changed state.
-    /// - userInfo: `["state": MWDATStreamSessionState]`
-    @objc public static let streamSessionStateChanged: Notification.Name
+    /// - object: The `MWDATStream` instance that changed state.
+    /// - userInfo: `["state": NSNumber]` containing a `MWDATStreamState` raw value.
+    @objc public static let streamStateChanged: Notification.Name
 
     /// Posted when a video frame is received.
     /// - Note: Delivered on a background thread at up to 30-60 fps. Dispatch to main queue for UI updates.
-    /// - object: The `MWDATStreamSession` instance that received the frame.
+    /// - object: The `MWDATStream` instance that received the frame.
     /// - userInfo: `["frame": MWDATVideoFrame]`
-    @objc public static let streamSessionFrameReceived: Notification.Name
+    @objc public static let streamFrameReceived: Notification.Name
 
     /// Posted when a photo is captured.
     /// - Note: Delivered on a background thread. Dispatch to main queue for UI updates.
-    /// - object: The `MWDATStreamSession` instance that captured the photo.
+    /// - object: The `MWDATStream` instance that captured the photo.
     /// - userInfo: `["photo": MWDATPhotoData]`
-    @objc public static let streamSessionPhotoCaptured: Notification.Name
+    @objc public static let streamPhotoCaptured: Notification.Name
 
     /// Posted when an error occurs during streaming.
     /// - Note: Delivered on a background thread. Dispatch to main queue for UI updates.
-    /// - object: The `MWDATStreamSession` instance where the error occurred.
-    /// - userInfo: `["error": MWDATStreamSessionError]`
-    @objc public static let streamSessionErrorOccurred: Notification.Name
+    /// - object: The `MWDATStream` instance where the error occurred.
+    /// - userInfo: `["error": NSError]` with a `localizedDescription` suitable for display.
+    @objc public static let streamErrorOccurred: Notification.Name
 }
 

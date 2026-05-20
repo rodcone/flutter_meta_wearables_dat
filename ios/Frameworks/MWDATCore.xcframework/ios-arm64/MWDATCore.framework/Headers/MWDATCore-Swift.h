@@ -320,6 +320,15 @@ SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _
 + (NSNotificationName _Nonnull)wearablesDevicesChanged SWIFT_WARN_UNUSED_RESULT;
 @end
 
+/// Errors that can occur when navigating to a screen in the Meta AI companion app.
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATNavigationError, "NavigationError", closed) {
+/// The Meta AI app is not installed on the device.
+  MWDATNavigationErrorMetaAINotInstalled = 0,
+/// The app is not registered with AI glasses.
+  MWDATNavigationErrorNotRegistered = 1,
+};
+static NSString * _Nonnull const MWDATNavigationErrorDomain = @"MWDATCore.NavigationError";
+
 SWIFT_CLASS("_TtC9MWDATCore21ObjC_AnyListenerToken")
 @interface ObjC_AnyListenerToken : NSObject
 - (void)cancel;
@@ -327,27 +336,77 @@ SWIFT_CLASS("_TtC9MWDATCore21ObjC_AnyListenerToken")
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
+/// ObjC-compatible mirror of <code>Compatibility</code>.
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATCompatibility, "ObjC_Compatibility", closed) {
+  MWDATCompatibilityUndefined = 0,
+  MWDATCompatibilityCompatible = 1,
+  MWDATCompatibilityDeviceUpdateRequired = 2,
+  MWDATCompatibilitySdkUpdateRequired = 3,
+};
+
 @class NSString;
+enum MWDATLinkState : NSInteger;
 SWIFT_CLASS_NAMED("ObjC_Device")
 @interface MWDATDevice : NSObject
 @property (nonatomic, readonly, copy) NSString * _Nonnull identifier;
 @property (nonatomic, readonly, copy) NSString * _Nonnull name;
 - (NSString * _Nonnull)nameOrId SWIFT_WARN_UNUSED_RESULT;
+/// ObjC-accessible mirror of <code>linkState</code>. Visible from ObjC as <code>linkState</code>.
+@property (nonatomic, readonly) enum MWDATLinkState linkState;
+/// ObjC-accessible variant of <code>addLinkStateListener(_:)</code>. Visible from ObjC as <code>addLinkStateListener:</code>.
+- (ObjC_AnyListenerToken * _Nonnull)addLinkStateListener:(void (^ _Nonnull)(enum MWDATLinkState))listener SWIFT_WARN_UNUSED_RESULT;
+/// ObjC-accessible mirror of <code>compatibility()</code>. Visible from ObjC as <code>compatibility</code>.
+@property (nonatomic, readonly) enum MWDATCompatibility compatibility;
+/// ObjC-accessible variant of <code>addCompatibilityListener(_:)</code>. Visible from ObjC as <code>addCompatibilityListener:</code>.
+- (ObjC_AnyListenerToken * _Nonnull)addCompatibilityListener:(void (^ _Nonnull)(enum MWDATCompatibility))listener SWIFT_WARN_UNUSED_RESULT;
 + (MWDATDevice * _Nonnull)makeDeviceForTest_DO_NOT_USEWithIdentifier:(NSString * _Nonnull)identifier name:(NSString * _Nonnull)name SWIFT_WARN_UNUSED_RESULT;
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
+enum MWDATDeviceSessionState : NSInteger;
 @class NSError;
 SWIFT_CLASS_NAMED("ObjC_DeviceSession")
 @interface MWDATDeviceSession : NSObject
 @property (nonatomic, readonly, copy) NSString * _Nonnull deviceIdentifier;
+/// The current state of this session.
+@property (nonatomic, readonly) enum MWDATDeviceSessionState state;
 - (void)start:(NSError * _Nullable * _Nullable)error;
 - (void)startAndWaitUntilReadyWithCompletionHandler:(void (^ _Nonnull)(NSError * _Nullable))completionHandler;
 - (void)stop;
+/// Adds a listener for session state changes.
+/// \param listener A block called with the new state value.
+///
+///
+/// returns:
+/// A token that must be retained to keep the listener active.
+- (ObjC_AnyListenerToken * _Nonnull)addStateListener:(void (^ _Nonnull)(enum MWDATDeviceSessionState))listener SWIFT_WARN_UNUSED_RESULT;
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
+
+/// Represents the current state of a device session.
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATDeviceSessionState, "ObjC_DeviceSessionState", closed) {
+/// The session has been created but not yet started.
+  MWDATDeviceSessionStateIdle = 0,
+/// The session is connecting to the device.
+  MWDATDeviceSessionStateStarting = 1,
+/// The session is connected and active.
+  MWDATDeviceSessionStateStarted = 2,
+/// The session is temporarily paused.
+  MWDATDeviceSessionStatePaused = 3,
+/// The session is stopping and cleaning up resources.
+  MWDATDeviceSessionStateStopping = 4,
+/// The session has ended. Create a new session to reconnect.
+  MWDATDeviceSessionStateStopped = 5,
+};
+
+/// ObjC-compatible mirror of <code>LinkState</code>.
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATLinkState, "ObjC_LinkState", closed) {
+  MWDATLinkStateDisconnected = 0,
+  MWDATLinkStateConnecting = 1,
+  MWDATLinkStateConnected = 2,
+};
 
 typedef SWIFT_ENUM_NAMED(NSInteger, MWDATPermission, "ObjC_Permission", closed) {
   MWDATPermissionCamera = 0,
@@ -361,25 +420,24 @@ typedef SWIFT_ENUM_NAMED(NSInteger, MWDATPermissionStatus, "ObjC_PermissionStatu
 
 enum MWDATRegistrationState : NSInteger;
 @class NSURL;
-enum MWDATSessionState : NSInteger;
 SWIFT_CLASS_NAMED("ObjC_Wearables")
 @interface MWDATWearables : NSObject
 + (void)configure:(NSError * _Nullable * _Nullable)error;
-/// Reset the shared state for testing purposes. This allows tests to call configure() multiple times.
-/// WARNING: This method is only intended for use in tests and should not be called in production code.
-+ (void)resetForTesting;
+/// Reset the shared state, allowing <code>configure()</code> to be called again.
++ (void)reset;
 SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly, strong) MWDATWearables * _Nonnull sharedInstance;)
 + (MWDATWearables * _Nonnull)sharedInstance SWIFT_WARN_UNUSED_RESULT;
 @property (nonatomic, readonly) enum MWDATRegistrationState registrationState;
 - (void)startRegistrationWithCompletionHandler:(void (^ _Nonnull)(NSError * _Nullable))completionHandler;
 - (void)handleUrl:(NSURL * _Nonnull)url completionHandler:(void (^ _Nonnull)(BOOL, NSError * _Nullable))completionHandler;
 - (void)startUnregistrationWithCompletionHandler:(void (^ _Nonnull)(NSError * _Nullable))completionHandler;
+- (void)openFirmwareUpdateWithCompletionHandler:(void (^ _Nonnull)(NSError * _Nullable))completionHandler;
+- (void)openDATGlassesAppUpdateWithCompletionHandler:(void (^ _Nonnull)(NSError * _Nullable))completionHandler;
 @property (nonatomic, readonly, copy) NSArray<NSString *> * _Nonnull devices;
 - (MWDATDevice * _Nullable)deviceForIdentifier:(NSString * _Nonnull)identifier SWIFT_WARN_UNUSED_RESULT;
 - (void)checkPermissionStatus:(enum MWDATPermission)permission completionHandler:(void (^ _Nonnull)(enum MWDATPermissionStatus, NSError * _Nullable))completionHandler;
 - (void)requestPermission:(enum MWDATPermission)permission completionHandler:(void (^ _Nonnull)(enum MWDATPermissionStatus, NSError * _Nullable))completionHandler;
 - (MWDATDeviceSession * _Nullable)createSessionForDeviceIdentifier:(NSString * _Nonnull)deviceIdentifier error:(NSError * _Nullable * _Nullable)error SWIFT_WARN_UNUSED_RESULT;
-- (void)addDeviceSessionStateListenerForDeviceId:(NSString * _Nonnull)deviceId listener:(void (^ _Nonnull)(enum MWDATSessionState))listener completionHandler:(void (^ _Nonnull)(ObjC_AnyListenerToken * _Nonnull))completionHandler;
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end

@@ -7,10 +7,10 @@ import CoreMedia
 import VideoToolbox
 
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
-  // Device session (0.6.0): created lazily on first startStreamSession call
-  // using the shared AutoDeviceSelector. Kept alive across stream start/stop
-  // so toggling streaming is fast. Torn down only when the underlying device
-  // disappears or when the plugin is disabled.
+  // Device session (DAT 0.7.0): created lazily on first startStreamSession
+  // call using the shared AutoDeviceSelector. Kept alive across stream
+  // start/stop so toggling streaming is fast. Torn down only when the
+  // underlying device disappears or when the plugin is disabled.
   private lazy var deviceSelector: AutoDeviceSelector = {
     AutoDeviceSelector(wearables: Wearables.shared)
   }()
@@ -20,7 +20,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var deviceAvailabilityTask: Task<Void, Never>?
 
   // Stream session state (single session at a time)
-  private var streamSession: StreamSession?
+  private var streamSession: MWDATCamera.Stream?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
   private var errorListenerToken: (any MWDATCore.AnyListenerToken)?
   private var frameCounter: Int = 0
@@ -34,9 +34,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var isInBackground: Bool = false
   // Texture registry
   private var textureRegistry: FlutterTextureRegistry?
-  // Stream session event handlers
-  private var streamStateHandler = StreamSessionStateStreamHandler()
-  private var streamErrorHandler = StreamSessionErrorStreamHandler()
+  // Stream event handlers
+  private var streamStateHandler = StreamStateStreamHandler()
+  private var streamErrorHandler = StreamErrorStreamHandler()
   private var videoStreamSizeHandler = VideoStreamSizeStreamHandler()
 
   // Background streaming — opt-in AVAudioSession keep-alive + software
@@ -79,6 +79,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // that don't opt in to background streaming.
     let videoFramesChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/video_frames", binaryMessenger: registrar.messenger())
     videoFramesChannel.setStreamHandler(instance.videoFrameHandler)
+    // Event channel for per-device state (thermal level). Tracks the active
+    // device and switches subscription on device change.
+    let deviceStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/device_state", binaryMessenger: registrar.messenger())
+    deviceStateChannel.setStreamHandler(DeviceStateStreamHandler(deviceSelectorProvider: { [weak instance] in
+      instance?.deviceSelector ?? AutoDeviceSelector(wearables: Wearables.shared)
+    }))
 
     Task { @MainActor in
       try? Wearables.configure()
@@ -116,8 +122,43 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         enableBackgroundStreaming(result: result)
       case "disableBackgroundStreaming":
         disableBackgroundStreaming(result: result)
+      case "openDATGlassesAppUpdate":
+        openDATGlassesAppUpdate(result: result)
       default:
         result(FlutterMethodNotImplemented)
+    }
+  }
+
+  // MARK: - Navigation APIs (0.7.0)
+
+  /// Opens the Meta AI app to the DAT-app-update screen for the connected
+  /// glasses. The companion to the `datAppOnTheGlassesUpdateRequired`
+  /// `DeviceSessionError` surfaced on `streamSessionErrorStream()` — apps
+  /// receiving that error should call this method to prompt the user to
+  /// update the on-device DAT app before retrying.
+  private func openDATGlassesAppUpdate(result: @escaping FlutterResult) {
+    Task { @MainActor in
+      do {
+        try await Wearables.shared.openDATGlassesAppUpdate()
+        result(true)
+      } catch let e as MWDATCore.NavigationError {
+        let code: String
+        let message: String
+        switch e {
+        case .metaAINotInstalled:
+          code = "metaAINotInstalled"
+          message = "Meta AI app is not installed. Please install it to update the glasses app."
+        case .notRegistered:
+          code = "notRegistered"
+          message = "App is not registered with Meta AI glasses. Complete registration first."
+        @unknown default:
+          code = "unknown"
+          message = "Unknown navigation error: \(e)"
+        }
+        result(FlutterError(code: code, message: message, details: e.rawValue))
+      } catch {
+        result(FlutterError(code: "NAVIGATION_ERROR", message: error.localizedDescription, details: nil))
+      }
     }
   }
 
@@ -406,24 +447,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - App Lifecycle (background safety for hvc1 codec)
   //
   // iOS forbids GPU access from backgrounded apps. The Meta DAT SDK keeps
-  // delivering hvc1 CMSampleBuffers in background (CPU-only CMBlockBuffer),
-  // but decoding them via VTDecompressionSession produces GPU-backed
-  // CVPixelBuffers — which is unsafe while backgrounded.
+  // delivering hvc1 CMSampleBuffers in background (CPU-only CMBlockBuffer)
+  // when background streaming is enabled, but decoding them via
+  // VTDecompressionSession produces GPU-backed CVPixelBuffers which iOS
+  // can't render anyway (no Flutter raster thread, no Metal access).
   //
-  // Strategy: invalidate the decoder on background, skip frame processing
-  // while backgrounded, let the lazy-init path in decodeCompressedFrame()
-  // recreate the decoder on the first frame after foregrounding. The
-  // underlying StreamSession stays alive throughout.
+  // Strategy: invalidate the decoder unconditionally on background. While
+  // backgrounded with background streaming on, we still forward the raw
+  // hvc1 NAL bytes to `videoFramesStream()` (useful for recording to disk)
+  // but skip decode + texture. The decoder is lazily recreated on the
+  // first frame after foreground.
+  //
+  // An earlier design forced *software* HEVC decoding while bg streaming
+  // was on, with the aim of keeping the decoder alive across the
+  // background→foreground transition. In practice the software decoder
+  // produced grey / corrupted output even in foreground, so the design
+  // was reverted: hardware decoder only, always invalidated on background.
 
   public func applicationDidEnterBackground(_ application: UIApplication) {
     isInBackground = true
-    // When background streaming is enabled we force software decoding, which
-    // survives the GPU-access restriction — keep the decoder alive so frames
-    // continue to be decoded and emitted to the video_frames channel.
-    if backgroundController.isEnabled {
-      NSLog("[MWDAT] App entered background — background streaming active, decoder kept alive (software path)")
-      return
-    }
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
@@ -433,7 +475,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   public func applicationWillEnterForeground(_ application: UIApplication) {
     isInBackground = false
-    NSLog("[MWDAT] App entering foreground — HEVC decoding will resume on next frame")
+    NSLog("[MWDAT] App entering foreground — HEVC decoder will be recreated on next frame")
   }
 
   // MARK: - Frame Processing (zero-copy via Texture API)
@@ -452,9 +494,20 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
     // Forward the hvc1 compressed sample to Dart BEFORE decoding — this lets
     // apps record the raw bitstream even when no decode path is needed (e.g.
-    // no texture subscriber, or decode failed while backgrounded).
+    // no texture subscriber, or we're backgrounded with no GPU access).
     if currentVideoCodec == .hvc1, videoFrameHandler.hasListener {
       videoFrameHandler.emitHvc1(sampleBuffer: videoFrame.sampleBuffer, ptsUs: ptsUs)
+    }
+
+    // While backgrounded with bg streaming on (the only way we reach here in
+    // background — the earlier guard returns otherwise), forward the raw
+    // hvc1 NAL bytes above for recording but skip decode + texture. iOS
+    // forbids GPU access from backgrounded apps, the decoder was already
+    // invalidated on the background transition, and there's no Flutter raster
+    // thread to render to. The decoder is lazily recreated on the first
+    // frame after foreground (see `decodeCompressedFrame`).
+    if isInBackground {
+      return
     }
 
     let now = Date()
@@ -503,11 +556,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       NSLog("[MWDAT] \(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
     }
 
-    // Skip texture updates while backgrounded. Metal texture writes from a
-    // backgrounded app are undefined behaviour; the texture will get a fresh
-    // frame on the first foregrounded tick. Frames keep flowing to Dart.
-    if isInBackground { return }
-
     guard let texture = pixelBufferTexture,
           let texId = textureId else {
       return
@@ -520,38 +568,33 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - HEVC Decompression (for hvc1 codec)
 
   /// Creates a VTDecompressionSession for decoding HEVC frames to BGRA pixel
-  /// buffers. When `forceSoftware` is true (background streaming is on), we
-  /// force software decoding so the decoder survives foreground/background
-  /// transitions — the hardware decoder is torn down by iOS whenever the app
-  /// loses GPU access, which causes a multi-second stall on return.
-  private func setupDecompressionSession(
-    formatDescription: CMFormatDescription,
-    forceSoftware: Bool
-  ) {
+  /// buffers. The output attrs explicitly request IOSurface + Metal-compatible
+  /// buffers so Flutter's `Texture` widget can sample them on the GPU
+  /// (a sanity belt-and-braces — the hardware decoder produces these by
+  /// default, but stating it is harmless and future-proof).
+  ///
+  /// Always hardware decoder. The session is invalidated on
+  /// `applicationDidEnterBackground` and lazily recreated on the first
+  /// frame after foreground — see the App Lifecycle MARK above for rationale.
+  private func setupDecompressionSession(formatDescription: CMFormatDescription) {
     let attrs: [String: Any] = [
       kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+      kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+      kCVPixelBufferMetalCompatibilityKey as String: true,
     ]
-
-    var decoderSpec: CFDictionary?
-    if forceSoftware {
-      let spec: [String: Any] = [
-        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder as String: false,
-      ]
-      decoderSpec = spec as CFDictionary
-    }
 
     var session: VTDecompressionSession?
     let status = VTDecompressionSessionCreate(
       allocator: kCFAllocatorDefault,
       formatDescription: formatDescription,
-      decoderSpecification: decoderSpec,
+      decoderSpecification: nil,
       imageBufferAttributes: attrs as CFDictionary,
       outputCallback: nil,
       decompressionSessionOut: &session
     )
     if status == noErr, let session {
       decompressionSession = session
-      NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding (software=\(forceSoftware))")
+      NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding (hardware)")
     } else {
       NSLog("[MWDAT] Failed to create VTDecompressionSession: \(status)")
     }
@@ -563,12 +606,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return nil
     }
 
-    // Lazily create decompression session on first frame
+    // Lazily create decompression session on first frame.
     if decompressionSession == nil {
-      setupDecompressionSession(
-        formatDescription: formatDescription,
-        forceSoftware: backgroundController.isEnabled
-      )
+      setupDecompressionSession(formatDescription: formatDescription)
     }
 
     guard let session = decompressionSession else { return nil }
@@ -653,15 +693,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       lastFrameSendTime = nil
       NSLog("[MWDAT] Registered texture \(texId)")
 
-      // 3. Add a StreamSession capability.
+      // 3. Add a Stream capability.
       let fpsValue = UInt(max(1, Int(fps.rounded())))
-      let streamConfig = StreamSessionConfig(
+      let streamConfig = StreamConfiguration(
         videoCodec: videoCodec,
         resolution: Self.resolution(for: streamQuality),
         frameRate: fpsValue
       )
 
-      let stream: StreamSession?
+      let stream: MWDATCamera.Stream?
       do {
         stream = try deviceSession.addStream(config: streamConfig)
       } catch let e as DeviceSessionError {
@@ -683,7 +723,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
       // 4. Wire listeners.
       errorListenerToken = session.errorPublisher.listen { error in
-        NSLog("[MWDAT] StreamSession error: \(error)")
+        NSLog("[MWDAT] Stream error: \(error)")
       }
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }

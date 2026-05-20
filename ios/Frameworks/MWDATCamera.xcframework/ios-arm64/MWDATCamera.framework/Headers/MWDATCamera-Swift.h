@@ -323,53 +323,53 @@ typedef unsigned int swift_uint4  __attribute__((__ext_vector_type__(4)));
 /// Delivered on a background thread. Dispatch to main queue for UI updates.
 /// <ul>
 ///   <li>
-///     object: The <code>MWDATStreamSession</code> instance that changed state.
+///     object: The <code>MWDATStream</code> instance that changed state.
 ///   </li>
 ///   <li>
-///     userInfo: <code>["state": MWDATStreamSessionState]</code>
+///     userInfo: <code>["state": NSNumber]</code> containing a <code>MWDATStreamState</code> raw value.
 ///   </li>
 /// </ul>
-SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _Nonnull streamSessionStateChanged;)
-+ (NSNotificationName _Nonnull)streamSessionStateChanged SWIFT_WARN_UNUSED_RESULT;
+SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _Nonnull streamStateChanged;)
++ (NSNotificationName _Nonnull)streamStateChanged SWIFT_WARN_UNUSED_RESULT;
 /// Posted when a video frame is received.
 /// note:
 /// Delivered on a background thread at up to 30-60 fps. Dispatch to main queue for UI updates.
 /// <ul>
 ///   <li>
-///     object: The <code>MWDATStreamSession</code> instance that received the frame.
+///     object: The <code>MWDATStream</code> instance that received the frame.
 ///   </li>
 ///   <li>
 ///     userInfo: <code>["frame": MWDATVideoFrame]</code>
 ///   </li>
 /// </ul>
-SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _Nonnull streamSessionFrameReceived;)
-+ (NSNotificationName _Nonnull)streamSessionFrameReceived SWIFT_WARN_UNUSED_RESULT;
+SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _Nonnull streamFrameReceived;)
++ (NSNotificationName _Nonnull)streamFrameReceived SWIFT_WARN_UNUSED_RESULT;
 /// Posted when a photo is captured.
 /// note:
 /// Delivered on a background thread. Dispatch to main queue for UI updates.
 /// <ul>
 ///   <li>
-///     object: The <code>MWDATStreamSession</code> instance that captured the photo.
+///     object: The <code>MWDATStream</code> instance that captured the photo.
 ///   </li>
 ///   <li>
 ///     userInfo: <code>["photo": MWDATPhotoData]</code>
 ///   </li>
 /// </ul>
-SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _Nonnull streamSessionPhotoCaptured;)
-+ (NSNotificationName _Nonnull)streamSessionPhotoCaptured SWIFT_WARN_UNUSED_RESULT;
+SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _Nonnull streamPhotoCaptured;)
++ (NSNotificationName _Nonnull)streamPhotoCaptured SWIFT_WARN_UNUSED_RESULT;
 /// Posted when an error occurs during streaming.
 /// note:
 /// Delivered on a background thread. Dispatch to main queue for UI updates.
 /// <ul>
 ///   <li>
-///     object: The <code>MWDATStreamSession</code> instance where the error occurred.
+///     object: The <code>MWDATStream</code> instance where the error occurred.
 ///   </li>
 ///   <li>
-///     userInfo: <code>["error": MWDATStreamSessionError]</code>
+///     userInfo: <code>["error": NSError]</code> with a <code>localizedDescription</code> suitable for display.
 ///   </li>
 /// </ul>
-SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _Nonnull streamSessionErrorOccurred;)
-+ (NSNotificationName _Nonnull)streamSessionErrorOccurred SWIFT_WARN_UNUSED_RESULT;
+SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _Nonnull streamErrorOccurred;)
++ (NSNotificationName _Nonnull)streamErrorOccurred SWIFT_WARN_UNUSED_RESULT;
 @end
 
 /// A device selector that automatically selects the best available device.
@@ -391,15 +391,15 @@ SWIFT_CLASS_NAMED("ObjC_CameraListenerToken")
 @end
 
 @class NSError;
-@class MWDATStreamSession;
-@class MWDATStreamSessionConfig;
+@class MWDATStream;
+@class MWDATStreamConfiguration;
 @interface MWDATDeviceSession (SWIFT_EXTENSION(MWDATCamera))
 /// Creates a stream capability with the default configuration.
 /// Returns <code>nil</code> without setting <code>error</code> when the device session is not started yet.
-- (MWDATStreamSession * _Nullable)addStreamWithError:(NSError * _Nullable * _Nullable)error SWIFT_WARN_UNUSED_RESULT;
+- (MWDATStream * _Nullable)addStreamWithError:(NSError * _Nullable * _Nullable)error SWIFT_WARN_UNUSED_RESULT;
 /// Creates a stream capability with the provided configuration.
 /// Returns <code>nil</code> without setting <code>error</code> when the device session is not started yet.
-- (MWDATStreamSession * _Nullable)addStreamWithConfig:(MWDATStreamSessionConfig * _Nonnull)config error:(NSError * _Nullable * _Nullable)error SWIFT_WARN_UNUSED_RESULT;
+- (MWDATStream * _Nullable)addStreamWithConfig:(MWDATStreamConfiguration * _Nonnull)config error:(NSError * _Nullable * _Nullable)error SWIFT_WARN_UNUSED_RESULT;
 @end
 
 /// Supported formats for capturing photos from Meta Wearables devices.
@@ -441,32 +441,52 @@ SWIFT_CLASS_NAMED("ObjC_SpecificDeviceSelector")
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
-enum MWDATStreamSessionState : NSInteger;
+enum MWDATStreamState : NSInteger;
 @class MWDATVideoFrame;
-enum MWDATStreamSessionError : NSInteger;
+enum MWDATStreamError : NSInteger;
 /// A class for managing media streaming sessions with Meta Wearables devices.
 /// Handles video streaming, photo capture, and provides real-time state updates.
 /// In addition to listener-based callbacks, this class also posts the following notifications:
 /// <ul>
 ///   <li>
-///     <code>NSNotification.streamSessionStateChanged</code> - When session state changes
+///     <code>NSNotification.streamStateChanged</code> - When session state changes
 ///   </li>
 ///   <li>
-///     <code>NSNotification.streamSessionFrameReceived</code> - When a video frame is received
+///     <code>NSNotification.streamFrameReceived</code> - When a video frame is received
 ///   </li>
 ///   <li>
-///     <code>NSNotification.streamSessionPhotoCaptured</code> - When a photo is captured
+///     <code>NSNotification.streamPhotoCaptured</code> - When a photo is captured
 ///   </li>
 ///   <li>
-///     <code>NSNotification.streamSessionErrorOccurred</code> - When an error occurs
+///     <code>NSNotification.streamErrorOccurred</code> - When an error occurs
 ///   </li>
 /// </ul>
-SWIFT_CLASS_NAMED("ObjC_StreamSession")
-@interface MWDATStreamSession : NSObject
+SWIFT_CLASS_NAMED("ObjC_Stream")
+@interface MWDATStream : NSObject
 /// The configuration used for this streaming session.
-@property (nonatomic, readonly, strong) MWDATStreamSessionConfig * _Nonnull config;
+@property (nonatomic, readonly, strong) MWDATStreamConfiguration * _Nonnull config;
 /// The current state of the streaming session.
-@property (nonatomic, readonly) enum MWDATStreamSessionState state;
+@property (nonatomic, readonly) enum MWDATStreamState state;
+/// Callback invoked when the session state changes.
+/// note:
+/// The callback runs on the underlying publisher thread. Dispatch to the main queue
+/// before updating UI.
+@property (nonatomic, copy) void (^ _Nullable onStateChanged)(enum MWDATStreamState);
+/// Callback invoked when a video frame is received.
+/// note:
+/// The callback runs on the underlying publisher thread and may fire at high frequency.
+/// Dispatch to the main queue before updating UI.
+@property (nonatomic, copy) void (^ _Nullable onVideoFrame)(MWDATVideoFrame * _Nonnull);
+/// Callback invoked when a photo is captured.
+/// note:
+/// The callback runs on the underlying publisher thread. Dispatch to the main queue
+/// before updating UI.
+@property (nonatomic, copy) void (^ _Nullable onPhotoData)(MWDATPhotoData * _Nonnull);
+/// Callback invoked when a streaming error occurs.
+/// note:
+/// The callback runs on the underlying publisher thread. Dispatch to the main queue
+/// before updating UI.
+@property (nonatomic, copy) void (^ _Nullable onError)(enum MWDATStreamError);
 /// Starts video streaming from the device.
 /// Begins streaming video frames from the currently available device. If no device is currently
 /// available, the session enters <code>.waitingForDevice</code> state and automatically connects when a
@@ -474,10 +494,17 @@ SWIFT_CLASS_NAMED("ObjC_StreamSession")
 /// State transitions: <code>.stopped</code> -> <code>.waitingForDevice</code> (no device) or <code>.stopped</code> -> <code>.starting</code>
 /// -> <code>.streaming</code> (with device).
 - (void)start;
+/// Starts video streaming from the device and calls the completion handler when the start
+/// request has been processed.
+/// The completion handler does not report streaming errors. Subscribe to <code>onError</code>,
+/// <code>addErrorListener(_:)</code>, or <code>NSNotification.streamErrorOccurred</code> to observe failures.
+- (void)startWithCompletion:(void (^ _Nullable)(void))completion;
 /// Stops video streaming and releases all resources.
 /// Shuts down the streaming pipeline and transitions to <code>.stopped</code> state.
 /// State transitions: Any state -> <code>.stopping</code> -> <code>.stopped</code>
 - (void)stop;
+/// Stops video streaming and calls the completion handler when the stop transition completes.
+- (void)stopWithCompletion:(void (^ _Nullable)(void))completion;
 /// Captures a still photo during streaming.
 /// Triggers a photo capture while video streaming is active. The captured photo is delivered
 /// through the photo data listener. Video streaming is temporarily paused during capture and
@@ -490,15 +517,17 @@ SWIFT_CLASS_NAMED("ObjC_StreamSession")
 /// active or a capture is already in progress.
 - (BOOL)capturePhotoWithFormat:(enum MWDATPhotoCaptureFormat)format;
 /// Adds a listener for state changes.
-/// The listener will be called on the main thread whenever the session state changes.
+/// The listener will be called on the underlying publisher thread whenever the session state
+/// changes. Dispatch to the main queue before updating UI.
 /// \param listener A block called with the new state value.
 ///
 ///
 /// returns:
 /// A token that must be retained to keep the listener active.
-- (MWDATCameraListenerToken * _Nonnull)addStateListener:(void (^ _Nonnull)(enum MWDATStreamSessionState))listener SWIFT_WARN_UNUSED_RESULT;
+- (MWDATCameraListenerToken * _Nonnull)addStateListener:(void (^ _Nonnull)(enum MWDATStreamState))listener SWIFT_WARN_UNUSED_RESULT;
 /// Adds a listener for video frames.
-/// The listener will be called on the main thread for each video frame received.
+/// The listener will be called on the underlying publisher thread for each video frame received.
+/// Dispatch to the main queue before updating UI.
 /// \param listener A block called with each video frame.
 ///
 ///
@@ -506,7 +535,8 @@ SWIFT_CLASS_NAMED("ObjC_StreamSession")
 /// A token that must be retained to keep the listener active.
 - (MWDATCameraListenerToken * _Nonnull)addVideoFrameListener:(void (^ _Nonnull)(MWDATVideoFrame * _Nonnull))listener SWIFT_WARN_UNUSED_RESULT;
 /// Adds a listener for captured photos.
-/// The listener will be called on the main thread when a photo is captured.
+/// The listener will be called on the underlying publisher thread when a photo is captured.
+/// Dispatch to the main queue before updating UI.
 /// \param listener A block called with the captured photo data.
 ///
 ///
@@ -514,13 +544,14 @@ SWIFT_CLASS_NAMED("ObjC_StreamSession")
 /// A token that must be retained to keep the listener active.
 - (MWDATCameraListenerToken * _Nonnull)addPhotoDataListener:(void (^ _Nonnull)(MWDATPhotoData * _Nonnull))listener SWIFT_WARN_UNUSED_RESULT;
 /// Adds a listener for errors.
-/// The listener will be called on the main thread when an error occurs.
+/// The listener will be called on the underlying publisher thread when an error occurs. Dispatch
+/// to the main queue before updating UI.
 /// \param listener A block called with the error code.
 ///
 ///
 /// returns:
 /// A token that must be retained to keep the listener active.
-- (MWDATCameraListenerToken * _Nonnull)addErrorListener:(void (^ _Nonnull)(enum MWDATStreamSessionError))listener SWIFT_WARN_UNUSED_RESULT;
+- (MWDATCameraListenerToken * _Nonnull)addErrorListener:(void (^ _Nonnull)(enum MWDATStreamError))listener SWIFT_WARN_UNUSED_RESULT;
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
@@ -528,8 +559,8 @@ SWIFT_CLASS_NAMED("ObjC_StreamSession")
 enum MWDATVideoCodec : NSInteger;
 enum MWDATStreamingResolution : NSInteger;
 /// Configuration for a media streaming session with a Meta Wearables device.
-SWIFT_CLASS_NAMED("ObjC_StreamSessionConfig")
-@interface MWDATStreamSessionConfig : NSObject
+SWIFT_CLASS_NAMED("ObjC_StreamConfiguration")
+@interface MWDATStreamConfiguration : NSObject
 /// The video codec to use for streaming.
 @property (nonatomic, readonly) enum MWDATVideoCodec videoCodec;
 /// The resolution at which to stream video content.
@@ -549,39 +580,45 @@ SWIFT_CLASS_NAMED("ObjC_StreamSessionConfig")
 @end
 
 /// Errors that can occur during streaming sessions.
-typedef SWIFT_ENUM_NAMED(NSInteger, MWDATStreamSessionError, "ObjC_StreamSessionError", closed) {
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATStreamError, "ObjC_StreamError", closed) {
 /// An internal error occurred.
-  MWDATStreamSessionErrorInternalError = 0,
+  MWDATStreamErrorInternalError = 0,
 /// The specified device could not be found.
-  MWDATStreamSessionErrorDeviceNotFound = 1,
+  MWDATStreamErrorDeviceNotFound = 1,
 /// The specified device is not connected.
-  MWDATStreamSessionErrorDeviceNotConnected = 2,
+  MWDATStreamErrorDeviceNotConnected = 2,
 /// The operation timed out.
-  MWDATStreamSessionErrorTimeout = 3,
+  MWDATStreamErrorTimeout = 3,
 /// Video streaming encountered an error.
-  MWDATStreamSessionErrorVideoStreamingError = 4,
+  MWDATStreamErrorVideoStreamingError = 4,
 /// Camera permission was denied.
-  MWDATStreamSessionErrorPermissionDenied = 5,
+  MWDATStreamErrorPermissionDenied = 5,
 /// The device hinges were closed during streaming.
-  MWDATStreamSessionErrorHingesClosed = 6,
+  MWDATStreamErrorHingesClosed = 6,
 /// The device thermal state has reached a critical level that may affect streaming performance.
-  MWDATStreamSessionErrorThermalCritical = 7,
+  MWDATStreamErrorThermalCritical = 7,
+/// The device thermal state has reached an emergency level and the device is shutting down.
+  MWDATStreamErrorThermalEmergency = 8,
+/// The device has entered peak power shutdown.
+  MWDATStreamErrorPeakPowerShutdown = 9,
+/// The device battery has reached a critically low level.
+  MWDATStreamErrorBatteryCritical = 10,
 };
 
 /// Represents the current state of a media streaming session.
-typedef SWIFT_ENUM_NAMED(NSInteger, MWDATStreamSessionState, "ObjC_StreamSessionState", closed) {
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATStreamState, "ObjC_StreamState", closed) {
 /// The session is completely stopped and not attempting to connect.
-  MWDATStreamSessionStateStopped = 0,
+  MWDATStreamStateStopped = 0,
 /// The session is waiting for a compatible device to become available.
-  MWDATStreamSessionStateWaitingForDevice = 1,
+  MWDATStreamStateWaitingForDevice = 1,
 /// The session is in the process of starting up.
-  MWDATStreamSessionStateStarting = 2,
+  MWDATStreamStateStarting = 2,
 /// The session is actively streaming media data.
-  MWDATStreamSessionStateStreaming = 3,
+  MWDATStreamStateStreaming = 3,
 /// The session is temporarily paused but maintains its connection.
-  MWDATStreamSessionStatePaused = 4,
+  MWDATStreamStatePaused = 4,
 /// The session is in the process of stopping.
-  MWDATStreamSessionStateStopping = 5,
+  MWDATStreamStateStopping = 5,
 };
 
 /// Valid streaming resolutions for live video from Meta Wearables devices.

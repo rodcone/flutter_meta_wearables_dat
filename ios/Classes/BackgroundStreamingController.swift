@@ -9,9 +9,13 @@ import UIKit
 /// suspending the process, which in turn keeps the BLE / External Accessory
 /// link to the glasses alive.
 final class BackgroundStreamingController {
-  /// When true, the plugin forces software HEVC decoding and keeps draining
-  /// frames in background. Flipped from the plugin when enable/disable is
-  /// called from Dart.
+  /// When true, the AVAudioSession keep-alive is active so the SDK keeps
+  /// delivering frames to the plugin while the app is backgrounded. The
+  /// plugin still invalidates the HEVC decoder on background (iOS forbids
+  /// GPU access while backgrounded) and forwards raw hvc1 NAL bytes to
+  /// `videoFramesStream()` for recording; the texture pauses until
+  /// foreground. Flipped from the plugin when enable/disable is called
+  /// from Dart.
   private(set) var isEnabled: Bool = false
 
   private var didRegisterObservers = false

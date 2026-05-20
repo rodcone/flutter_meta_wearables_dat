@@ -332,6 +332,16 @@ SWIFT_CLASS_NAMED("ObjC_MockCameraKit")
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
+SWIFT_CLASS_NAMED("ObjC_MockCaptouchKit")
+@interface MockCaptouchKit : NSObject
+/// Simulate a single tap gesture on the device’s capacitive touch sensor.
+- (void)tap;
+/// Simulate a tap-and-hold gesture that stops the active session.
+- (void)tapAndHold;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
 @class NSString;
 SWIFT_PROTOCOL_NAMED("ObjC_MockDevice")
 @protocol MockDevice
@@ -387,6 +397,7 @@ SWIFT_PROTOCOL_NAMED("ObjC_MockDisplaylessGlasses")
 SWIFT_CLASS_NAMED("ObjC_MockDisplaylessGlassesServices")
 @interface MockDisplaylessGlassesServices : NSObject
 @property (nonatomic, readonly, strong) MockCameraKit * _Nonnull camera;
+@property (nonatomic, readonly, strong) MockCaptouchKit * _Nonnull captouch;
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end

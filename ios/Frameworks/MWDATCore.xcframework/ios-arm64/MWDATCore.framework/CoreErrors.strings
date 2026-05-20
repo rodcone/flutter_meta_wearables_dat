@@ -1,0 +1,73 @@
+/* (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary. */
+
+/* StreamError */
+"dat_error_stream_error" = "Unspecified error, the stream can continue regardless";
+"dat_error_stream_critical_error" = "Critical error, the stream should end";
+"dat_error_stream_device_not_found" = "Device not found";
+"dat_error_stream_device_not_connected" = "Device is not connected";
+"dat_error_stream_hinge_closed" = "The hinges on the glasses were closed";
+"dat_error_stream_permissions_denied" = "Permissions denied";
+"dat_error_stream_thermal_hot" = "Device thermal level is too high for streaming";
+"dat_error_stream_thermal_emergency" = "Device reached a thermal emergency, streaming has been stopped";
+"dat_error_stream_battery_low" = "Device battery is too low for streaming";
+"dat_error_stream_peak_power_limit" = "Device peak power limit reached";
+"dat_error_stream_timeout" = "The operation timed out";
+
+/* DeviceSessionError */
+"dat_error_session_no_eligible_device" = "No eligible device available";
+"dat_error_session_already_stopped" = "Session has already been stopped";
+"dat_error_session_already_exists" = "A session already exists for this device";
+"dat_error_session_idle" = "Session is idle. Start the session before adding capabilities";
+"dat_error_session_capability_already_active" = "A capability of this type is already active on the session";
+"dat_error_session_capability_not_found" = "No capability of this type is attached to the session";
+"dat_error_session_thermal_critical" = "Device thermal state is critical";
+"dat_error_session_thermal_emergency" = "Device thermal state is emergency — shutting down";
+"dat_error_session_peak_power_shutdown" = "Device peak power shutdown";
+"dat_error_session_battery_critical" = "Device battery critically low";
+"dat_error_session_dat_app_update_required" = "The app on your glasses needs an update before this session can start. Go to the App Connections page in Meta AI to update it.";
+"dat_error_session_dwa_unavailable" = "DAT Wearables App on the glasses is not reachable";
+
+/* WearablesError */
+"dat_error_wearables_internal_error" = "Internal error";
+"dat_error_wearables_already_configured" = "Already configured";
+"dat_error_wearables_configuration_error" = "Configuration error";
+
+/* WearablesHandleURLError */
+"dat_error_wearables_url_registration_error" = "Registration error";
+"dat_error_wearables_url_unregistration_error" = "Unregistration error";
+
+/* RegistrationError */
+"dat_error_registration_already_registered" = "User is already registered when attempting to register again";
+"dat_error_registration_configuration_invalid" = "The Wearables Device Access Toolkit configuration is invalid or incomplete";
+"dat_error_registration_meta_ai_not_installed" = "The Meta AI app is not installed on the device, which is required for registration";
+"dat_error_registration_network_unavailable" = "No internet connection available. Please check your connection and try again";
+"dat_error_registration_unknown" = "An unknown error occurred during the registration process";
+
+/* UnregistrationError */
+"dat_error_unregistration_already_unregistered" = "User is already unregistered when attempting to unregister again";
+"dat_error_unregistration_configuration_invalid" = "The Wearables Device Access Toolkit configuration is invalid or incomplete";
+"dat_error_unregistration_meta_ai_not_installed" = "The Meta AI app is not installed on the device, which is required for unregistration";
+"dat_error_unregistration_unknown" = "An unknown error occurred during the unregistration process";
+
+/* NavigationError */
+"dat_error_navigation_meta_ai_not_installed" = "The Meta AI app is not installed on the device";
+"dat_error_navigation_not_registered" = "The DAT app is not registered with AI glasses";
+
+/* PermissionError */
+"dat_error_permission_no_device" = "No wearable devices have been discovered or registered";
+"dat_error_permission_no_device_with_connection" = "All discovered devices are powered off or disconnected";
+"dat_error_permission_connection_error" = "A connection error occurred while communicating with the device";
+"dat_error_permission_meta_ai_not_installed" = "The Meta AI companion app is not installed on the device";
+"dat_error_permission_request_in_progress" = "A permission request is already in progress";
+"dat_error_permission_request_timeout" = "The permission request exceeded the allowed time limit";
+"dat_error_permission_internal_error" = "An unexpected internal error occurred";
+
+/* VoiceInvocationError */
+"dat_error_voice_device_not_found" = "Device not found";
+"dat_error_voice_connection_not_available" = "Device connection not available";
+"dat_error_voice_channel_setup_failed" = "Failed to setup AI Actions channel";
+"dat_error_voice_invalid_wearables_interface" = "Invalid WearablesInterface provided";
+"dat_error_voice_invalid_message_proto" = "Invalid Message proto";
+"dat_error_voice_init_request_error" = "Failed to initialize request";
+"dat_error_voice_send_message_error" = "Failed to send message";
+"dat_error_voice_action_failed" = "Action failed";
