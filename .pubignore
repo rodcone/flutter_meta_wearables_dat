@@ -1,0 +1,40 @@
+# pub.dev's published archive must be ≤ 100 MiB uncompressed. The iOS
+# xcframeworks dominate the size — `scripts/thin-xcframeworks.sh` strips
+# the universal simulator slice down to arm64-only, which buys back ~36 MB
+# and gets the archive comfortably under the limit.
+#
+# NOTE on nested packages: pub walks up the directory tree and applies
+# parent .pubignore patterns to nested packages too. We deliberately do
+# *not* exclude `flutter_meta_wearables_dat_mock_device/` here — that
+# would also hide the mock package's own pubspec when publishing the
+# mock add-on. The mock add-on's bytes (~5 MB after thinning) are
+# duplicated into the core's archive as a side effect; harmless waste.
+
+# Reference SDK Swift source + the iOS/Android sample apps are maintainer
+# aids, not needed by consumers. Anchored to this directory to avoid the
+# same nested-package issue.
+/doc/
+
+# Internal maintainer scripts and CI configuration
+/.github/
+/install-skills.sh
+/scripts/
+
+# Editor / OS / build noise
+.DS_Store
+*.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Example app build artifacts that occasionally slip through
+example/build/
+example/ios/Pods/
+example/ios/.symlinks/
+example/ios/Flutter/ephemeral/
+example/ios/Flutter/Flutter.framework/
+example/ios/Flutter/Flutter.podspec
+example/android/.gradle/
+example/android/build/
+example/android/app/build/
+example/android/local.properties

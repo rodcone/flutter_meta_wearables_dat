@@ -69,6 +69,8 @@ To set up your glasses for development, you must enable **Developer mode** in th
 
 **Minimum deployment target:** iOS 17.0
 
+**iOS Simulator:** Apple Silicon Macs only. The vendored Meta DAT xcframeworks are shipped with arm64-only simulator slices to stay under pub.dev's 100 MiB package-size limit; x86_64 (Intel Mac) iOS Simulator builds are not supported.
+
 Add the following to your `Info.plist`:
 
 ```xml

@@ -1,0 +1,20 @@
+# The mock add-on is published as its own pub.dev package. Its archive
+# should contain only the mock plugin's sources + MWDATMockDevice.xcframework
+# (~12 MB). Stay well clear of the 100 MiB limit by excluding editor/OS
+# noise and the example project's build artifacts.
+
+.DS_Store
+*.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Example app build artifacts that occasionally slip through
+example/build/
+example/ios/Pods/
+example/ios/.symlinks/
+example/ios/Flutter/ephemeral/
+example/android/.gradle/
+example/android/build/
+example/android/app/build/
+example/android/local.properties

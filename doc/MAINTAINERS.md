@@ -31,6 +31,18 @@ Update the binaries across **both** plugins:
 
 Delete the existing folders before pasting the new versions to avoid stale slices.
 
+### 2b. Thin the xcframeworks (required for pub.dev publish)
+
+Meta ships universal arm64+x86_64 simulator binaries inside each xcframework. Combined with the device slice that pushes the pub.dev archive past the 100 MiB uncompressed limit. Run the thinning script after dropping in new binaries:
+
+```bash
+./scripts/thin-xcframeworks.sh
+```
+
+The script strips x86_64 from each simulator slice, renames the directory from `ios-arm64_x86_64-simulator` → `ios-arm64-simulator`, and patches each xcframework's `Info.plist` accordingly. Idempotent (running twice is a no-op). Typical savings: ~36 MB across the three frameworks.
+
+**Tradeoff this implies**: iOS Simulator development requires an Apple Silicon Mac. Intel-Mac iOS dev is end-of-life as of 2026 so this is the realistic baseline; if you need x86_64 sim support back you'll have to find another way under pub.dev's size limit.
+
 ### 3. Sync Example App
 
 Force the example app to recognize the updated files:
