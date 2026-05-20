@@ -40,9 +40,12 @@ enum VideoCodec {
   raw('raw'),
 
   /// Compressed HEVC video frames (hvc1). iOS only.
-  /// Decoded to BGRA via `VTDecompressionSession`. When background streaming
-  /// is enabled the decoder is configured software-only so it survives the
-  /// foreground/background transition without a keyframe wait.
+  /// Decoded to BGRA via `VTDecompressionSession` (hardware). The decoder is
+  /// invalidated on background entry (iOS forbids GPU access from backgrounded
+  /// apps) and lazily recreated on the first frame after foreground — there's
+  /// a brief keyframe-wait stall on resume. Raw hvc1 NAL bytes continue to
+  /// flow on [MetaWearablesDat.videoFramesStream] while backgrounded if
+  /// [MetaWearablesDat.enableBackgroundStreaming] was called.
   hvc1('hvc1');
 
   const VideoCodec(this.value);

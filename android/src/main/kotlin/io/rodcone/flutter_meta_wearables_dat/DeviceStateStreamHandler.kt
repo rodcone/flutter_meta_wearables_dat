@@ -74,19 +74,29 @@ internal class DeviceStateStreamHandler(
         innerJob?.cancel()
         innerJob = null
         val selector = deviceSelectorProvider()
+        var currentDeviceId: com.meta.wearable.dat.core.types.DeviceIdentifier? = null
 
         // Seed: if a device is already active, attach the inner subscription
         // immediately so Dart subscribers see the first thermal reading
         // without waiting for an `activeDeviceFlow` tick.
         selector.activeDevice()?.let { deviceId ->
+            currentDeviceId = deviceId
             innerJob = subscribe(deviceId, events)
         }
 
         outerJob =
                 scope.launch {
                     selector.activeDeviceFlow().collect { deviceId ->
+                        // `activeDeviceFlow()` replays the current value to
+                        // new collectors. The SDK's
+                        // `Wearables.getDeviceState(...)` doesn't tolerate
+                        // rapid cancel+resubscribe for the same device, so
+                        // only tear down + restart when the device actually
+                        // changes (mirrors the iOS handler's behaviour).
+                        if (deviceId == currentDeviceId) return@collect
                         innerJob?.cancel()
                         innerJob = null
+                        currentDeviceId = deviceId
                         if (deviceId != null) {
                             innerJob = subscribe(deviceId, events)
                         }

@@ -19,6 +19,80 @@ class StreamScreen extends StatefulWidget {
 }
 
 class _StreamScreenState extends State<StreamScreen> {
+  stream_providers.StreamSessionProvider? _streamProvider;
+  StreamSessionError? _shownError;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _streamProvider = context.read<stream_providers.StreamSessionProvider>();
+      _streamProvider!.addListener(_onStreamProviderChanged);
+      _onStreamProviderChanged();
+    });
+  }
+
+  @override
+  void dispose() {
+    _streamProvider?.removeListener(_onStreamProviderChanged);
+    super.dispose();
+  }
+
+  void _onStreamProviderChanged() {
+    final error = _streamProvider?.lastError;
+    if (error == null || identical(error, _shownError)) return;
+    _shownError = error;
+    _showErrorSnackBar(error);
+    _streamProvider?.clearError();
+  }
+
+  void _showErrorSnackBar(StreamSessionError error) {
+    if (!mounted) return;
+
+    final isDatUpdate = error.code == 'datAppOnTheGlassesUpdateRequired';
+    final isTransient = error.code == 'noEligibleDevice';
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                error.isThermalCritical
+                    ? Icons.thermostat
+                    : isDatUpdate
+                        ? Icons.system_update
+                        : Icons.error_outline,
+                color: Colors.white,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(error.message),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red.shade900,
+          duration: isTransient
+              ? const Duration(seconds: 3)
+              : isDatUpdate
+                  ? const Duration(seconds: 10)
+                  : const Duration(seconds: 6),
+          action: isDatUpdate
+              ? SnackBarAction(
+                  label: 'Update',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    unawaited(_streamProvider?.openDATGlassesAppUpdate());
+                  },
+                )
+              : null,
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer3<
@@ -92,80 +166,6 @@ class _StreamScreenState extends State<StreamScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: _ThermalChip(level: streamProvider.thermalLevel!),
-                  ),
-                ),
-              ),
-            // Error banner at the top
-            if (streamProvider.lastError != null)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  child: Container(
-                    margin: const EdgeInsets.all(16),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade900.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          streamProvider.lastError!.isThermalCritical
-                              ? Icons.thermostat
-                              : streamProvider.requiresDATGlassesAppUpdate
-                                  ? Icons.system_update
-                                  : Icons.error_outline,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            streamProvider.lastError!.message,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                        // When the SDK signals the on-device DAT app needs
-                        // updating, the user needs a way forward: surface the
-                        // openDATGlassesAppUpdate() call as an "Update" action.
-                        if (streamProvider.requiresDATGlassesAppUpdate)
-                          TextButton(
-                            onPressed: streamProvider.openDATGlassesAppUpdate,
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              minimumSize: const Size(0, 32),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: const Text(
-                              'Update',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          )
-                        else
-                          GestureDetector(
-                            onTap: streamProvider.dismissError,
-                            child: const Icon(
-                              Icons.close,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                          ),
-                      ],
-                    ),
                   ),
                 ),
               ),

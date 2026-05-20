@@ -22,8 +22,8 @@ class StreamSessionProvider extends ChangeNotifier {
   VideoStreamSize? _videoStreamSize;
   bool _hasActiveDevice = false;
   bool _isStreaming = false;
-  double _fps = 24;
-  StreamQuality _streamQuality = StreamQuality.low;
+  double _fps = 15;
+  StreamQuality _streamQuality = StreamQuality.medium;
   VideoCodec _videoCodec = VideoCodec.raw;
   StreamSessionState? _sessionState;
   StreamSessionError? _lastError;
@@ -61,12 +61,6 @@ class StreamSessionProvider extends ChangeNotifier {
   /// [MetaWearablesDat.deviceStateStream].
   ThermalLevel? get thermalLevel => _thermalLevel;
 
-  /// True when the latest error from the SDK signals the on-device DAT app
-  /// needs updating — pair with [openDATGlassesAppUpdate] to surface a
-  /// "Update glasses app" action to the user.
-  bool get requiresDATGlassesAppUpdate =>
-      _lastError?.code == 'datAppOnTheGlassesUpdateRequired';
-
   void _initializeActiveDeviceMonitoring() {
     _activeDeviceSubscription = MetaWearablesDat.activeDeviceStream().listen(
       (hasActiveDevice) {
@@ -102,19 +96,11 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   /// Opens the Meta AI app to the DAT-app-update screen on the connected
-  /// glasses. Call this when [requiresDATGlassesAppUpdate] is true to prompt
-  /// the user to update the on-device DAT app.
+  /// glasses when the SDK reports `datAppOnTheGlassesUpdateRequired`.
   Future<bool> openDATGlassesAppUpdate() async {
     unawaited(HapticFeedback.mediumImpact());
     try {
-      final ok = await MetaWearablesDat.openDATGlassesAppUpdate();
-      if (ok) {
-        // Clear the error so the banner goes away once the user has been
-        // handed off to the Meta AI app.
-        _lastError = null;
-        notifyListeners();
-      }
-      return ok;
+      return await MetaWearablesDat.openDATGlassesAppUpdate();
     } catch (e) {
       debugPrint('[MetaWearablesDAT] openDATGlassesAppUpdate failed: $e');
       return false;
@@ -178,8 +164,15 @@ class StreamSessionProvider extends ChangeNotifier {
     }
   }
 
-  void dismissError() {
+  /// Clears the pending error after the UI has shown it (e.g. via SnackBar).
+  void clearError() {
+    if (_lastError == null) return;
     _lastError = null;
+    notifyListeners();
+  }
+
+  void _setError(StreamSessionError error) {
+    _lastError = error;
     notifyListeners();
   }
 
@@ -221,10 +214,7 @@ class StreamSessionProvider extends ChangeNotifier {
       unawaited(_sessionErrorSubscription?.cancel());
       _sessionErrorSubscription =
           MetaWearablesDat.streamSessionErrorStream().listen(
-        (error) {
-          _lastError = error;
-          notifyListeners();
-        },
+        _setError,
         onError: (dynamic error) {
           debugPrint('[MetaWearablesDAT] Session error stream error: $error');
         },

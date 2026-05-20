@@ -363,6 +363,7 @@ class MetaWearablesDatPlugin :
                     // Start monitoring now that SDK is properly initialized with permissions
                     registrationStateStreamHandler?.restartMonitoring()
                     activeDeviceStreamHandler?.restartMonitoring()
+                    deviceStateStreamHandler?.restartMonitoring()
                 } else {
                     Log.d(TAG, "BT permissions denied by user")
                 }
@@ -426,6 +427,7 @@ class MetaWearablesDatPlugin :
             ensureWearablesInitialized()
             registrationStateStreamHandler?.restartMonitoring()
             activeDeviceStreamHandler?.restartMonitoring()
+            deviceStateStreamHandler?.restartMonitoring()
             result.success(true)
             return
         }

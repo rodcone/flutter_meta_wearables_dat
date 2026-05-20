@@ -447,24 +447,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - App Lifecycle (background safety for hvc1 codec)
   //
   // iOS forbids GPU access from backgrounded apps. The Meta DAT SDK keeps
-  // delivering hvc1 CMSampleBuffers in background (CPU-only CMBlockBuffer),
-  // but decoding them via VTDecompressionSession produces GPU-backed
-  // CVPixelBuffers — which is unsafe while backgrounded.
+  // delivering hvc1 CMSampleBuffers in background (CPU-only CMBlockBuffer)
+  // when background streaming is enabled, but decoding them via
+  // VTDecompressionSession produces GPU-backed CVPixelBuffers which iOS
+  // can't render anyway (no Flutter raster thread, no Metal access).
   //
-  // Strategy: invalidate the decoder on background, skip frame processing
-  // while backgrounded, let the lazy-init path in decodeCompressedFrame()
-  // recreate the decoder on the first frame after foregrounding. The
-  // underlying Stream stays alive throughout.
+  // Strategy: invalidate the decoder unconditionally on background. While
+  // backgrounded with background streaming on, we still forward the raw
+  // hvc1 NAL bytes to `videoFramesStream()` (useful for recording to disk)
+  // but skip decode + texture. The decoder is lazily recreated on the
+  // first frame after foreground.
+  //
+  // An earlier design forced *software* HEVC decoding while bg streaming
+  // was on, with the aim of keeping the decoder alive across the
+  // background→foreground transition. In practice the software decoder
+  // produced grey / corrupted output even in foreground, so the design
+  // was reverted: hardware decoder only, always invalidated on background.
 
   public func applicationDidEnterBackground(_ application: UIApplication) {
     isInBackground = true
-    // When background streaming is enabled we force software decoding, which
-    // survives the GPU-access restriction — keep the decoder alive so frames
-    // continue to be decoded and emitted to the video_frames channel.
-    if backgroundController.isEnabled {
-      NSLog("[MWDAT] App entered background — background streaming active, decoder kept alive (software path)")
-      return
-    }
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
@@ -474,7 +475,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   public func applicationWillEnterForeground(_ application: UIApplication) {
     isInBackground = false
-    NSLog("[MWDAT] App entering foreground — HEVC decoding will resume on next frame")
+    NSLog("[MWDAT] App entering foreground — HEVC decoder will be recreated on next frame")
   }
 
   // MARK: - Frame Processing (zero-copy via Texture API)
@@ -493,9 +494,20 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
     // Forward the hvc1 compressed sample to Dart BEFORE decoding — this lets
     // apps record the raw bitstream even when no decode path is needed (e.g.
-    // no texture subscriber, or decode failed while backgrounded).
+    // no texture subscriber, or we're backgrounded with no GPU access).
     if currentVideoCodec == .hvc1, videoFrameHandler.hasListener {
       videoFrameHandler.emitHvc1(sampleBuffer: videoFrame.sampleBuffer, ptsUs: ptsUs)
+    }
+
+    // While backgrounded with bg streaming on (the only way we reach here in
+    // background — the earlier guard returns otherwise), forward the raw
+    // hvc1 NAL bytes above for recording but skip decode + texture. iOS
+    // forbids GPU access from backgrounded apps, the decoder was already
+    // invalidated on the background transition, and there's no Flutter raster
+    // thread to render to. The decoder is lazily recreated on the first
+    // frame after foreground (see `decodeCompressedFrame`).
+    if isInBackground {
+      return
     }
 
     let now = Date()
@@ -544,11 +556,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       NSLog("[MWDAT] \(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
     }
 
-    // Skip texture updates while backgrounded. Metal texture writes from a
-    // backgrounded app are undefined behaviour; the texture will get a fresh
-    // frame on the first foregrounded tick. Frames keep flowing to Dart.
-    if isInBackground { return }
-
     guard let texture = pixelBufferTexture,
           let texId = textureId else {
       return
@@ -561,38 +568,33 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - HEVC Decompression (for hvc1 codec)
 
   /// Creates a VTDecompressionSession for decoding HEVC frames to BGRA pixel
-  /// buffers. When `forceSoftware` is true (background streaming is on), we
-  /// force software decoding so the decoder survives foreground/background
-  /// transitions — the hardware decoder is torn down by iOS whenever the app
-  /// loses GPU access, which causes a multi-second stall on return.
-  private func setupDecompressionSession(
-    formatDescription: CMFormatDescription,
-    forceSoftware: Bool
-  ) {
+  /// buffers. The output attrs explicitly request IOSurface + Metal-compatible
+  /// buffers so Flutter's `Texture` widget can sample them on the GPU
+  /// (a sanity belt-and-braces — the hardware decoder produces these by
+  /// default, but stating it is harmless and future-proof).
+  ///
+  /// Always hardware decoder. The session is invalidated on
+  /// `applicationDidEnterBackground` and lazily recreated on the first
+  /// frame after foreground — see the App Lifecycle MARK above for rationale.
+  private func setupDecompressionSession(formatDescription: CMFormatDescription) {
     let attrs: [String: Any] = [
       kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+      kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+      kCVPixelBufferMetalCompatibilityKey as String: true,
     ]
-
-    var decoderSpec: CFDictionary?
-    if forceSoftware {
-      let spec: [String: Any] = [
-        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder as String: false,
-      ]
-      decoderSpec = spec as CFDictionary
-    }
 
     var session: VTDecompressionSession?
     let status = VTDecompressionSessionCreate(
       allocator: kCFAllocatorDefault,
       formatDescription: formatDescription,
-      decoderSpecification: decoderSpec,
+      decoderSpecification: nil,
       imageBufferAttributes: attrs as CFDictionary,
       outputCallback: nil,
       decompressionSessionOut: &session
     )
     if status == noErr, let session {
       decompressionSession = session
-      NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding (software=\(forceSoftware))")
+      NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding (hardware)")
     } else {
       NSLog("[MWDAT] Failed to create VTDecompressionSession: \(status)")
     }
@@ -604,12 +606,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return nil
     }
 
-    // Lazily create decompression session on first frame
+    // Lazily create decompression session on first frame.
     if decompressionSession == nil {
-      setupDecompressionSession(
-        formatDescription: formatDescription,
-        forceSoftware: backgroundController.isEnabled
-      )
+      setupDecompressionSession(formatDescription: formatDescription)
     }
 
     guard let session = decompressionSession else { return nil }

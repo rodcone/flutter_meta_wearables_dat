@@ -36,9 +36,9 @@ PODS:
     - DKImagePickerController/PhotoGallery
     - Flutter
   - Flutter (1.0.0)
-  - flutter_meta_wearables_dat (0.4.0):
+  - flutter_meta_wearables_dat (0.5.0):
     - Flutter
-  - flutter_meta_wearables_dat_mock_device (0.4.0):
+  - flutter_meta_wearables_dat_mock_device (0.5.0):
     - Flutter
     - flutter_meta_wearables_dat
   - image_picker_ios (0.0.1):
@@ -94,8 +94,8 @@ SPEC CHECKSUMS:
   DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
   file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  flutter_meta_wearables_dat: c612a0dfb06489d22e02160cd5374dd126d161ca
-  flutter_meta_wearables_dat_mock_device: c188f20f19c0fca9676cae3c74ccded70f241700
+  flutter_meta_wearables_dat: 5a40beb8f4443e8ab2025114269f5caa9c4263fd
+  flutter_meta_wearables_dat_mock_device: 62dc282778ac40860e0c703ef0f5d806f832aa08
   image_picker_ios: e0ece4aa2a75771a7de3fa735d26d90817041326
   path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf

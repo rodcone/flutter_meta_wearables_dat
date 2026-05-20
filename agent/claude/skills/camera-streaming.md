@@ -71,7 +71,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
 
 **Android manifest**: nothing to change — the plugin manifest auto-merges `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK` and the internal foreground service. `BackgroundNotification` is required on Android (OS mandate).
 
-**How it works.** iOS activates an `AVAudioSession` and forces software HEVC decoding so the decoder survives background→foreground without stutter. Android starts a foreground service of type `connectedDevice` with a customizable notification and a `PARTIAL_WAKE_LOCK`.
+**How it works.** iOS activates an `AVAudioSession` to keep the process scheduled in background; the HEVC hardware decoder is invalidated on background and recreated on the first frame after foreground (brief keyframe-wait stall, no freeze). Raw hvc1 NAL bytes still flow to `videoFramesStream()` while backgrounded for recording. Android starts a foreground service of type `connectedDevice` with a customizable notification and a `PARTIAL_WAKE_LOCK`.
 
 **Frames in background.** The `Texture` widget can't render in background (no GPU access), but every frame is still emitted on `videoFramesStream()`:
 

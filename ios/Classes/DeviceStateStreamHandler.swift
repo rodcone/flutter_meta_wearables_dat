@@ -22,17 +22,27 @@ class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
     outerTask = Task { @MainActor in
       let selector = self.deviceSelectorProvider()
       var innerTask: Task<Void, Never>?
+      var currentDeviceId: DeviceIdentifier?
 
       // Seed: if a device is already active, attach the inner subscription
       // immediately so Dart subscribers see the first thermal value without
       // waiting for an `activeDeviceStream` tick.
       if let deviceId = selector.activeDevice {
+        currentDeviceId = deviceId
         innerTask = Self.subscribe(toDevice: deviceId, events: events)
       }
 
       for await deviceId in selector.activeDeviceStream() {
+        // `activeDeviceStream()` replays the current value to new collectors,
+        // so we'll get an emit for the device we just seeded. The SDK's
+        // `deviceStateStream(for:)` doesn't tolerate rapid cancel+resubscribe
+        // for the same device (the second subscription closes immediately
+        // with 0 emits), so only tear down + restart when the device
+        // actually changes.
+        if deviceId == currentDeviceId { continue }
         innerTask?.cancel()
         innerTask = nil
+        currentDeviceId = deviceId
         if let deviceId = deviceId {
           innerTask = Self.subscribe(toDevice: deviceId, events: events)
         }
