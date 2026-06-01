@@ -283,13 +283,21 @@ class CameraPermissionException implements Exception {
     this.details,
   });
 
-  /// Returns true if the device is disconnected or powered off.
+  /// Returns true when the request failed because no Ray-Ban Meta device was
+  /// reachable (powered off, out of Bluetooth range, or the Meta AI app
+  /// reports no connection).
   bool get isDeviceDisconnected => code == 'DEVICE_DISCONNECTED';
 
-  /// Returns true if the permission was denied by the user.
+  /// Reserved for cases where the SDK surfaces a denial as an exception.
+  /// In the current SDK a user denying the prompt is *not* an error — it
+  /// returns `false` from [MetaWearablesDat.requestCameraPermission].
+  /// Treat a `false` return as denial; this predicate stays for forward
+  /// compatibility.
   bool get isPermissionDenied => code == 'PERMISSION_DENIED';
 
-  /// Returns true if there was an internal SDK error.
+  /// Returns true for any other SDK-side failure (request already in
+  /// progress, timeout, Meta AI app not installed, generic internal error,
+  /// or an unrecognized error type).
   bool get isInternalError => code == 'INTERNAL_ERROR';
 
   @override
@@ -664,16 +672,21 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.disableBackgroundStreaming();
   }
 
-  /// Stream of per-frame [VideoFrame] events, emitted in both foreground and
-  /// background when background streaming is enabled.
+  /// Stream of per-frame [VideoFrame] events. Emitted whenever a Dart
+  /// subscriber is attached — the native side short-circuits serialization
+  /// when no listener is present, so there is zero per-frame cost for apps
+  /// that don't need the feed.
   ///
   /// Use this when you want to record the stream to disk or run custom
   /// per-frame processing. For preview rendering, the zero-copy `Texture`
   /// returned by [startStreamSession] is always the right choice — it
   /// bypasses the platform channel.
   ///
-  /// Subscribers have no effect when background streaming is disabled; the
-  /// native side short-circuits serialization so there is no per-frame cost.
+  /// On iOS, frames keep flowing while the app is backgrounded only if
+  /// [enableBackgroundStreaming] has been called (iOS otherwise suspends
+  /// the underlying capture). On Android, [enableBackgroundStreaming] is
+  /// what keeps the OS from killing the streaming process once the app
+  /// leaves the foreground.
   static Stream<VideoFrame> videoFramesStream() {
     return MetaWearablesDatPlatform.instance.videoFramesStream();
   }

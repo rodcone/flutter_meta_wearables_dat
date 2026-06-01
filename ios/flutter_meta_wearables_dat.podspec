@@ -5,13 +5,16 @@
 Pod::Spec.new do |s|
   s.name             = 'flutter_meta_wearables_dat'
   s.version          = '0.5.0'
-  s.summary          = 'A new Flutter plugin project.'
+  s.summary          = "Flutter bridge to Meta's Wearables DAT for iOS and Android."
   s.description      = <<-DESC
-A new Flutter plugin project.
+Flutter plugin providing a bridge to Meta's Wearables Device Access Toolkit (DAT)
+for integration with Meta AI Glasses (Ray-Ban Meta). Supports device registration,
+camera permissions, video streaming with raw (BGRA) and hvc1 (HEVC) codecs, photo
+capture, and background streaming on iOS 17.0+.
                        DESC
-  s.homepage         = 'http://example.com'
+  s.homepage         = 'https://github.com/rodcone/flutter_meta_wearables_dat'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Your Company' => 'email@example.com' }
+  s.author           = { 'Gautier de Lataillade' => 'gautier@levinriegner.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'
@@ -29,9 +32,7 @@ A new Flutter plugin project.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386', 'OTHER_LDFLAGS' => '-lc++' }
   s.swift_version = '5.0'
 
-  # If your plugin requires a privacy manifest, for example if it uses any
-  # required reason APIs, update the PrivacyInfo.xcprivacy file to describe your
-  # plugin's privacy impact, and then uncomment this line. For more information,
-  # see https://developer.apple.com/documentation/bundleresources/privacy_manifest_files
-  # s.resource_bundles = {'flutter_meta_wearables_dat_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
+  # Privacy manifest declares no required-reason API usage and no tracking; ship
+  # it so consumers' aggregated privacy report stays accurate.
+  s.resource_bundles = {'flutter_meta_wearables_dat_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
 end

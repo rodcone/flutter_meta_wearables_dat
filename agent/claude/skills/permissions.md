@@ -30,14 +30,18 @@ if (!hasPermission) {
   // User can: allow always, allow once, or deny
   try {
     final granted = await MetaWearablesDat.requestCameraPermission();
+    if (!granted) {
+      // User declined the prompt — SDK returns false (not an exception).
+    }
   } on CameraPermissionException catch (e) {
     if (e.isDeviceDisconnected) {
-      // Device is disconnected or powered off
-    } else if (e.isPermissionDenied) {
-      // User denied permission
+      // No Ray-Ban Meta reachable (powered off, out of range, no connection).
     } else if (e.isInternalError) {
-      // Internal SDK error
+      // SDK-side failure: request already in progress, timeout,
+      // Meta AI app missing, generic internal error.
     }
+    // isPermissionDenied is reserved for future SDK semantics — current
+    // SDK surfaces user denial as `granted == false` above, not here.
   }
 }
 ```
@@ -49,9 +53,9 @@ if (!hasPermission) {
 | `code` | Error code string |
 | `message` | Human-readable description |
 | `details` | Additional error details (Map) |
-| `isDeviceDisconnected` | Device is disconnected or powered off |
-| `isPermissionDenied` | User denied permission |
-| `isInternalError` | Internal SDK error |
+| `isDeviceDisconnected` | No Ray-Ban Meta reachable (powered off, out of range, no connection) |
+| `isPermissionDenied` | Reserved for future SDK semantics — user denial currently returns `false` from `requestCameraPermission()`, not an exception |
+| `isInternalError` | Request already in progress, timeout, Meta AI app missing, or any other SDK-side failure |
 
 ## Order matters
 

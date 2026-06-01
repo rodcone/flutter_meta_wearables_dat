@@ -86,7 +86,7 @@ Payload layout:
 
 | Codec | iOS bytes | Android bytes |
 |-------|-----------|---------------|
-| `raw` | BGRA, `width * height * 4` | I420 planar YUV, `width * height * 3/2` |
+| `raw` | BGRA, `bytesPerRow * height` (use `VideoFrame.bytesPerRow` — rows may be padded) | I420 planar YUV, `width * height * 3/2` (tightly packed; `bytesPerRow` is `null`) |
 | `hvc1` | HEVC NAL units (self-contained: keyframes carry VPS/SPS/PPS) | n/a |
 
 `videoFramesStream()` is zero-cost when no subscriber is attached. Subscribe **before** `startStreamSession()` to capture the opening keyframe. `captureStreamFrame` still returns `null` while backgrounded — use `videoFramesStream()` for pixel data in background.

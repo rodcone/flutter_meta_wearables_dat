@@ -14,7 +14,7 @@ the binary and skip the matching Info.plist usage strings.
                        DESC
   s.homepage         = 'https://github.com/rodcone/flutter_meta_wearables_dat'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Your Company' => 'email@example.com' }
+  s.author           = { 'Gautier de Lataillade' => 'gautier@levinriegner.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'

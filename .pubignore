@@ -38,3 +38,8 @@ example/android/.gradle/
 example/android/build/
 example/android/app/build/
 example/android/local.properties
+
+# Secrets used by the example app — git-ignored, but pub respects .pubignore
+# over .gitignore, so list them explicitly to keep them out of the archive.
+example/android/secrets.properties
+example/ios/Flutter/Secrets.xcconfig

@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "flutter_meta_wearables_dat",
-    platforms: [.iOS("14.0")],
+    platforms: [.iOS("17.0")],
     products: [
         .library(name: "flutter_meta_wearables_dat", targets: ["flutter_meta_wearables_dat"])
     ],
@@ -17,20 +17,14 @@ let package = Package(
             name: "MWDATCamera",
             path: "Frameworks/MWDATCamera.xcframework"
         ),
-        .binaryTarget(
-            name: "MWDATMockDevice",
-            path: "Frameworks/MWDATMockDevice.xcframework"
-        ),
         .target(
             name: "flutter_meta_wearables_dat",
             dependencies: [
                 "MWDATCore",
-                "MWDATCamera",
-                "MWDATMockDevice"
+                "MWDATCamera"
             ],
             path: "Classes",
             resources: []
         )
     ]
 )
-
