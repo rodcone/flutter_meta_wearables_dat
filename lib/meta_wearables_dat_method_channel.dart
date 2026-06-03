@@ -215,7 +215,9 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   Stream<RegistrationState> registrationStateStream() {
     return eventChannel.receiveBroadcastStream().map((dynamic event) {
       final state = RegistrationState.fromInt(event as int);
-      debugPrint('[MetaWearablesDAT] registrationState → $state');
+      if (kDebugMode) {
+        debugPrint('[MetaWearablesDAT] registrationState → $state');
+      }
       return state;
     });
   }
@@ -226,7 +228,9 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
       dynamic event,
     ) {
       final state = StreamSessionState.fromInt(event as int);
-      debugPrint('[MetaWearablesDAT] streamSessionState → $state');
+      if (kDebugMode) {
+        debugPrint('[MetaWearablesDAT] streamSessionState → $state');
+      }
       return state;
     });
   }
@@ -241,9 +245,11 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
         code: map['code'] as String,
         message: map['message'] as String,
       );
-      debugPrint(
-        '[MetaWearablesDAT] streamSessionError → ${err.code}: ${err.message}',
-      );
+      if (kDebugMode) {
+        debugPrint(
+          '[MetaWearablesDAT] streamSessionError → ${err.code}: ${err.message}',
+        );
+      }
       return err;
     });
   }
@@ -254,7 +260,9 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
       dynamic event,
     ) {
       final available = event as bool;
-      debugPrint('[MetaWearablesDAT] activeDevice → $available');
+      if (kDebugMode) {
+        debugPrint('[MetaWearablesDAT] activeDevice → $available');
+      }
       return available;
     });
   }
@@ -269,9 +277,11 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
         width: (map['width'] as num).toInt(),
         height: (map['height'] as num).toInt(),
       );
-      debugPrint(
-        '[MetaWearablesDAT] videoStreamSize → ${size.width}x${size.height}',
-      );
+      if (kDebugMode) {
+        debugPrint(
+          '[MetaWearablesDAT] videoStreamSize → ${size.width}x${size.height}',
+        );
+      }
       return size;
     });
   }
@@ -341,9 +351,11 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
           (map['thermalLevel'] as num).toInt(),
         ),
       );
-      debugPrint(
-        '[MetaWearablesDAT] deviceState → thermalLevel=${state.thermalLevel}',
-      );
+      if (kDebugMode) {
+        debugPrint(
+          '[MetaWearablesDAT] deviceState → thermalLevel=${state.thermalLevel}',
+        );
+      }
       return state;
     });
   }

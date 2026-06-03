@@ -231,9 +231,17 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       do {
         let status = try await Wearables.shared.checkPermissionStatus(.camera)
         result(status == .granted)
-      } catch is MWDATCore.PermissionError {
-        // Permission not granted yet or denied — return false instead of error
-        result(false)
+      } catch let e as MWDATCore.PermissionError {
+        // Mirror Android's typed-exception contract: surface no-device / Meta-AI-missing
+        // / timeout / etc. as the same FlutterError codes `requestCameraPermission`
+        // already emits. Returning `false` here would conflate contract failures with
+        // a real "user denied" outcome on the Dart side.
+        let code = Self.mapPermissionError(e)
+        result(FlutterError(
+          code: code,
+          message: e.description,
+          details: ["errorType": String(describing: e), "rawValue": e.rawValue]
+        ))
       } catch {
         result(FlutterError(code: "INTERNAL_ERROR", message: error.localizedDescription, details: nil))
       }

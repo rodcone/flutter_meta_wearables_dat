@@ -19,6 +19,7 @@ import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.core.session.DeviceSession
+import com.meta.wearable.dat.core.types.DatResult
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionError
 import com.meta.wearable.dat.core.types.PermissionStatus
@@ -108,7 +109,8 @@ class MetaWearablesDatPlugin :
     private var btPermissionsGranted = false
 
     // Permission request handling
-    private var permissionContinuation: CancellableContinuation<PermissionStatus>? = null
+    private var permissionContinuation:
+        CancellableContinuation<DatResult<PermissionStatus, PermissionError>>? = null
     private val permissionMutex = Mutex()
     // Lazy so it isn't constructed at plugin load — the 0.6.0 SDK types
     // may touch `Wearables` internals and throw before `Wearables.initialize()`.
@@ -333,9 +335,13 @@ class MetaWearablesDatPlugin :
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode != PERMISSION_REQUEST_CODE) return false
-        val status = permissionContract.parseResult(resultCode, data)
-        val permissionStatus = status.getOrDefault(PermissionStatus.Denied)
-        permissionContinuation?.resume(permissionStatus)
+        // Carry the full DatResult through so the caller can distinguish a
+        // user-initiated denial (PermissionStatus.Denied) from a contract
+        // failure (NO_DEVICE, REQUEST_TIMEOUT, …). Collapsing both to
+        // PermissionStatus.Denied here would silently lie to the Dart layer,
+        // which now treats `false` as "user denied" exclusively.
+        val parseResult = permissionContract.parseResult(resultCode, data)
+        permissionContinuation?.resume(parseResult)
         permissionContinuation = null
         return true
     }
@@ -516,14 +522,33 @@ class MetaWearablesDatPlugin :
                         return@withLock
                     }
 
-                    val permissionStatus =
-                            suspendCancellableCoroutine<PermissionStatus> { continuation ->
+                    val parseResult =
+                            suspendCancellableCoroutine<
+                                DatResult<PermissionStatus, PermissionError>
+                            > { continuation ->
                                 permissionContinuation = continuation
                                 continuation.invokeOnCancellation { permissionContinuation = null }
                                 val intent = permissionContract.createIntent(act, Permission.CAMERA)
                                 act.startActivityForResult(intent, PERMISSION_REQUEST_CODE)
                             }
 
+                    // Mirror checkCameraPermissionStatus: contract failures
+                    // (NO_DEVICE, REQUEST_TIMEOUT, …) become typed errors via
+                    // mapPermissionError; only an explicit PermissionStatus.Denied
+                    // result returns `false` to the Dart layer.
+                    var failure: PermissionError? = null
+                    parseResult.onFailure { error, _ -> failure = error }
+                    val err = failure
+                    if (err != null) {
+                        result.error(
+                                mapPermissionError(err),
+                                err.description,
+                                mapOf("errorType" to err.name),
+                        )
+                        return@withLock
+                    }
+                    val permissionStatus =
+                            parseResult.getOrNull() ?: PermissionStatus.Denied
                     result.success(permissionStatus == PermissionStatus.Granted)
                 } catch (e: Exception) {
                     result.error(
