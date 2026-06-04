@@ -97,6 +97,12 @@ jobs:
         resolver: [cocoapods, spm]
     steps:
       - uses: actions/checkout@v4
+      # `BackgroundStreamingController.swift` uses iOS-18+ AVAudioSession APIs
+      # (`.allowBluetoothHFP`) so the build needs the matching SDK. The default
+      # Xcode on `macos-latest` images lags real releases — pin to latest-stable.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
