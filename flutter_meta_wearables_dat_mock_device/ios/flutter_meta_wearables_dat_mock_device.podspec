@@ -16,7 +16,7 @@ the binary and skip the matching Info.plist usage strings.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Gautier de Lataillade' => 'gautier@levinriegner.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files = 'flutter_meta_wearables_dat_mock_device/Sources/flutter_meta_wearables_dat_mock_device/**/*'
   s.dependency 'Flutter'
   # Transitive access to MWDATCore.xcframework (vendored by the core plugin)
   # — needed for MWDATCore.Permission / MWDATCore.PermissionStatus types.
@@ -24,9 +24,9 @@ the binary and skip the matching Info.plist usage strings.
   s.platform = :ios, '17.0'
   s.static_framework = true
   s.vendored_frameworks = [
-    'Frameworks/MWDATMockDevice.xcframework'
+    'flutter_meta_wearables_dat_mock_device/Frameworks/MWDATMockDevice.xcframework'
   ]
-  s.preserve_paths = 'Frameworks/*.xcframework'
+  s.preserve_paths = 'flutter_meta_wearables_dat_mock_device/Frameworks/*.xcframework'
   s.frameworks = 'AVFoundation', 'CoreMedia'
   s.xcconfig = { 'OTHER_LDFLAGS' => '-framework MWDATMockDevice' }
 
