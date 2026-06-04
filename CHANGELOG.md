@@ -1,3 +1,6 @@
+## 0.5.2
+* iOS: Add Swift Package Manager support alongside CocoaPods.
+
 ## 0.5.1
 * Prepare Android Gradle for Flutter's Built-in Kotlin migration.
 * Camera permission errors are now typed `CameraPermissionException`s on both platforms; a `false` return means *user denied*, exclusively.
