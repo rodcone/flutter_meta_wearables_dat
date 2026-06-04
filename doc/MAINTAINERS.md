@@ -75,10 +75,10 @@ Update the version in **both** `build.gradle` files (each plugin owns its own `e
 
 ```groovy
 // android/build.gradle (core)
-ext.mwdat_version = "0.6.0"  // mwdat-core, mwdat-camera
+ext.mwdat_version = "0.7.0"  // mwdat-core, mwdat-camera
 
 // flutter_meta_wearables_dat_mock_device/android/build.gradle
-ext.mwdat_version = "0.6.0"  // mwdat-mockdevice
+ext.mwdat_version = "0.7.0"  // mwdat-mockdevice
 ```
 
 Keep the two values in sync — mixing versions across the two plugins risks ABI breakage at runtime.
@@ -99,8 +99,12 @@ Key Android-specific implementation files:
 - `FrameProcessor.kt` — I420→ARGB frame conversion and FPS throttling
 - `ActiveDeviceStreamHandler.kt` — active device event channel
 - `RegistrationStateStreamHandler.kt` — registration state event channel
-- `StreamSessionStateStreamHandler.kt` — stream session state event channel (maps `StreamSessionState` enum to int)
-- `StreamSessionErrorStreamHandler.kt` — stream session error event channel (programmable sink, Android SDK has no native error publisher)
+- `StreamStateStreamHandler.kt` — stream state event channel (maps DAT 0.7.0 `StreamState` enum to int; Dart-facing channel name stays `stream_session_state` for backwards compat)
+- `StreamSessionErrorStreamHandler.kt` — stream session error event channel. Funnels three sources: `Stream.errorStream` (`StreamError`), `DeviceSession.errors` (`DeviceSessionError`, since DAT 0.7.0), and pre-stream `sendError(code, message)` calls
+- `DeviceStateStreamHandler.kt` — per-device thermal state stream (switches its inner subscription when `AutoDeviceSelector` swaps the active device)
+- `VideoFrameStreamHandler.kt` — per-frame I420 byte forwarder for `video_frames` event channel
+- `VideoStreamSizeStreamHandler.kt` — emits `{width, height}` on stream start and resolution changes
+- `BackgroundStreamingService.kt` — foreground service (`connectedDevice` type, API 30+) + wake lock for background streaming
 
 ### 5. Test Build
 

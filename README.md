@@ -381,7 +381,7 @@ final sub = MetaWearablesDat.videoFramesStream().listen((frame) {
 
 Frame bytes are codec-dependent:
 
-- `VideoCodec.raw` — **iOS**: BGRA pixel data, tightly packed at `width * height * 4` bytes. **Android**: I420 planar YUV at `width * height * 3/2` bytes (Y plane, then U, then V).
+- `VideoCodec.raw` — **iOS**: BGRA pixel data at `bytesPerRow * height` bytes; rows may carry trailing padding for alignment, so iterate rows with `VideoFrame.bytesPerRow` rather than assuming `width * 4`. **Android**: I420 planar YUV, tightly packed at `width * height * 3/2` bytes (Y plane, then U, then V; `bytesPerRow` is `null`).
 - `VideoCodec.hvc1` (iOS only) — raw HEVC elementary stream (`hvc1` NAL units). Keyframes carry the parameter sets (VPS/SPS/PPS) inline, so the stream is self-contained and can be fed straight into `ffmpeg -i file.h265 out.mp4` or muxed into an mp4 track via `ffmpeg_kit_flutter`.
 
 Subscribing to `videoFramesStream()` is zero-cost when there are no listeners — the plugin won't encode or emit anything until the first subscriber attaches. Always subscribe *before* calling `startStreamSession()` if you want to capture the opening keyframe.

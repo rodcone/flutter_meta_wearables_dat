@@ -421,7 +421,7 @@ Codec payload layout:
 
 | Codec | iOS | Android |
 |-------|-----|---------|
-| `raw` | BGRA, `width * height * 4` bytes | I420 planar YUV, `width * height * 3/2` bytes |
+| `raw` | BGRA, `bytesPerRow * height` bytes (rows may be padded — use `VideoFrame.bytesPerRow`) | I420 planar YUV, `width * height * 3/2` bytes (tightly packed; `bytesPerRow` is `null`) |
 | `hvc1` | raw HEVC NAL units (self-contained: keyframes carry VPS/SPS/PPS) | n/a — Android SDK doesn't support `hvc1` |
 
 `videoFramesStream()` is zero-cost when no subscriber is attached. Subscribe **before** `startStreamSession()` to capture the opening keyframe.

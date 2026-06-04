@@ -19,7 +19,9 @@ import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.core.session.DeviceSession
+import com.meta.wearable.dat.core.types.DatResult
 import com.meta.wearable.dat.core.types.Permission
+import com.meta.wearable.dat.core.types.PermissionError
 import com.meta.wearable.dat.core.types.PermissionStatus
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -107,7 +109,8 @@ class MetaWearablesDatPlugin :
     private var btPermissionsGranted = false
 
     // Permission request handling
-    private var permissionContinuation: CancellableContinuation<PermissionStatus>? = null
+    private var permissionContinuation:
+        CancellableContinuation<DatResult<PermissionStatus, PermissionError>>? = null
     private val permissionMutex = Mutex()
     // Lazy so it isn't constructed at plugin load — the 0.6.0 SDK types
     // may touch `Wearables` internals and throw before `Wearables.initialize()`.
@@ -332,9 +335,13 @@ class MetaWearablesDatPlugin :
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode != PERMISSION_REQUEST_CODE) return false
-        val status = permissionContract.parseResult(resultCode, data)
-        val permissionStatus = status.getOrDefault(PermissionStatus.Denied)
-        permissionContinuation?.resume(permissionStatus)
+        // Carry the full DatResult through so the caller can distinguish a
+        // user-initiated denial (PermissionStatus.Denied) from a contract
+        // failure (NO_DEVICE, REQUEST_TIMEOUT, …). Collapsing both to
+        // PermissionStatus.Denied here would silently lie to the Dart layer,
+        // which now treats `false` as "user denied" exclusively.
+        val parseResult = permissionContract.parseResult(resultCode, data)
+        permissionContinuation?.resume(parseResult)
         permissionContinuation = null
         return true
     }
@@ -448,7 +455,7 @@ class MetaWearablesDatPlugin :
                 result.success(status == PermissionStatus.Granted)
             } catch (e: Exception) {
                 result.error(
-                        "PERMISSION_ERROR",
+                        "INTERNAL_ERROR",
                         e.message ?: "Failed to check camera permission status.",
                         null
                 )
@@ -458,13 +465,35 @@ class MetaWearablesDatPlugin :
 
     private suspend fun checkCameraPermissionStatus(result: Result): PermissionStatus? {
         val checkResult = Wearables.checkPermissionStatus(Permission.CAMERA)
-        var permissionErrorMessage: String? = null
-        checkResult.onFailure { error, _ -> permissionErrorMessage = error.description }
-        if (permissionErrorMessage != null) {
-            result.error("PERMISSION_ERROR", permissionErrorMessage, null)
+        var failure: PermissionError? = null
+        checkResult.onFailure { error, _ -> failure = error }
+        val err = failure
+        if (err != null) {
+            result.error(
+                    mapPermissionError(err),
+                    err.description,
+                    mapOf("errorType" to err.name),
+            )
             return null
         }
         return checkResult.getOrNull() ?: PermissionStatus.Denied
+    }
+
+    /**
+     * Map an SDK [PermissionError] to one of the typed codes that
+     * `CameraPermissionException` predicates on the Dart side. `PERMISSION_DENIED`
+     * is reserved for the case where a user explicitly declines the request — the
+     * SDK doesn't surface that as an error (it returns `PermissionStatus.Denied`),
+     * so it's never emitted here.
+     */
+    private fun mapPermissionError(error: PermissionError): String = when (error) {
+        PermissionError.NO_DEVICE,
+        PermissionError.NO_DEVICE_WITH_CONNECTION,
+        PermissionError.CONNECTION_ERROR -> "DEVICE_DISCONNECTED"
+        PermissionError.META_AI_NOT_INSTALLED,
+        PermissionError.REQUEST_IN_PROGRESS,
+        PermissionError.REQUEST_TIMEOUT,
+        PermissionError.INTERNAL_ERROR -> "INTERNAL_ERROR"
     }
 
     /**
@@ -486,25 +515,44 @@ class MetaWearablesDatPlugin :
                     val act = activity
                     if (act == null) {
                         result.error(
-                                "PERMISSION_ERROR",
+                                "INTERNAL_ERROR",
                                 "Activity is not available. Ensure the app is in the foreground.",
                                 null
                         )
                         return@withLock
                     }
 
-                    val permissionStatus =
-                            suspendCancellableCoroutine<PermissionStatus> { continuation ->
+                    val parseResult =
+                            suspendCancellableCoroutine<
+                                DatResult<PermissionStatus, PermissionError>
+                            > { continuation ->
                                 permissionContinuation = continuation
                                 continuation.invokeOnCancellation { permissionContinuation = null }
                                 val intent = permissionContract.createIntent(act, Permission.CAMERA)
                                 act.startActivityForResult(intent, PERMISSION_REQUEST_CODE)
                             }
 
+                    // Mirror checkCameraPermissionStatus: contract failures
+                    // (NO_DEVICE, REQUEST_TIMEOUT, …) become typed errors via
+                    // mapPermissionError; only an explicit PermissionStatus.Denied
+                    // result returns `false` to the Dart layer.
+                    var failure: PermissionError? = null
+                    parseResult.onFailure { error, _ -> failure = error }
+                    val err = failure
+                    if (err != null) {
+                        result.error(
+                                mapPermissionError(err),
+                                err.description,
+                                mapOf("errorType" to err.name),
+                        )
+                        return@withLock
+                    }
+                    val permissionStatus =
+                            parseResult.getOrNull() ?: PermissionStatus.Denied
                     result.success(permissionStatus == PermissionStatus.Granted)
                 } catch (e: Exception) {
                     result.error(
-                            "PERMISSION_ERROR",
+                            "INTERNAL_ERROR",
                             e.message ?: "Failed to request permission.",
                             null
                     )

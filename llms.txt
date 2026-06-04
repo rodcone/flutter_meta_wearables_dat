@@ -1,0 +1,54 @@
+# flutter_meta_wearables_dat
+
+> Flutter plugin bridging Meta's Wearables Device Access Toolkit (DAT) — register, stream the camera, capture photos, and capture raw video frames from **Ray-Ban Meta (Gen 1 & 2)**, **Meta Ray-Ban Display**, **Oakley Meta HSTN**, and **Oakley Meta Vanguard** smart glasses. iOS 17+ and Android API 29+. Published by verified publisher rodcone.io; tracks the latest DAT SDK release (currently 0.7.0) and is updated within days of each Meta release.
+
+The package exposes a single static facade, `MetaWearablesDat`, that delegates through a `MetaWearablesDatPlatform` interface to a Swift implementation on iOS (using the vendored `MWDATCore` / `MWDATCamera` xcframeworks) and a Kotlin implementation on Android (using the `mwdat-core` / `mwdat-camera` Maven dependencies from GitHub Packages). Integration follows a four-phase lifecycle: **Android permissions → registration (via Meta AI deep link) → camera permission → streaming**. Streaming returns a Flutter `Texture` ID for zero-copy rendering; reactive state and errors are exposed as Dart `Stream`s on dedicated event channels. Mock-device support lives in a separate optional add-on so production builds do not need to declare `NSCameraUsageDescription` (iOS) or the `CAMERA` permission (Android).
+
+## Public API
+
+- [lib/flutter_meta_wearables_dat.dart](https://github.com/rodcone/flutter_meta_wearables_dat/blob/main/lib/flutter_meta_wearables_dat.dart): the `MetaWearablesDat` static facade — every public method consumers call.
+- [lib/meta_wearables_dat_platform_interface.dart](https://github.com/rodcone/flutter_meta_wearables_dat/blob/main/lib/meta_wearables_dat_platform_interface.dart): abstract platform contract.
+- [lib/meta_wearables_dat_method_channel.dart](https://github.com/rodcone/flutter_meta_wearables_dat/blob/main/lib/meta_wearables_dat_method_channel.dart): default method/event channel implementation.
+
+## Compatible devices
+
+- Ray-Ban Meta (Gen 1)
+- Ray-Ban Meta (Gen 2)
+- Meta Ray-Ban Display
+- Oakley Meta HSTN
+- Oakley Meta Vanguard
+
+## Integration lifecycle
+
+- [Setup](https://github.com/rodcone/flutter_meta_wearables_dat#setup): iOS `Info.plist`, Android manifest, GitHub Packages Maven repo, `MainActivity` must extend `FlutterFragmentActivity`.
+- [Phase 0 — Android permissions](https://github.com/rodcone/flutter_meta_wearables_dat#0-android-permissions-android-only): `requestAndroidPermissions()`; gates SDK initialization on Android, no-op on iOS.
+- [Phase 1 — Registration](https://github.com/rodcone/flutter_meta_wearables_dat#1-registration-one-time): `startRegistration()` + deep-link callback through `handleUrl()` from the Meta AI app.
+- [Phase 2 — Camera permission](https://github.com/rodcone/flutter_meta_wearables_dat#2-permissions-first-time-camera-access): `requestCameraPermission()`.
+- [Phase 3 — Streaming](https://github.com/rodcone/flutter_meta_wearables_dat#3-session-after-registration-and-permissions): `startStreamSession()` returns a texture ID; subscribe to `streamSessionStateStream()`, `streamSessionErrorStream()`, `videoStreamSizeStream()`, `deviceStateStream()`.
+- [Background streaming](https://github.com/rodcone/flutter_meta_wearables_dat#background-streaming): opt in with `enableBackgroundStreaming()` before starting the session — iOS keeps the process alive via an `AVAudioSession`; Android runs a foreground service with a `connectedDevice` type and a `PARTIAL_WAKE_LOCK`.
+- [Raw video frames](https://github.com/rodcone/flutter_meta_wearables_dat#accessing-raw-frame-bytes): `videoFramesStream()` delivers BGRA / I420 / hvc1 NAL payloads for recording, ML, or re-muxing — zero-cost when no listener is attached.
+
+## AI assistant resources
+
+- [AGENTS.md](https://github.com/rodcone/flutter_meta_wearables_dat/blob/main/AGENTS.md): full AI-readable reference — code style, architecture, every type, every method signature, integration lifecycle, platform differences, debugging tree. Compatible with 20+ AI tools.
+- [agent/](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/agent): Claude Code skills + commands, Cursor `.mdc` rules, and GitHub Copilot instructions ready to drop into a consumer project.
+- [install-skills.sh](https://github.com/rodcone/flutter_meta_wearables_dat/blob/main/install-skills.sh): one-liner to install the assistant config of your choice (`claude` / `cursor` / `copilot` / `agents` / `all`).
+
+## Optional mock-device add-on
+
+- [flutter_meta_wearables_dat_mock_device](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/flutter_meta_wearables_dat_mock_device): simulates a Ray-Ban Meta from the phone camera for development without physical glasses. Pulled in only for dev/staging; production apps that omit it ship without `MWDATMockDevice.xcframework` / `mwdat-mockdevice` and without camera-permission declarations.
+
+## Example app
+
+- [example/](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example): full-stack Flutter app demonstrating the four-phase lifecycle — deep-link wiring (via `app_links`), `Provider`-based state management, registration, streaming with live `Texture` rendering, photo capture, thermal monitoring, and optional mock-device flows.
+
+## Changelog
+
+- [CHANGELOG.md](https://github.com/rodcone/flutter_meta_wearables_dat/blob/main/CHANGELOG.md): release cadence and per-version notes. Latest release pairs with DAT 0.7.0 and adds thermal monitoring, peak-power / battery-critical error codes, and the `openDATGlassesAppUpdate()` recovery path.
+
+## Optional
+
+- [pub.dev package page](https://pub.dev/packages/flutter_meta_wearables_dat)
+- [Meta's official DAT API reference (llms.txt)](https://wearables.developer.meta.com/llms.txt?full=true): authoritative upstream SDK reference.
+- [Meta Wearables Developer Center](https://wearables.developer.meta.com/): registration, app IDs, client tokens.
+- [Meta's AI-Assisted Development guide](https://wearables.developer.meta.com/docs/ai-assisted)

@@ -1,3 +1,9 @@
+## 0.5.1
+
+* Future-proof Android Gradle scripts for Flutter's [Built-in Kotlin migration](https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors). The Kotlin Gradle Plugin is now applied conditionally (`if (agpMajor < 9)`) — once a consumer upgrades to AGP 9, KGP will be auto-injected by Flutter's tooling and this plugin will stop contributing to the `Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP)` warning. On AGP < 9 (current Flutter 3.44 baseline) nothing changes: KGP is still applied so the plugin continues to compile, and the warning continues to fire from this and other plugins in the same situation until the host app moves to AGP 9.
+* Replace the deprecated `android.kotlinOptions { }` block with the modern top-level `kotlin.compilerOptions { }` DSL.
+* No API changes; consumers do not need to change anything beyond bumping the dependency.
+
 ## 0.5.0
 
 * Update to DAT SDK 0.7.0. Drop-in upgrade — no API changes.

@@ -198,10 +198,31 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         let granted = status == .granted
         result(granted)
       } catch let e as MWDATCore.PermissionError {
-        result(FlutterError(code: "PERMISSION_ERROR", message: e.localizedDescription, details: e.rawValue))
+        let code = Self.mapPermissionError(e)
+        result(FlutterError(
+          code: code,
+          message: e.description,
+          details: ["errorType": String(describing: e), "rawValue": e.rawValue]
+        ))
       } catch {
-        result(FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil))
+        result(FlutterError(code: "INTERNAL_ERROR", message: error.localizedDescription, details: nil))
       }
+    }
+  }
+
+  /// Map an SDK `PermissionError` to one of the typed codes that
+  /// `CameraPermissionException` predicates on the Dart side. `PERMISSION_DENIED`
+  /// is reserved for the case where a user explicitly declines the request — the
+  /// SDK doesn't surface that as an error (it returns `.denied`), so it's never
+  /// emitted here.
+  private static func mapPermissionError(_ e: MWDATCore.PermissionError) -> String {
+    switch e {
+    case .noDevice, .noDeviceWithConnection, .connectionError:
+      return "DEVICE_DISCONNECTED"
+    case .metaAINotInstalled, .requestInProgress, .requestTimeout, .internalError:
+      return "INTERNAL_ERROR"
+    @unknown default:
+      return "INTERNAL_ERROR"
     }
   }
 
@@ -210,11 +231,19 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       do {
         let status = try await Wearables.shared.checkPermissionStatus(.camera)
         result(status == .granted)
-      } catch is MWDATCore.PermissionError {
-        // Permission not granted yet or denied — return false instead of error
-        result(false)
+      } catch let e as MWDATCore.PermissionError {
+        // Mirror Android's typed-exception contract: surface no-device / Meta-AI-missing
+        // / timeout / etc. as the same FlutterError codes `requestCameraPermission`
+        // already emits. Returning `false` here would conflate contract failures with
+        // a real "user denied" outcome on the Dart side.
+        let code = Self.mapPermissionError(e)
+        result(FlutterError(
+          code: code,
+          message: e.description,
+          details: ["errorType": String(describing: e), "rawValue": e.rawValue]
+        ))
       } catch {
-        result(FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil))
+        result(FlutterError(code: "INTERNAL_ERROR", message: error.localizedDescription, details: nil))
       }
     }
   }

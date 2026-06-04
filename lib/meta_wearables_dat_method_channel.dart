@@ -213,49 +213,77 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
 
   @override
   Stream<RegistrationState> registrationStateStream() {
-    return eventChannel.receiveBroadcastStream().map(
-      (dynamic event) => RegistrationState.fromInt(event as int),
-    );
+    return eventChannel.receiveBroadcastStream().map((dynamic event) {
+      final state = RegistrationState.fromInt(event as int);
+      if (kDebugMode) {
+        debugPrint('[MetaWearablesDAT] registrationState → $state');
+      }
+      return state;
+    });
   }
 
   @override
   Stream<StreamSessionState> streamSessionStateStream() {
-    return streamSessionStateEventChannel.receiveBroadcastStream().map(
-      (dynamic event) => StreamSessionState.fromInt(event as int),
-    );
+    return streamSessionStateEventChannel.receiveBroadcastStream().map((
+      dynamic event,
+    ) {
+      final state = StreamSessionState.fromInt(event as int);
+      if (kDebugMode) {
+        debugPrint('[MetaWearablesDAT] streamSessionState → $state');
+      }
+      return state;
+    });
   }
 
   @override
   Stream<StreamSessionError> streamSessionErrorStream() {
-    return streamSessionErrorEventChannel.receiveBroadcastStream().map(
-      (dynamic event) {
-        final map = Map<String, dynamic>.from(event as Map);
-        return StreamSessionError(
-          code: map['code'] as String,
-          message: map['message'] as String,
+    return streamSessionErrorEventChannel.receiveBroadcastStream().map((
+      dynamic event,
+    ) {
+      final map = Map<String, dynamic>.from(event as Map);
+      final err = StreamSessionError(
+        code: map['code'] as String,
+        message: map['message'] as String,
+      );
+      if (kDebugMode) {
+        debugPrint(
+          '[MetaWearablesDAT] streamSessionError → ${err.code}: ${err.message}',
         );
-      },
-    );
+      }
+      return err;
+    });
   }
 
   @override
   Stream<bool> activeDeviceStream() {
-    return activeDeviceEventChannel.receiveBroadcastStream().map(
-      (dynamic event) => event as bool,
-    );
+    return activeDeviceEventChannel.receiveBroadcastStream().map((
+      dynamic event,
+    ) {
+      final available = event as bool;
+      if (kDebugMode) {
+        debugPrint('[MetaWearablesDAT] activeDevice → $available');
+      }
+      return available;
+    });
   }
 
   @override
   Stream<VideoStreamSize> videoStreamSizeStream() {
-    return videoStreamSizeEventChannel.receiveBroadcastStream().map(
-      (dynamic event) {
-        final map = Map<String, dynamic>.from(event as Map);
-        return VideoStreamSize(
-          width: (map['width'] as num).toInt(),
-          height: (map['height'] as num).toInt(),
+    return videoStreamSizeEventChannel.receiveBroadcastStream().map((
+      dynamic event,
+    ) {
+      final map = Map<String, dynamic>.from(event as Map);
+      final size = VideoStreamSize(
+        width: (map['width'] as num).toInt(),
+        height: (map['height'] as num).toInt(),
+      );
+      if (kDebugMode) {
+        debugPrint(
+          '[MetaWearablesDAT] videoStreamSize → ${size.width}x${size.height}',
         );
-      },
-    );
+      }
+      return size;
+    });
   }
 
   @override
@@ -314,15 +342,21 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
 
   @override
   Stream<DeviceState> deviceStateStream() {
-    return deviceStateEventChannel.receiveBroadcastStream().map(
-      (dynamic event) {
-        final map = Map<String, dynamic>.from(event as Map);
-        return DeviceState(
-          thermalLevel: ThermalLevel.fromInt(
-            (map['thermalLevel'] as num).toInt(),
-          ),
+    return deviceStateEventChannel.receiveBroadcastStream().map((
+      dynamic event,
+    ) {
+      final map = Map<String, dynamic>.from(event as Map);
+      final state = DeviceState(
+        thermalLevel: ThermalLevel.fromInt(
+          (map['thermalLevel'] as num).toInt(),
+        ),
+      );
+      if (kDebugMode) {
+        debugPrint(
+          '[MetaWearablesDAT] deviceState → thermalLevel=${state.thermalLevel}',
         );
-      },
-    );
+      }
+      return state;
+    });
   }
 }
