@@ -26,10 +26,12 @@ The Meta Wearables DAT is distributed as pre-compiled binaries.
 
 Update the binaries across **both** plugins:
 
-1. **Core plugin** — replace `MWDATCore.xcframework` and `MWDATCamera.xcframework` in `ios/Frameworks/` (root).
-2. **Mock add-on** — replace `MWDATMockDevice.xcframework` in `flutter_meta_wearables_dat_mock_device/ios/Frameworks/`.
+1. **Core plugin** — replace `MWDATCore.xcframework` and `MWDATCamera.xcframework` in `ios/flutter_meta_wearables_dat/Frameworks/`.
+2. **Mock add-on** — replace `MWDATMockDevice.xcframework` in `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks/`.
 
 Delete the existing folders before pasting the new versions to avoid stale slices.
+
+The same xcframework files back both the CocoaPods (`vendored_frameworks` in each `*.podspec`) and Swift Package Manager (`.binaryTarget(path:)` in each `Package.swift`) paths — there's only one source of truth on disk.
 
 ### 2b. Thin the xcframeworks (required for pub.dev publish)
 
@@ -51,14 +53,45 @@ Force the example app to recognize the updated files:
 2. Update Pods: Run `pod update` (not just `pod install`) to re-link the local vendored files
 3. Clean Build: Open Xcode and perform a Clean Build Folder (`Cmd+Shift+K`)
 
+If you're testing under Swift Package Manager (`flutter config --enable-swift-package-manager`), skip the `pod update` step and instead delete any cached SwiftPM state before rebuilding:
+
+```bash
+rm -rf example/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+rm -rf example/ios/Runner.xcworkspace/xcshareddata/swiftpm
+cd example && flutter clean
+```
+
+SwiftPM caches binary-target checksums in `Package.resolved`; clearing the workspace state forces a fresh resolve against the new xcframeworks.
+
 ### 4. Implement API Changes
 
 Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Swift and Dart) to adopt new features and fix any issues introduced by the update.
 
 ### 5. Test Build
 
-- Clean build: `cd example && flutter build ios --release --no-codesign`
-- Run the example app on a device or simulator to verify everything works with the new version
+Verify both iOS resolvers from a clean state:
+
+```bash
+# CocoaPods (the example app's committed baseline)
+flutter config --no-enable-swift-package-manager
+cd example && flutter clean && flutter build ios --release --no-codesign
+
+# Swift Package Manager (Flutter migrates the pbxproj on the fly)
+flutter config --enable-swift-package-manager
+flutter clean && flutter build ios --release --no-codesign
+```
+
+Then run the example app on a device or simulator on whichever resolver matches your usual workflow, to verify the new DAT version actually works at runtime. CI's `ios-build` job covers both paths on every PR.
+
+## iOS resolver layout
+
+The iOS side supports CocoaPods and Swift Package Manager from the same on-disk layout:
+
+- **Sources** live under `ios/flutter_meta_wearables_dat/Sources/flutter_meta_wearables_dat/` (and the mock equivalent). Any new Swift file goes there — don't recreate the legacy `ios/Classes/` directory.
+- **Vendored xcframeworks** live under `ios/flutter_meta_wearables_dat/Frameworks/` (and the mock equivalent). Same files back both resolvers.
+- **Manifests**: each plugin ships both `*.podspec` (CocoaPods) and `Package.swift` (SwiftPM). Any change to source paths, system frameworks, or vendored frameworks must be applied to *both* manifests in lockstep.
+- **Cross-plugin dependency**: the mock plugin's `Package.swift` reaches the core via `.package(name: "flutter_meta_wearables_dat", path: "../flutter_meta_wearables_dat")` — a sibling-relative path that resolves through Flutter's symlinked plugin umbrella regardless of whether the plugins live in this monorepo or under a consumer's pub-cache. The core plugin re-exports `MWDATCore` as a separate `.library(name: "MWDATCore", targets: ["MWDATCore"])` product so the mock can `import MWDATCore`. The equivalent CocoaPods linkage is the `s.dependency 'flutter_meta_wearables_dat'` line in the mock's podspec.
+- **Privacy manifest** lives inside the SwiftPM source target dir (`ios/flutter_meta_wearables_dat/Sources/flutter_meta_wearables_dat/PrivacyInfo.xcprivacy`) — SwiftPM requires resources to be inside the target's `path`. The podspec's `s.resource_bundles` points at the same file.
 
 ## Android
 
