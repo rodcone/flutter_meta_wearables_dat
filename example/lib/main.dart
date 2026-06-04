@@ -24,7 +24,7 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   final appLinks = AppLinks();
   StreamSubscription<Uri>? _deepLinkSubscription;
   String? _lastHandledDeepLink;
@@ -33,7 +33,17 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_initDeepLinkListener());
+  }
+
+  // app_links delivers deep links via uriLinkStream; without this override
+  // MaterialApp's default observer also tries to Navigator.pushNamed the full
+  // URL as a route and logs "Could not find a generator for route". Returning
+  // true short-circuits that fallback.
+  @override
+  Future<bool> didPushRouteInformation(RouteInformation routeInformation) {
+    return Future.value(true);
   }
 
   Future<void> _initDeepLinkListener() async {
@@ -76,6 +86,7 @@ class _MyAppState extends State<MyApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _deepLinkSubscription?.cancel();
     super.dispose();
   }
