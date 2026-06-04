@@ -85,3 +85,37 @@ jobs:
             exit 1
           fi
           echo "OK: both packages are at $CORE_VERSION"
+
+  # Build the example app on both iOS resolvers. Example app is committed in
+  # its CocoaPods baseline state; on the SPM job Flutter migrates the
+  # pbxproj on the fly. Catches regressions on either path.
+  ios-build:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        resolver: [cocoapods, spm]
+    steps:
+      - uses: actions/checkout@v4
+      # `BackgroundStreamingController.swift` uses iOS-18+ AVAudioSession APIs
+      # (`.allowBluetoothHFP`) so the build needs the matching SDK. The default
+      # Xcode on `macos-latest` images lags real releases — pin to latest-stable.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Configure iOS resolver (${{ matrix.resolver }})
+        run: |
+          if [ "${{ matrix.resolver }}" = "spm" ]; then
+            flutter config --enable-swift-package-manager
+          else
+            flutter config --no-enable-swift-package-manager
+          fi
+      - name: flutter pub get
+        working-directory: example
+        run: flutter pub get
+      - name: Build iOS example
+        working-directory: example
+        run: flutter build ios --release --no-codesign

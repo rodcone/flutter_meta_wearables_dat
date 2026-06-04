@@ -444,8 +444,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.5.1
-  flutter_meta_wearables_dat_mock_device: ^0.5.1
+  flutter_meta_wearables_dat: ^0.5.2
+  flutter_meta_wearables_dat_mock_device: ^0.5.2
 ```
 
 ```dart

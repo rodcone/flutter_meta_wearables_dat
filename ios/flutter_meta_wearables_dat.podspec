@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_meta_wearables_dat'
-  s.version          = '0.5.1'
+  s.version          = '0.5.2'
   s.summary          = "Flutter bridge to Meta's Wearables DAT for iOS and Android."
   s.description      = <<-DESC
 Flutter plugin providing a bridge to Meta's Wearables Device Access Toolkit (DAT)
@@ -16,15 +16,15 @@ capture, and background streaming on iOS 17.0+.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Gautier de Lataillade' => 'gautier@levinriegner.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files = 'flutter_meta_wearables_dat/Sources/flutter_meta_wearables_dat/**/*'
   s.dependency 'Flutter'
   s.platform = :ios, '17.0'
   s.static_framework = true
   s.vendored_frameworks = [
-    'Frameworks/MWDATCore.xcframework',
-    'Frameworks/MWDATCamera.xcframework'
+    'flutter_meta_wearables_dat/Frameworks/MWDATCore.xcframework',
+    'flutter_meta_wearables_dat/Frameworks/MWDATCamera.xcframework'
   ]
-  s.preserve_paths = 'Frameworks/*.xcframework'
+  s.preserve_paths = 'flutter_meta_wearables_dat/Frameworks/*.xcframework'
   s.frameworks = 'CoreBluetooth', 'Network', 'AVFoundation', 'VideoToolbox'
   s.xcconfig = { 'OTHER_LDFLAGS' => '-framework MWDATCamera -framework MWDATCore' }
 
@@ -34,5 +34,5 @@ capture, and background streaming on iOS 17.0+.
 
   # Privacy manifest declares no required-reason API usage and no tracking; ship
   # it so consumers' aggregated privacy report stays accurate.
-  s.resource_bundles = {'flutter_meta_wearables_dat_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
+  s.resource_bundles = {'flutter_meta_wearables_dat_privacy' => ['flutter_meta_wearables_dat/Sources/flutter_meta_wearables_dat/PrivacyInfo.xcprivacy']}
 end
