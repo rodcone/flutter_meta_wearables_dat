@@ -1,10 +1,7 @@
 ## 0.5.1
-* Future-proof Android Gradle scripts for Flutter's [Built-in Kotlin migration](https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors). The Kotlin Gradle Plugin is now applied conditionally (`if (agpMajor < 9)`) — once a consumer upgrades to AGP 9, KGP will be auto-injected by Flutter's tooling and this plugin will stop contributing to the `Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP)` warning. On AGP < 9 (current Flutter 3.44 baseline) nothing changes: KGP is still applied so the plugin continues to compile, and the warning continues to fire from this and other plugins in the same situation until the host app moves to AGP 9.
-* Replace the deprecated `android.kotlinOptions { }` block with the modern top-level `kotlin.compilerOptions { }` DSL.
-* **Android** `requestCameraPermission`: stop collapsing `RequestPermissionContract.parseResult` failures (`NO_DEVICE`, `REQUEST_TIMEOUT`, `CONNECTION_ERROR`, …) to `PermissionStatus.Denied`. Those now surface through `mapPermissionError` as typed `CameraPermissionException`s (`DEVICE_DISCONNECTED` / `INTERNAL_ERROR`), matching the contract the Dart side already documents — `false` means *user explicitly denied*, not "something went wrong".
-* **iOS** `getCameraPermissionStatus`: stop swallowing every `MWDATCore.PermissionError` as `false`. The status check now routes through the same `mapPermissionError` helper as `requestCameraPermission`, so no-device / Meta-AI-missing / timeout cases are reported identically across iOS and Android.
-* Gate `debugPrint` calls in the event-stream pipelines (`registrationState`, `streamSessionState`, `streamSessionError`, `activeDevice`, `videoStreamSize`, `deviceState`) behind `kDebugMode`. Flutter's `debugPrint` is *not* automatically a no-op in release builds, so previously consumers' release apps were emitting per-event plugin logs they had no way to silence.
-* No API changes; consumers do not need to change anything beyond bumping the dependency.
+* Prepare Android Gradle for Flutter's Built-in Kotlin migration.
+* Camera permission errors are now typed `CameraPermissionException`s on both platforms; a `false` return means *user denied*, exclusively.
+* Gate event-stream `debugPrint` behind `kDebugMode` so release builds stop logging plugin events.
 
 ## 0.5.0
 * Update to DAT SDK 0.7.0 on iOS and Android. Existing Dart APIs unchanged; new opt-in additions below — non-breaking, drop-in upgrade.
