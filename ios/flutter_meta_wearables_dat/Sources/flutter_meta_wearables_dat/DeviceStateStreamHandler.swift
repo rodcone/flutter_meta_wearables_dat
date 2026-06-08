@@ -11,6 +11,12 @@ import MWDATCore
 class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
   private let deviceSelectorProvider: @MainActor () -> AutoDeviceSelector
   private var outerTask: Task<Void, Never>?
+  private var eventSink: FlutterEventSink?
+  // See `ActiveDeviceStreamHandler`: the outer `activeDeviceStream()` loop dies
+  // on unregister, taking thermal updates with it. These let
+  // `restartMonitoring()` relaunch the loop exactly once after re-registration.
+  private var isMonitoring = false
+  private var monitoringGeneration = 0
 
   init(deviceSelectorProvider: @escaping @MainActor () -> AutoDeviceSelector) {
     self.deviceSelectorProvider = deviceSelectorProvider
@@ -18,8 +24,40 @@ class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
   }
 
   public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    eventSink = events
+    startMonitoring()
+    return nil
+  }
+
+  public func onCancel(withArguments arguments: Any?) -> FlutterError? {
     outerTask?.cancel()
+    outerTask = nil
+    eventSink = nil
+    isMonitoring = false
+    return nil
+  }
+
+  /// Relaunch the active-device tracking loop after a disconnect/re-register
+  /// cycle so thermal updates resume. Mirrors
+  /// `ActiveDeviceStreamHandler.restartMonitoring()`; the `!isMonitoring` guard
+  /// also keeps us from a rapid cancel+resubscribe of `deviceStateStream(for:)`
+  /// for a still-active device (which the SDK answers with an empty stream).
+  func restartMonitoring() {
+    guard eventSink != nil else { return }
+    guard !isMonitoring else { return }
+    startMonitoring()
+  }
+
+  private func startMonitoring() {
+    outerTask?.cancel()
+    guard let events = eventSink else { return }
+    monitoringGeneration += 1
+    let generation = monitoringGeneration
+    isMonitoring = true
     outerTask = Task { @MainActor in
+      defer {
+        if self.monitoringGeneration == generation { self.isMonitoring = false }
+      }
       let selector = self.deviceSelectorProvider()
       var innerTask: Task<Void, Never>?
       var currentDeviceId: DeviceIdentifier?
@@ -50,13 +88,6 @@ class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
 
       innerTask?.cancel()
     }
-    return nil
-  }
-
-  public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    outerTask?.cancel()
-    outerTask = nil
-    return nil
   }
 
   @MainActor

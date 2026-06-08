@@ -7,8 +7,11 @@ import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 class DeviceProvider extends ChangeNotifier {
   bool? _hasCameraPermissionGranted;
   RegistrationState? _registrationState;
-  RegistrationState? _previousRegistrationState;
   StreamSubscription<RegistrationState>? _registrationStateSubscription;
+  // Gates the register-transition side effects (active-device restart +
+  // camera-permission auto-request) so they only fire on a genuine state
+  // change, never while seeding the initial state on launch.
+  bool _initialized = false;
 
   bool? get hasCameraPermissionGranted => _hasCameraPermissionGranted;
   RegistrationState? get registrationState => _registrationState;
@@ -25,23 +28,14 @@ class DeviceProvider extends ChangeNotifier {
       await MetaWearablesDat.requestAndroidPermissions();
 
       await refreshRegistrationState(notify: false);
+      _initialized = true;
       notifyListeners();
 
       // Listen to state changes
       _registrationStateSubscription =
           MetaWearablesDat.registrationStateStream().listen(
             (state) {
-              _previousRegistrationState = _registrationState;
-              _registrationState = state;
-
-              // After registration completes, restart active device monitoring
-              // so the plugin re-subscribes to the device flow and picks up
-              // newly available devices.
-              if (state == RegistrationState.registered &&
-                  _previousRegistrationState != RegistrationState.registered) {
-                MetaWearablesDat.restartActiveDeviceMonitoring();
-              }
-
+              _setRegistrationState(state);
               notifyListeners();
             },
             onError: (dynamic error) {
@@ -141,16 +135,41 @@ class DeviceProvider extends ChangeNotifier {
 
   Future<void> refreshRegistrationState({bool notify = true}) async {
     try {
-      _previousRegistrationState = _registrationState;
-      _registrationState = await MetaWearablesDat.getRegistrationState();
+      _setRegistrationState(await MetaWearablesDat.getRegistrationState());
     } catch (e) {
       debugPrint('[MetaWearablesDAT] Error refreshing registration state: $e');
-      _registrationState = RegistrationState.unavailable;
+      _setRegistrationState(RegistrationState.unavailable);
     } finally {
       if (notify) {
         notifyListeners();
       }
     }
+  }
+
+  /// Updates the cached registration state and fires the one-time side effects
+  /// that must run when the user (re-)registers. Routing both the registration
+  /// stream and [refreshRegistrationState] through here means the
+  /// unregistered→registered transition is handled exactly once, regardless of
+  /// which path observes it first. Side effects are suppressed until
+  /// [_initialized] so simply launching the app while already registered does
+  /// not bounce the user into Meta AI.
+  void _setRegistrationState(RegistrationState state) {
+    final wasRegistered = _registrationState == RegistrationState.registered;
+    _registrationState = state;
+
+    if (!_initialized) return;
+    if (state != RegistrationState.registered || wasRegistered) return;
+
+    // Fresh (re-)registration. Re-subscribe the plugin to the device flow so it
+    // picks up the newly available device…
+    unawaited(MetaWearablesDat.restartActiveDeviceMonitoring());
+    // …and re-request camera permission. Unregistration revokes it, and the SDK
+    // will not surface the glasses in its device flow until at least one
+    // permission is granted again via Meta AI — so without this the user is
+    // stranded behind a Start button that never enables. This is a no-op (no
+    // Meta AI navigation) when permission is already granted, e.g. right after
+    // first-time onboarding.
+    unawaited(requestCameraPermission());
   }
 
   Future<void> refreshCameraPermissionStatus({bool notify = true}) async {
@@ -166,8 +185,15 @@ class DeviceProvider extends ChangeNotifier {
       final hasPermission = await MetaWearablesDat.getCameraPermissionStatus();
       _hasCameraPermissionGranted = hasPermission;
     } on CameraPermissionException catch (e) {
-      debugPrint('[MetaWearablesDAT] Camera permission status error: $e');
-      _hasCameraPermissionGranted = false;
+      if (e.isDeviceDisconnected) {
+        // Expected while the glasses are still (re)connecting — not a denial.
+        // Leave the status unknown; it resolves once a device is active or the
+        // user re-grants permission (auto-requested on the register transition).
+        _hasCameraPermissionGranted = null;
+      } else {
+        debugPrint('[MetaWearablesDAT] Camera permission status error: $e');
+        _hasCameraPermissionGranted = false;
+      }
     } catch (e) {
       debugPrint(
         '[MetaWearablesDAT] Error checking camera permission status: $e',

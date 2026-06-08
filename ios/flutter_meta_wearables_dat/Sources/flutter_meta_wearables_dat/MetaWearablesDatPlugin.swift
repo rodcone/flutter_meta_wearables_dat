@@ -38,6 +38,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var streamStateHandler = StreamStateStreamHandler()
   private var streamErrorHandler = StreamErrorStreamHandler()
   private var videoStreamSizeHandler = VideoStreamSizeStreamHandler()
+  // Active-device + per-device-state handlers. Stored (not throwaway) so the
+  // `restartActiveDeviceMonitoring` method channel can relaunch their stream
+  // loops after a disconnect/re-register cycle. Assigned in `register(with:)`.
+  private var activeDeviceHandler: ActiveDeviceStreamHandler?
+  private var deviceStateHandler: DeviceStateStreamHandler?
 
   // Background streaming — opt-in AVAudioSession keep-alive + software
   // decoder mode. When enabled, the plugin keeps the decoder alive across
@@ -60,12 +65,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     registrationStateChannel.setStreamHandler(RegistrationStateStreamHandler())
     // Event channel for active device availability updates
     let activeDeviceChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/active_device", binaryMessenger: registrar.messenger())
-    activeDeviceChannel.setStreamHandler(ActiveDeviceStreamHandler(deviceSelectorProvider: { [weak instance] in
+    let activeDeviceHandler = ActiveDeviceStreamHandler(deviceSelectorProvider: { [weak instance] in
       // Fall back to a fresh selector only if the plugin has been torn down —
       // in normal operation the shared instance is always used so the active
       // device state is seeded without re-discovery.
       instance?.deviceSelector ?? AutoDeviceSelector(wearables: Wearables.shared)
-    }))
+    })
+    instance.activeDeviceHandler = activeDeviceHandler
+    activeDeviceChannel.setStreamHandler(activeDeviceHandler)
     // Event channels for stream session state and errors
     let streamStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/stream_session_state", binaryMessenger: registrar.messenger())
     streamStateChannel.setStreamHandler(instance.streamStateHandler)
@@ -82,9 +89,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // Event channel for per-device state (thermal level). Tracks the active
     // device and switches subscription on device change.
     let deviceStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/device_state", binaryMessenger: registrar.messenger())
-    deviceStateChannel.setStreamHandler(DeviceStateStreamHandler(deviceSelectorProvider: { [weak instance] in
+    let deviceStateHandler = DeviceStateStreamHandler(deviceSelectorProvider: { [weak instance] in
       instance?.deviceSelector ?? AutoDeviceSelector(wearables: Wearables.shared)
-    }))
+    })
+    instance.deviceStateHandler = deviceStateHandler
+    deviceStateChannel.setStreamHandler(deviceStateHandler)
 
     Task { @MainActor in
       try? Wearables.configure()
@@ -98,8 +107,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // No-op on iOS — Android-only runtime permissions
         result(true)
       case "restartActiveDeviceMonitoring":
-        // No-op on iOS — Android-only workaround for device flow timing
-        result(true)
+        // Relaunch the active-device + device-state stream loops, which the SDK
+        // terminates on unregistration. Dart calls this after returning from
+        // Meta AI so streaming can resume after a disconnect/re-register cycle
+        // without an app restart.
+        Task { @MainActor in
+          self.activeDeviceHandler?.restartMonitoring()
+          self.deviceStateHandler?.restartMonitoring()
+          result(true)
+        }
       case "startRegistration":
         startRegistration(result: result)
       case "disconnect":
@@ -187,8 +203,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   func requestCameraPermission(result: @escaping FlutterResult) {
     Task { @MainActor in
       do {
-        let currentStatus = try await Wearables.shared.checkPermissionStatus(.camera)
-        if currentStatus == .granted {
+        // Fast path: skip the prompt if permission is already granted. This is
+        // best-effort — `checkPermissionStatus` throws `.noDevice` when no
+        // glasses are connected (e.g. right after re-registration, since
+        // unregistration revokes camera permission). We must NOT bail out in
+        // that case: `requestPermission(.camera)` is exactly what re-grants the
+        // permission and brings the device back into `devicesStream`, so fall
+        // through to it instead of surfacing DEVICE_DISCONNECTED.
+        if let currentStatus = try? await Wearables.shared.checkPermissionStatus(.camera),
+           currentStatus == .granted {
           result(true)
           return
         }
