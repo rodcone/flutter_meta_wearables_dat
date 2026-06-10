@@ -626,10 +626,15 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.videoStreamSizeStream();
   }
 
-  /// Restarts active device monitoring on Android.
+  /// Restarts active device monitoring.
   /// Call after registration completes so the plugin re-subscribes
   /// to the device flow and picks up newly available devices.
-  /// No-op on iOS.
+  ///
+  /// On Android this re-subscribes the native device-flow listener. On iOS
+  /// it relaunches the active-device and device-state event loops plus the
+  /// plugin's internal availability watchdog — the SDK terminates those
+  /// streams on unregistration, so without this call streaming could not
+  /// resume after a disconnect/re-register cycle without an app restart.
   static Future<bool> restartActiveDeviceMonitoring() {
     return MetaWearablesDatPlatform.instance.restartActiveDeviceMonitoring();
   }

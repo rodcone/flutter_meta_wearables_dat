@@ -18,6 +18,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var deviceSessionStateTask: Task<Void, Never>?
   private var deviceSessionErrorTask: Task<Void, Never>?
   private var deviceAvailabilityTask: Task<Void, Never>?
+  // Last error observed on the DeviceSession's errorStream. Used to surface
+  // the genuine failure reason when the session stops before reaching
+  // `.started` (instead of a fabricated `noEligibleDevice`). Cleared at the
+  // start of every `ensureDeviceSessionStarted` attempt.
+  private var lastDeviceSessionError: DeviceSessionError?
 
   // Stream session state (single session at a time)
   private var streamSession: MWDATCamera.Stream?
@@ -110,10 +115,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // Relaunch the active-device + device-state stream loops, which the SDK
         // terminates on unregistration. Dart calls this after returning from
         // Meta AI so streaming can resume after a disconnect/re-register cycle
-        // without an app restart.
+        // without an app restart. Also relaunch the plugin's internal
+        // availability watchdog — its `for await` dies with the SDK stream and
+        // would otherwise stay dead for the rest of the process.
         Task { @MainActor in
           self.activeDeviceHandler?.restartMonitoring()
           self.deviceStateHandler?.restartMonitoring()
+          self.startDeviceAvailabilityMonitoring()
           result(true)
         }
       case "startRegistration":
@@ -375,6 +383,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return existing
     }
 
+    // Each attempt starts with a clean error slate so a stale error from a
+    // previous attempt can't masquerade as this one's failure reason.
+    lastDeviceSessionError = nil
+
     // Drop stale/stopped sessions — `.stopped` is terminal.
     if let existing = deviceSession, existing.state == .stopped {
       await teardownDeviceSession()
@@ -393,9 +405,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           return session
         }
         if state == .stopped {
-          // Terminal failure before ever reaching .started
+          // Terminal failure before ever reaching .started — surface the
+          // genuine error from the session's errorStream when we saw one.
           deviceSession = nil
-          throw DeviceSessionError.noEligibleDevice
+          throw lastDeviceSessionError ?? DeviceSessionError.noEligibleDevice
         }
       }
       // Stream ended without reaching .started
@@ -403,15 +416,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       throw DeviceSessionError.unexpectedError(description: "Device session state stream ended before reaching .started")
     }
 
-    // Session exists but not yet .started — wait for it.
+    // Session exists but not yet `.started`.
     guard let session = deviceSession else {
       throw DeviceSessionError.noEligibleDevice
     }
-    for await state in session.stateStream() {
+    // Capture the state stream BEFORE start() so we don't miss transitions.
+    let stateStream = session.stateStream()
+    if session.state == .idle {
+      // A previous start() threw (e.g. noEligibleDevice while the device was
+      // still connecting) and left the session `.idle`. The SDK documents
+      // start() as retryable from `.idle` — without this, the `for await`
+      // below would hang forever on a session nothing ever starts, wedging
+      // every subsequent startStreamSession call.
+      try session.start()
+    }
+    for await state in stateStream {
       if state == .started { return session }
       if state == .stopped {
         deviceSession = nil
-        throw DeviceSessionError.noEligibleDevice
+        throw lastDeviceSessionError ?? DeviceSessionError.noEligibleDevice
       }
     }
     throw DeviceSessionError.unexpectedError(description: "Device session state stream ended")
@@ -442,6 +465,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceSessionErrorTask?.cancel()
     deviceSessionErrorTask = Task { [weak self] in
       for await error in session.errorStream() {
+        self?.lastDeviceSessionError = error
         self?.streamErrorHandler.send(deviceSessionError: error)
       }
     }

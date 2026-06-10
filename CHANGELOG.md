@@ -1,3 +1,9 @@
+## 0.5.3
+* iOS: Fix a permanent hang in `startStreamSession` after a failed start. If a previous attempt threw (e.g. `noEligibleDevice` while the glasses were still linking up post-registration), the device session was left `.idle` and every subsequent call awaited a state transition that nothing would ever trigger — the Dart future never completed. The session is now re-`start()`ed from `.idle` (the SDK's documented retry path).
+* iOS: When the device session stops before reaching `.started`, `startStreamSession` now surfaces the genuine error observed on the session's `errorStream()` instead of a fabricated `noEligibleDevice`.
+* iOS: `restartActiveDeviceMonitoring()` also relaunches the plugin's internal device-availability watchdog (it previously only restarted the Dart-facing event loops, leaving the auto-teardown watcher dead after the SDK terminated its stream on unregistration).
+* Docs: corrected `restartActiveDeviceMonitoring` — it has not been a no-op on iOS since 0.5.2; documented what it restarts per platform.
+
 ## 0.5.2
 * iOS: Add Swift Package Manager support alongside CocoaPods.
 
