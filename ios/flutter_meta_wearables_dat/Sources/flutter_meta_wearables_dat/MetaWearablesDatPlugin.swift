@@ -117,11 +117,17 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // Meta AI so streaming can resume after a disconnect/re-register cycle
         // without an app restart. Also relaunch the plugin's internal
         // availability watchdog — its `for await` dies with the SDK stream and
-        // would otherwise stay dead for the rest of the process.
+        // would otherwise stay dead for the rest of the process. When the
+        // shared selector has gone blind (typical right after a first
+        // registration — see `rebuildDeviceSelectorIfBlind`), it is recreated
+        // and the loops are force-restarted onto the new instance.
         Task { @MainActor in
-          self.activeDeviceHandler?.restartMonitoring()
-          self.deviceStateHandler?.restartMonitoring()
-          self.startDeviceAvailabilityMonitoring()
+          let rebuilt = await self.rebuildDeviceSelectorIfBlind()
+          self.activeDeviceHandler?.restartMonitoring(force: rebuilt)
+          self.deviceStateHandler?.restartMonitoring(force: rebuilt)
+          if !rebuilt {
+            self.startDeviceAvailabilityMonitoring()
+          }
           result(true)
         }
       case "startRegistration":
@@ -359,6 +365,31 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   // MARK: - Session Lifecycle
+
+  /// Recreates the shared `AutoDeviceSelector` when it has gone blind — no
+  /// active device and no started session. The selector's internal monitoring
+  /// task is created in its `init`; an instance created before the app was
+  /// registered (the plugin instantiates it at registrar time) can stay blind
+  /// to devices that only surface after registration. Meta's CameraAccess
+  /// sample only ever creates its selector post-registration; rebuilding on
+  /// the post-registration `restartActiveDeviceMonitoring` call mirrors that.
+  /// Returns `true` when the selector was rebuilt so callers can
+  /// force-restart loops still attached to the old instance.
+  @MainActor
+  private func rebuildDeviceSelectorIfBlind() async -> Bool {
+    if let session = deviceSession, session.state == .started {
+      return false
+    }
+    guard deviceSelector.activeDevice == nil else {
+      return false
+    }
+    // Any idle/stopped leftover session is bound to the old selector — drop
+    // it so the next startStreamSession creates against the fresh one.
+    await teardownDeviceSession()
+    deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
+    startDeviceAvailabilityMonitoring()
+    return true
+  }
 
   /// Monitors `activeDeviceStream` and tears the DeviceSession down whenever
   /// the active device becomes `nil`. Launched once in `register`.

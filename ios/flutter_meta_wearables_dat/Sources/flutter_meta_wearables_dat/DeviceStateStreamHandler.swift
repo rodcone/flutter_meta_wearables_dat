@@ -42,9 +42,14 @@ class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
   /// `ActiveDeviceStreamHandler.restartMonitoring()`; the `!isMonitoring` guard
   /// also keeps us from a rapid cancel+resubscribe of `deviceStateStream(for:)`
   /// for a still-active device (which the SDK answers with an empty stream).
-  func restartMonitoring() {
+  ///
+  /// Pass `force: true` when the plugin has swapped its `AutoDeviceSelector`
+  /// so the loop re-binds to the new instance. The rapid-resubscribe hazard
+  /// doesn't apply there: the selector is only swapped while it reports no
+  /// active device, so no inner `deviceStateStream(for:)` subscription exists.
+  func restartMonitoring(force: Bool = false) {
     guard eventSink != nil else { return }
-    guard !isMonitoring else { return }
+    if !force, isMonitoring { return }
     startMonitoring()
   }
 

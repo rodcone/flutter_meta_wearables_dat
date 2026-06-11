@@ -45,9 +45,13 @@ class ActiveDeviceStreamHandler: NSObject, FlutterStreamHandler {
   /// channel on returning from Meta AI; without it the loop stays dead and the
   /// active-device boolean never flips back to `true`. Idempotent — a no-op
   /// when there is no Dart subscriber or the loop is already healthy.
-  func restartMonitoring() {
+  ///
+  /// Pass `force: true` when the plugin has swapped its `AutoDeviceSelector`:
+  /// a healthy-looking loop may still be attached to the old (blind) selector
+  /// instance, so it must be relaunched to pick up the new one.
+  func restartMonitoring(force: Bool = false) {
     guard eventSink != nil else { return }
-    guard !isMonitoring else { return }
+    if !force, isMonitoring { return }
     startMonitoring()
   }
 
