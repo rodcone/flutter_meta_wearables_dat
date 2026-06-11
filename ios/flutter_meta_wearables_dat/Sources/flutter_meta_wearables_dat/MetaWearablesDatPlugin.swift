@@ -148,6 +148,31 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         capturePhoto(call: call, result: result)
       case "getRegistrationState":
         getRegistrationState(result: result)
+      case "describeDevices":
+        // Debug snapshot of what the SDK currently sees. `activeDevice == nil`
+        // with a non-empty `devices` list means the selector filtered them
+        // (e.g. incompatible — DAT app on the glasses needs an update);
+        // an empty list means discovery never surfaced anything
+        // (registration / Bluetooth / manifest).
+        Task { @MainActor in
+          let devices: [[String: Any]] = Wearables.shared.devices.map { id in
+            guard let device = Wearables.shared.deviceForIdentifier(id) else {
+              return ["identifier": String(describing: id), "resolved": false]
+            }
+            return [
+              "identifier": String(describing: id),
+              "resolved": true,
+              "name": device.nameOrId(),
+              "linkState": String(describing: device.linkState),
+              "compatibility": String(describing: device.compatibility()),
+            ]
+          }
+          result([
+            "devices": devices,
+            "activeDevice": self.deviceSelector.activeDevice
+              .map { String(describing: $0) } as Any,
+          ])
+        }
       case "enableBackgroundStreaming":
         enableBackgroundStreaming(result: result)
       case "disableBackgroundStreaming":

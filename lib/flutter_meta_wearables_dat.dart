@@ -603,6 +603,21 @@ class MetaWearablesDat {
     return registrationState;
   }
 
+  /// Debug snapshot of the devices the SDK currently sees — identifiers,
+  /// link state, and compatibility — plus the device selector's current pick.
+  ///
+  /// `activeDeviceStream()` reporting no device means the selector's
+  /// *filtered* list is empty. This shows the raw list so you can tell
+  /// "no devices discovered at all" (registration / Bluetooth / manifest
+  /// issue) apart from "device present but filtered out" (e.g.
+  /// `compatibility: deviceUpdateRequired` — the DAT app on the glasses
+  /// needs an update; see [openDATGlassesAppUpdate]).
+  ///
+  /// iOS only for now; throws a `MissingPluginException` on Android.
+  static Future<Map<String, dynamic>> describeDevices() {
+    return MetaWearablesDatPlatform.instance.describeDevices();
+  }
+
   /// Stream of registration state changes.
   static Stream<RegistrationState> registrationStateStream() {
     final registrationStateStream = MetaWearablesDatPlatform.instance

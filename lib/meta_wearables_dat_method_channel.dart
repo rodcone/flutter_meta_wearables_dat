@@ -212,6 +212,17 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
+  Future<Map<String, dynamic>> describeDevices() async {
+    final value = await methodChannel.invokeMethod<Map<Object?, Object?>>(
+      'describeDevices',
+    );
+    if (value == null) {
+      return <String, dynamic>{};
+    }
+    return value.map((key, dynamic v) => MapEntry(key.toString(), v));
+  }
+
+  @override
   Stream<RegistrationState> registrationStateStream() {
     return eventChannel.receiveBroadcastStream().map((dynamic event) {
       final state = RegistrationState.fromInt(event as int);
