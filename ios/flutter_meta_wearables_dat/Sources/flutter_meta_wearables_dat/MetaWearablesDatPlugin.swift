@@ -38,7 +38,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Stream session state (single session at a time)
   private var streamSession: MWDATCamera.Stream?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
-  private var errorListenerToken: (any MWDATCore.AnyListenerToken)?
   private var frameCounter: Int = 0
   private var currentTargetFPS: Double = 30.0
   private var lastFrameSendTime: Date?
@@ -60,10 +59,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var activeDeviceHandler: ActiveDeviceStreamHandler?
   private var deviceStateHandler: DeviceStateStreamHandler?
 
-  // Background streaming — opt-in AVAudioSession keep-alive + software
-  // decoder mode. When enabled, the plugin keeps the decoder alive across
-  // foreground/background transitions and keeps emitting frames to the
-  // video_frames event channel regardless of UI visibility.
+  // Background streaming — opt-in AVAudioSession keep-alive. When enabled, the
+  // plugin keeps emitting frames to the video_frames event channel regardless
+  // of UI visibility. The hardware HEVC decoder is still invalidated on
+  // background entry and recreated on foreground (iOS forbids GPU access from
+  // backgrounded apps).
   private let backgroundController = BackgroundStreamingController()
   private let videoFrameHandler = VideoFrameStreamHandler()
 
@@ -159,31 +159,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         capturePhoto(call: call, result: result)
       case "getRegistrationState":
         getRegistrationState(result: result)
-      case "describeDevices":
-        // Debug snapshot of what the SDK currently sees. `activeDevice == nil`
-        // with a non-empty `devices` list means the selector filtered them
-        // (e.g. incompatible — DAT app on the glasses needs an update);
-        // an empty list means discovery never surfaced anything
-        // (registration / Bluetooth / manifest).
-        Task { @MainActor in
-          let devices: [[String: Any]] = Wearables.shared.devices.map { id in
-            guard let device = Wearables.shared.deviceForIdentifier(id) else {
-              return ["identifier": String(describing: id), "resolved": false]
-            }
-            return [
-              "identifier": String(describing: id),
-              "resolved": true,
-              "name": device.nameOrId(),
-              "linkState": String(describing: device.linkState),
-              "compatibility": String(describing: device.compatibility()),
-            ]
-          }
-          result([
-            "devices": devices,
-            "activeDevice": self.deviceSelector.activeDevice
-              .map { String(describing: $0) } as Any,
-          ])
-        }
       case "enableBackgroundStreaming":
         enableBackgroundStreaming(result: result)
       case "disableBackgroundStreaming":
@@ -592,10 +567,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       await token.cancel()
       videoListenerToken = nil
     }
-    if let token = errorListenerToken {
-      await token.cancel()
-      errorListenerToken = nil
-    }
     streamStateHandler.session = nil
     streamErrorHandler.session = nil
     if let session = streamSession {
@@ -910,10 +881,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return
       }
 
-      // 4. Wire listeners.
-      errorListenerToken = session.errorPublisher.listen { error in
-        NSLog("[MWDAT] Stream error: \(error)")
-      }
+      // 4. Wire listeners. Stream errors are forwarded to Dart by
+      // `streamErrorHandler` once its `session` is set below.
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         self.processAndSendFrame(videoFrame)

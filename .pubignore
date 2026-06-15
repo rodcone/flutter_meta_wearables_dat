@@ -20,6 +20,15 @@
 /install-skills.sh
 /scripts/
 
+# Maintainer / AI-assistant docs — not needed inside the published package.
+# CLAUDE.md is internal maintainer guidance; AGENTS.md + agent/ are consumer
+# AI configs that install-skills.sh copies from the GitHub tarball, not from
+# the pub archive; llms.txt is a maintainer aid. Anchored to this directory.
+/CLAUDE.md
+/AGENTS.md
+/agent/
+/llms.txt
+
 # Editor / OS / build noise
 .DS_Store
 *.DS_Store

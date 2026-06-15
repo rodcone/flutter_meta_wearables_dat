@@ -85,10 +85,6 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     );
   }
 
-  Future<Map<String, dynamic>> describeDevices() {
-    throw UnimplementedError('describeDevices() has not been implemented.');
-  }
-
   Stream<RegistrationState> registrationStateStream() {
     throw UnimplementedError(
       'registrationStateStream() has not been implemented.',

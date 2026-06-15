@@ -29,10 +29,6 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         return nil
     }
 
-    func dispose() {
-        sinkQueue.sync { eventSink = nil }
-    }
-
     // MARK: - Emission
 
     /// Emit a decoded raw BGRA pixel buffer. Caller passes the already-locked
@@ -42,7 +38,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         pixelBuffer: CVPixelBuffer,
         ptsUs: Int64
     ) {
-        guard let sink = eventSink else { return }
+        guard eventSink != nil else { return }
 
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
@@ -68,7 +64,6 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         sinkQueue.async { [weak self] in
             self?.eventSink?(payload)
         }
-        _ = sink // silence unused-capture
     }
 
     /// Emit a compressed hvc1 sample buffer. Extracts the CMBlockBuffer bytes

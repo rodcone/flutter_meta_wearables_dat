@@ -90,6 +90,10 @@ class MetaWearablesDatMockDevice {
   ///
   /// Use together with [configure] to test permission-gated code paths
   /// (e.g. granted vs denied).
+  ///
+  /// **iOS only.** The Android mock SDK has no programmatic
+  /// permission-injection hook, so this is a no-op there (returns `true`
+  /// without changing any state).
   static Future<bool> setPermission(
     Permission permission,
     PermissionStatus status,
@@ -102,6 +106,10 @@ class MetaWearablesDatMockDevice {
 
   /// Configures the result that a subsequent `requestPermission` call will
   /// return for a given [permission] on mock devices.
+  ///
+  /// **iOS only.** The Android mock SDK has no programmatic
+  /// permission-injection hook, so this is a no-op there (returns `true`
+  /// without changing any state).
   static Future<bool> setPermissionRequestResult(
     Permission permission,
     PermissionStatus status,

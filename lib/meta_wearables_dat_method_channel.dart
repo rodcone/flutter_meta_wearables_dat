@@ -102,20 +102,8 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
 
   @override
   Future<bool> startRegistration() async {
-    try {
-      final ok = await methodChannel.invokeMethod<bool>('startRegistration');
-      return ok ?? false;
-    } on PlatformException catch (e) {
-      if (e.code == 'REGISTRATION_ERROR') {
-        // Re-throw with more context if needed, or handle specific error codes
-        throw PlatformException(
-          code: e.code,
-          message: e.message,
-          details: e.details,
-        );
-      }
-      rethrow;
-    }
+    final ok = await methodChannel.invokeMethod<bool>('startRegistration');
+    return ok ?? false;
   }
 
   @override
@@ -209,17 +197,6 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   Future<RegistrationState> getRegistrationState() async {
     final value = await methodChannel.invokeMethod<int>('getRegistrationState');
     return RegistrationState.fromInt(value ?? 0);
-  }
-
-  @override
-  Future<Map<String, dynamic>> describeDevices() async {
-    final value = await methodChannel.invokeMethod<Map<Object?, Object?>>(
-      'describeDevices',
-    );
-    if (value == null) {
-      return <String, dynamic>{};
-    }
-    return value.map((key, dynamic v) => MapEntry(key.toString(), v));
   }
 
   @override
