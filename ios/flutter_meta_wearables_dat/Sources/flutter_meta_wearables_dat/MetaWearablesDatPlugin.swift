@@ -23,6 +23,17 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // `.started` (instead of a fabricated `noEligibleDevice`). Cleared at the
   // start of every `ensureDeviceSessionStarted` attempt.
   private var lastDeviceSessionError: DeviceSessionError?
+  // Upper bound on how long `ensureDeviceSessionStarted` waits for a session to
+  // reach `.started`. `stateStream()` has no deadline of its own, so a session
+  // the SDK leaves in a non-terminal state forever would otherwise hang the
+  // awaiting Dart future indefinitely.
+  private let deviceSessionStartTimeout: TimeInterval = 20.0
+  // Timestamp of the last `AutoDeviceSelector` rebuild (see
+  // `rebuildDeviceSelectorIfBlind`). A freshly-rebuilt selector needs a moment
+  // to discover devices; this debounces back-to-back rebuilds so we don't
+  // discard a still-discovering selector and prolong the no-device window.
+  private var lastSelectorRebuild: Date?
+  private let selectorRebuildCooldown: TimeInterval = 3.0
 
   // Stream session state (single session at a time)
   private var streamSession: MWDATCamera.Stream?
@@ -408,10 +419,24 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     guard deviceSelector.activeDevice == nil else {
       return false
     }
+    // Debounce: a just-rebuilt selector hasn't had time to discover the active
+    // device yet, so it still reports `activeDevice == nil`. The example app
+    // calls `restartActiveDeviceMonitoring` twice in quick succession on a
+    // fresh registration (the registration-state transition plus `handleUrl`'s
+    // finally), and registration bursts can fire it more. Without this guard
+    // each call would discard the previous selector mid-discovery, restarting
+    // discovery from scratch and prolonging the very no-device window the
+    // rebuild exists to fix. The cooldown still allows a genuine retry later if
+    // the new selector is itself slow to discover.
+    if let last = lastSelectorRebuild,
+       Date().timeIntervalSince(last) < selectorRebuildCooldown {
+      return false
+    }
     // Any idle/stopped leftover session is bound to the old selector — drop
     // it so the next startStreamSession creates against the fresh one.
     await teardownDeviceSession()
     deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
+    lastSelectorRebuild = Date()
     startDeviceAvailabilityMonitoring()
     return true
   }
@@ -455,21 +480,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // Capture the state stream BEFORE start() so we don't miss transitions.
       let stateStream = session.stateStream()
       try session.start()
-
-      for await state in stateStream {
-        if state == .started {
-          return session
-        }
-        if state == .stopped {
-          // Terminal failure before ever reaching .started — surface the
-          // genuine error from the session's errorStream when we saw one.
-          deviceSession = nil
-          throw lastDeviceSessionError ?? DeviceSessionError.noEligibleDevice
-        }
-      }
-      // Stream ended without reaching .started
-      deviceSession = nil
-      throw DeviceSessionError.unexpectedError(description: "Device session state stream ended before reaching .started")
+      return try await awaitSessionStarted(session, stateStream: stateStream)
     }
 
     // Session exists but not yet `.started`.
@@ -481,19 +492,65 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if session.state == .idle {
       // A previous start() threw (e.g. noEligibleDevice while the device was
       // still connecting) and left the session `.idle`. The SDK documents
-      // start() as retryable from `.idle` — without this, the `for await`
-      // below would hang forever on a session nothing ever starts, wedging
-      // every subsequent startStreamSession call.
+      // start() as retryable from `.idle` — without this, the wait below would
+      // hang forever on a session nothing ever starts, wedging every
+      // subsequent startStreamSession call.
       try session.start()
     }
-    for await state in stateStream {
-      if state == .started { return session }
-      if state == .stopped {
-        deviceSession = nil
-        throw lastDeviceSessionError ?? DeviceSessionError.noEligibleDevice
+    return try await awaitSessionStarted(session, stateStream: stateStream)
+  }
+
+  /// Waits for `session` to reach `.started`, racing the device session's
+  /// `stateStream` against `deviceSessionStartTimeout`.
+  ///
+  /// The `.idle` retry in `ensureDeviceSessionStarted` re-kicks only one of the
+  /// non-terminal states the SDK can leave a session in (`.starting`,
+  /// `.paused`, `.stopping` also exist). `stateStream()` carries no deadline, so
+  /// without this timeout a session wedged in any of those states would hang
+  /// the awaiting Dart future forever — the exact failure class this changeset
+  /// set out to kill. On timeout the wedged session is torn down so the next
+  /// attempt starts from a clean slate rather than re-entering the same wait.
+  @MainActor
+  private func awaitSessionStarted(
+    _ session: DeviceSession,
+    stateStream: AsyncStream<DeviceSessionState>
+  ) async throws -> DeviceSession {
+    let timeout = deviceSessionStartTimeout
+    let outcome = await withTaskGroup(of: SessionWaitOutcome.self) { group in
+      group.addTask {
+        for await state in stateStream {
+          if state == .started { return .started }
+          if state == .stopped { return .stopped }
+        }
+        return .streamEnded
       }
+      group.addTask {
+        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        return .timedOut
+      }
+      let first = await group.next() ?? .streamEnded
+      group.cancelAll()
+      return first
     }
-    throw DeviceSessionError.unexpectedError(description: "Device session state stream ended")
+
+    switch outcome {
+    case .started:
+      return session
+    case .stopped:
+      // `observeDeviceSession` also reacts to `.stopped` and clears state; just
+      // drop our reference and surface the genuine error if one was seen.
+      deviceSession = nil
+      throw lastDeviceSessionError ?? DeviceSessionError.noEligibleDevice
+    case .timedOut:
+      // Nothing will advance a wedged session — stop it and cancel its
+      // observers so the next startStreamSession creates a fresh one.
+      await teardownDeviceSession()
+      throw lastDeviceSessionError ?? DeviceSessionError.unexpectedError(
+        description: "Device session did not reach .started within \(Int(timeout))s")
+    case .streamEnded:
+      deviceSession = nil
+      throw DeviceSessionError.unexpectedError(description: "Device session state stream ended before reaching .started")
+    }
   }
 
   /// Observes the DeviceSession's state and error streams so we can react to
@@ -958,4 +1015,14 @@ private enum StreamQuality {
   case high
   case medium
   case low
+}
+
+/// Result of racing a device session's state stream against the start timeout
+/// in `awaitSessionStarted`. Plain (no associated values) so it crosses the
+/// task-group boundary as a `Sendable` value without capturing the plugin.
+private enum SessionWaitOutcome: Sendable {
+  case started
+  case stopped
+  case timedOut
+  case streamEnded
 }
