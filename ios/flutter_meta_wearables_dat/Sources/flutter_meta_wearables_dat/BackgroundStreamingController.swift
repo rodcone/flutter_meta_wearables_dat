@@ -68,12 +68,6 @@ final class BackgroundStreamingController {
     )
     nc.addObserver(
       self,
-      selector: #selector(handleRouteChange(_:)),
-      name: AVAudioSession.routeChangeNotification,
-      object: nil
-    )
-    nc.addObserver(
-      self,
       selector: #selector(handleMediaServicesReset),
       name: AVAudioSession.mediaServicesWereResetNotification,
       object: nil
@@ -97,15 +91,6 @@ final class BackgroundStreamingController {
     @unknown default:
       break
     }
-  }
-
-  @objc private func handleRouteChange(_ notification: Notification) {
-    guard isEnabled,
-          let info = notification.userInfo,
-          let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
-          let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
-    else { return }
-    NSLog("[MWDAT] AVAudioSession route change: \(reason.rawValue)")
   }
 
   @objc private func handleMediaServicesReset() {

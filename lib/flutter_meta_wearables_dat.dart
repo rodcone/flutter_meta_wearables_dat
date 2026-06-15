@@ -113,7 +113,9 @@ class StreamSessionError {
   /// `internalError`, `deviceNotFound`, `deviceNotConnected`, `timeout`,
   /// `videoStreamingError`, `permissionDenied`, `hingesClosed`,
   /// `thermalCritical`, `thermalEmergency`, `peakPowerShutdown`,
-  /// `batteryCritical`.
+  /// `batteryCritical`. `deviceNotFound` is **iOS only** — the Android SDK's
+  /// `StreamError` has no equivalent case, so a not-found device surfaces as
+  /// `videoStreamingError` there.
   ///
   /// **Device-session codes** (originate from the SDK's `DeviceSessionError`,
   /// surfaced on the same channel so consumers don't need a second
@@ -491,9 +493,11 @@ class MetaWearablesDat {
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
   }) {
-    debugPrint(
-      '[MetaWearablesDAT] Starting stream session with device UUID: $deviceUUID, FPS: $fps, Stream quality: $streamQuality, Video codec: $videoCodec',
-    );
+    if (kDebugMode) {
+      debugPrint(
+        '[MetaWearablesDAT] Starting stream session with device UUID: $deviceUUID, FPS: $fps, Stream quality: $streamQuality, Video codec: $videoCodec',
+      );
+    }
     return MetaWearablesDatPlatform.instance.startStreamSession(
       deviceUUID,
       fps: fps,
@@ -512,9 +516,11 @@ class MetaWearablesDat {
     String? deviceUUID, {
     PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
   }) {
-    debugPrint(
-      '[MetaWearablesDAT] Capturing photo with device UUID: $deviceUUID, format: $format',
-    );
+    if (kDebugMode) {
+      debugPrint(
+        '[MetaWearablesDAT] Capturing photo with device UUID: $deviceUUID, format: $format',
+      );
+    }
     return MetaWearablesDatPlatform.instance.capturePhoto(
       deviceUUID,
       format: format,
@@ -599,23 +605,10 @@ class MetaWearablesDat {
   static Future<RegistrationState> getRegistrationState() async {
     final registrationState = await MetaWearablesDatPlatform.instance
         .getRegistrationState();
-    debugPrint('[MetaWearablesDAT] Registration state: $registrationState');
+    if (kDebugMode) {
+      debugPrint('[MetaWearablesDAT] Registration state: $registrationState');
+    }
     return registrationState;
-  }
-
-  /// Debug snapshot of the devices the SDK currently sees — identifiers,
-  /// link state, and compatibility — plus the device selector's current pick.
-  ///
-  /// `activeDeviceStream()` reporting no device means the selector's
-  /// *filtered* list is empty. This shows the raw list so you can tell
-  /// "no devices discovered at all" (registration / Bluetooth / manifest
-  /// issue) apart from "device present but filtered out" (e.g.
-  /// `compatibility: deviceUpdateRequired` — the DAT app on the glasses
-  /// needs an update; see [openDATGlassesAppUpdate]).
-  ///
-  /// iOS only for now; throws a `MissingPluginException` on Android.
-  static Future<Map<String, dynamic>> describeDevices() {
-    return MetaWearablesDatPlatform.instance.describeDevices();
   }
 
   /// Stream of registration state changes.
@@ -663,10 +656,12 @@ class MetaWearablesDat {
   /// keep-alive mechanism engages immediately.
   ///
   /// **iOS** — activates an `AVAudioSession` in `.playAndRecord` /
-  /// `.videoRecording` mode and switches the HEVC decoder to software so it
-  /// survives background/foreground transitions. The host app's `Info.plist`
-  /// must declare these `UIBackgroundModes`: `audio`, `bluetooth-central`,
-  /// `bluetooth-peripheral`, `external-accessory`.
+  /// `.videoRecording` mode to keep the process scheduled while backgrounded.
+  /// The hardware HEVC decoder is invalidated on background entry (iOS forbids
+  /// GPU access from backgrounded apps) and lazily recreated on the first frame
+  /// after foreground, so resume incurs a brief keyframe-wait stall. The host
+  /// app's `Info.plist` must declare these `UIBackgroundModes`: `audio`,
+  /// `bluetooth-central`, `bluetooth-peripheral`, `external-accessory`.
   ///
   /// **Android** — starts a foreground service with the given
   /// [androidNotification] and acquires a `PARTIAL_WAKE_LOCK`. The plugin

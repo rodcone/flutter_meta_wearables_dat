@@ -1,3 +1,7 @@
+## 0.5.3
+
+* Docs: clarify that `setPermission` / `setPermissionRequestResult` are iOS only — the Android mock SDK exposes no permission-injection hook, so they no-op there. Version aligned with the core package.
+
 ## 0.5.2
 
 * iOS: Add Swift Package Manager support alongside CocoaPods.

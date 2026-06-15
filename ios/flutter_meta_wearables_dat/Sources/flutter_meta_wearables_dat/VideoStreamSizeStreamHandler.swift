@@ -40,10 +40,4 @@ class VideoStreamSizeStreamHandler: NSObject, FlutterStreamHandler {
     lastWidth = 0
     lastHeight = 0
   }
-
-  func dispose() {
-    eventSink = nil
-    lastWidth = 0
-    lastHeight = 0
-  }
 }

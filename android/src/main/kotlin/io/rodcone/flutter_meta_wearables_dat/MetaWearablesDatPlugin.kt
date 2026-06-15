@@ -41,7 +41,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
@@ -137,7 +136,6 @@ class MetaWearablesDatPlugin :
     private var stream: Stream? = null
     private var sessionKey: String? = null
     private var videoJob: Job? = null
-    private var streamStateJob: Job? = null
     private var streamErrorJob: Job? = null
     private var deviceAvailabilityJob: Job? = null
     // Texture API — renders I420 frames to a SurfaceTexture
@@ -931,13 +929,6 @@ class MetaWearablesDatPlugin :
                             }
                         }
 
-                streamStateJob =
-                        scope.launch {
-                            newStream.state.collect { state ->
-                                Log.d(TAG, "Stream [$key] state: $state")
-                            }
-                        }
-
                 streamErrorJob =
                         scope.launch {
                             newStream.errorStream.collect { streamError ->
@@ -1094,7 +1085,10 @@ class MetaWearablesDatPlugin :
                                         is CaptureError.CaptureFailed -> "captureFailed"
                                     }
                             Log.e(TAG, "Photo capture failed: $errorCode - ${error.description}")
-                            streamSessionErrorStreamHandler?.sendError(errorCode, error.description)
+                            // Capture failure is returned to the awaiting Dart
+                            // caller via the method-channel error below; it is
+                            // not a stream-session error, so (matching iOS) it
+                            // is not pushed onto the stream_session_errors channel.
                             result.error("CAPTURE_PHOTO_FAILED", error.description, errorCode)
                         }
             } catch (e: Exception) {
@@ -1146,8 +1140,6 @@ class MetaWearablesDatPlugin :
     private fun teardownStreamOnly() {
         videoJob?.cancel()
         videoJob = null
-        streamStateJob?.cancel()
-        streamStateJob = null
         streamErrorJob?.cancel()
         streamErrorJob = null
         streamStateStreamHandler?.stream = null
