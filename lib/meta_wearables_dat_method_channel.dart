@@ -256,6 +256,22 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
+  Future<List<WearableDevice>> getDevices() async {
+    final raw = await methodChannel.invokeListMethod<dynamic>('getDevices');
+    if (raw == null) return <WearableDevice>[];
+    final devices = raw
+        .map(
+          (dynamic e) =>
+              WearableDevice.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+    if (kDebugMode) {
+      debugPrint('[MetaWearablesDAT] getDevices → ${devices.length} device(s)');
+    }
+    return devices;
+  }
+
+  @override
   Stream<VideoStreamSize> videoStreamSizeStream() {
     return videoStreamSizeEventChannel.receiveBroadcastStream().map((
       dynamic event,

@@ -109,6 +109,10 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     );
   }
 
+  Future<List<WearableDevice>> getDevices() {
+    throw UnimplementedError('getDevices() has not been implemented.');
+  }
+
   Stream<VideoStreamSize> videoStreamSizeStream() {
     throw UnimplementedError(
       'videoStreamSizeStream() has not been implemented.',

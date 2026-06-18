@@ -135,6 +135,13 @@ class MetaWearablesDatPlugin :
     private var session: DeviceSession? = null
     private var stream: Stream? = null
     private var sessionKey: String? = null
+
+    // Device the current (reusable) DeviceSession is bound to. Captured at
+    // session creation — from the auto-selector's pick *before* createSession,
+    // so a later A→B switch can't misattribute it — and cleared on session
+    // teardown. Combined with a live STREAMING check in `getDevices`, it tells
+    // which device is actually streaming.
+    @Volatile private var sessionDeviceId: String? = null
     private var videoJob: Job? = null
     private var streamErrorJob: Job? = null
     private var deviceAvailabilityJob: Job? = null
@@ -235,6 +242,7 @@ class MetaWearablesDatPlugin :
             "startRegistration" -> startRegistration(result)
             "disconnect" -> disconnect(result)
             "getRegistrationState" -> getRegistrationState(result)
+            "getDevices" -> getDevices(result)
             "getCameraPermissionStatus" -> getCameraPermissionStatus(result)
             "requestCameraPermission" -> requestCameraPermission(result)
             "handleUrl" -> handleUrl(call, result)
@@ -605,6 +613,121 @@ class MetaWearablesDatPlugin :
         }
     }
 
+    /**
+     * Returns a snapshot of all paired devices as a list of maps, decoded by
+     * `WearableDevice.fromMap` on the Dart side. Requires Bluetooth permissions
+     * (the SDK can't enumerate devices until initialized) — returns a
+     * `NOT_INITIALIZED` error otherwise rather than a misleading empty list.
+     *
+     * `isActive` = the shared auto-selector's current pick (what a new stream
+     * would bind to). `isStreamingDevice` = the device the *live* stream uses,
+     * gated on the stream's actual STREAMING state so a stale reference after
+     * an SDK-driven stop doesn't report a false positive.
+     */
+    private fun getDevices(result: Result) {
+        if (!btPermissionsGranted || application == null) {
+            result.error(
+                    "NOT_INITIALIZED",
+                    "Bluetooth permissions not granted; call requestAndroidPermissions() first.",
+                    null,
+            )
+            return
+        }
+        scope.launch {
+            try {
+                ensureWearablesInitialized()
+                val active = deviceSelector.activeDevice()?.identifier
+                val streaming =
+                        stream?.state?.value ==
+                                com.meta.wearable.dat.camera.types.StreamState.STREAMING
+                val sessionId = sessionDeviceId
+                val devices =
+                        Wearables.devices.value.mapNotNull { id ->
+                            val idStr = id.identifier
+                            if (idStr.isEmpty()) return@mapNotNull null
+                            val device = Wearables.devicesMetadata[id]?.value
+                            val isActive = idStr == active
+                            val isStreamingDevice = streaming && idStr == sessionId
+                            if (device != null) {
+                                mapOf<String, Any?>(
+                                        "id" to idStr,
+                                        "name" to device.name,
+                                        "deviceType" to deviceTypeCode(device.deviceType),
+                                        "linkState" to linkStateCode(device.linkState),
+                                        "compatibility" to
+                                                compatibilityCode(device.compatibility),
+                                        "supportsDisplay" to device.isDisplayCapable(),
+                                        "isActive" to isActive,
+                                        "isStreamingDevice" to isStreamingDevice,
+                                        "firmwareInfo" to device.firmwareInfo,
+                                )
+                            } else {
+                                // Metadata unavailable — complete fallback so the
+                                // count still matches Wearables.devices.
+                                mapOf<String, Any?>(
+                                        "id" to idStr,
+                                        "name" to idStr,
+                                        "deviceType" to "unknown",
+                                        "linkState" to "unknown",
+                                        "compatibility" to "undefined",
+                                        "supportsDisplay" to false,
+                                        "isActive" to isActive,
+                                        "isStreamingDevice" to isStreamingDevice,
+                                        "firmwareInfo" to null,
+                                )
+                            }
+                        }
+                result.success(devices)
+            } catch (e: Exception) {
+                result.error(
+                        "GET_DEVICES_ERROR",
+                        e.message ?: "Failed to list devices.",
+                        null,
+                )
+            }
+        }
+    }
+
+    /** Canonical device-type code, kept identical to the iOS side. */
+    private fun deviceTypeCode(type: com.meta.wearable.dat.core.types.DeviceType): String {
+        return when (type) {
+            com.meta.wearable.dat.core.types.DeviceType.RAYBAN_META -> "rayBanMeta"
+            com.meta.wearable.dat.core.types.DeviceType.OAKLEY_META_HSTN -> "oakleyMetaHSTN"
+            com.meta.wearable.dat.core.types.DeviceType.OAKLEY_META_VANGUARD ->
+                    "oakleyMetaVanguard"
+            com.meta.wearable.dat.core.types.DeviceType.META_RAYBAN_DISPLAY ->
+                    "metaRayBanDisplay"
+            com.meta.wearable.dat.core.types.DeviceType.RAYBAN_META_OPTICS -> "rayBanMetaOptics"
+            com.meta.wearable.dat.core.types.DeviceType.UNKNOWN -> "unknown"
+            else -> "unknown"
+        }
+    }
+
+    /** Canonical link-state code, kept identical to the iOS side. */
+    private fun linkStateCode(state: com.meta.wearable.dat.core.types.LinkState): String {
+        return when (state) {
+            com.meta.wearable.dat.core.types.LinkState.DISCONNECTED -> "disconnected"
+            com.meta.wearable.dat.core.types.LinkState.CONNECTING -> "connecting"
+            com.meta.wearable.dat.core.types.LinkState.CONNECTED -> "connected"
+            else -> "unknown"
+        }
+    }
+
+    /** Canonical compatibility code, kept identical to the iOS side. */
+    private fun compatibilityCode(
+            compatibility: com.meta.wearable.dat.core.types.DeviceCompatibility
+    ): String {
+        return when (compatibility) {
+            com.meta.wearable.dat.core.types.DeviceCompatibility.UNDEFINED -> "undefined"
+            com.meta.wearable.dat.core.types.DeviceCompatibility.COMPATIBLE -> "compatible"
+            com.meta.wearable.dat.core.types.DeviceCompatibility.DEVICE_UPDATE_REQUIRED ->
+                    "deviceUpdateRequired"
+            com.meta.wearable.dat.core.types.DeviceCompatibility.SDK_UPDATE_REQUIRED ->
+                    "sdkUpdateRequired"
+            else -> "undefined"
+        }
+    }
+
     private fun getRegistrationState(result: Result) {
         try {
             ensureWearablesInitialized()
@@ -964,10 +1087,17 @@ class MetaWearablesDatPlugin :
             }
         }
 
+        // Capture the auto-selector's current pick *before* createSession so a
+        // later A→B switch can't misattribute which device this session bound.
+        val candidate = deviceSelector.activeDevice()?.identifier
         var created: DeviceSession? = null
         Wearables.createSession(deviceSelector)
-                .onSuccess { created = it }
+                .onSuccess {
+                    created = it
+                    sessionDeviceId = candidate
+                }
                 .onFailure { error, _ ->
+                    sessionDeviceId = null
                     val identifier = error.description.lowercase()
                     val code =
                             when {
@@ -1179,6 +1309,7 @@ class MetaWearablesDatPlugin :
             Log.w(TAG, "Error stopping session: ${e.message}")
         }
         session = null
+        sessionDeviceId = null
     }
 
     // endregion
