@@ -16,14 +16,26 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // `makeDeviceSelector()` at every construction site so a blind rebuild
   // can't silently drop the pin.
   private var pinnedDeviceId: DeviceIdentifier?
-  // Shared selector: `SpecificDeviceSelector` when pinned, else
-  // `AutoDeviceSelector`. Lazy so it isn't built on the init path.
-  private lazy var deviceSelector: any DeviceSelector = makeDeviceSelector()
+  // Shared selector. When pinned, an `AutoDeviceSelector` *constrained by a
+  // filter* to the chosen device — NOT a `SpecificDeviceSelector`, whose iOS
+  // `activeDeviceStream()` emits once then completes (which would stop the
+  // availability watchdog from ever observing the pinned device disconnect).
+  // A filtered `AutoDeviceSelector` keeps a continuous stream that emits nil
+  // when the pinned device drops. Lazy so it isn't built on the init path.
+  private lazy var deviceSelector: AutoDeviceSelector = makeDeviceSelector()
   /// Builds the shared selector honoring `pinnedDeviceId`.
-  private func makeDeviceSelector() -> any DeviceSelector {
-    pinnedDeviceId.map { SpecificDeviceSelector(device: $0) }
-      ?? AutoDeviceSelector(wearables: Wearables.shared)
+  private func makeDeviceSelector() -> AutoDeviceSelector {
+    guard let id = pinnedDeviceId else {
+      return AutoDeviceSelector(wearables: Wearables.shared)
+    }
+    return AutoDeviceSelector(
+      wearables: Wearables.shared,
+      filter: { $0.identifier == id }
+    )
   }
+  // Guards concurrent startStreamSession calls: a second start that tore down
+  // the first's in-flight session would leave the first awaiting `.started`.
+  private var isStartingSession = false
   private var deviceSession: DeviceSession?
   private var deviceSessionStateTask: Task<Void, Never>?
   private var deviceSessionErrorTask: Task<Void, Never>?
@@ -827,20 +839,35 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let requestedDeviceId = args["deviceId"] as? String
 
     Task { @MainActor in
-      // If a stream is already active: re-requesting the same selection returns
-      // the existing texture; requesting a *different* device must stop first —
-      // don't silently keep streaming the old one.
-      if streamSession != nil {
-        if requestedDeviceId == pinnedDeviceId {
-          if let texId = textureId {
-            result(texId)
-          } else {
-            result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
-          }
-        } else {
-          result(FlutterError(code: "STREAM_ACTIVE", message: "A stream is already active on another device. Stop it before switching devices.", details: nil))
-        }
+      // Reject a concurrent start: a second start that tears down the first's
+      // in-flight session (on a pin change) would leave the first awaiting
+      // `.started` forever.
+      if isStartingSession {
+        result(FlutterError(code: "STREAM_ACTIVE", message: "A stream start is already in progress.", details: nil))
         return
+      }
+      isStartingSession = true
+      defer { isStartingSession = false }
+
+      // A non-nil `streamSession` only counts as active if it's not terminal:
+      // the SDK can stop a stream (hinges, thermal) without clearing our
+      // reference, so check the actual state. Same selection → return the
+      // existing texture; a *different* device → caller must stop first.
+      if let existing = streamSession {
+        if existing.state != .stopped && existing.state != .stopping {
+          if requestedDeviceId == pinnedDeviceId {
+            if let texId = textureId {
+              result(texId)
+            } else {
+              result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
+            }
+          } else {
+            result(FlutterError(code: "STREAM_ACTIVE", message: "A stream is already active on another device. Stop it before switching devices.", details: nil))
+          }
+          return
+        }
+        // Stale (stopped/stopping) stream — drop the reference and recreate.
+        await teardownStreamOnly()
       }
 
       // Apply a pin change (or clear) before creating the session: rebuild the

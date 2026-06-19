@@ -164,6 +164,10 @@ class MetaWearablesDatPlugin :
     // teardown. Combined with a live STREAMING check in `getDevices`, it tells
     // which device is actually streaming.
     @Volatile private var sessionDeviceId: String? = null
+
+    // Guards concurrent startStreamSession calls: a second start that tore down
+    // the first's in-flight session would leave the first awaiting STARTED.
+    @Volatile private var startInProgress = false
     private var videoJob: Job? = null
     private var streamErrorJob: Job? = null
     private var deviceAvailabilityJob: Job? = null
@@ -978,29 +982,57 @@ class MetaWearablesDatPlugin :
             Log.d(TAG, "videoCodec '$videoCodec' ignored on Android (only raw I420 supported)")
         }
 
-        // If a Stream is already active: re-requesting the same selection returns
-        // the existing texture; a *different* device must stop first.
-        if (stream != null) {
-            if (deviceId == pinnedDeviceId) {
-                val entry = textureEntry
-                if (entry != null) {
-                    result.success(entry.id())
+        // A non-nil `stream` only counts as active if it's not terminal: the SDK
+        // can stop a stream (hinges, thermal) without clearing our reference.
+        // Same selection → return the existing texture; a *different* device →
+        // caller must stop first; a stale (terminal) stream is torn down and
+        // recreated below.
+        val existingStream = stream
+        if (existingStream != null) {
+            val st = existingStream.state.value
+            val live =
+                    st != com.meta.wearable.dat.camera.types.StreamState.STOPPED &&
+                            st !=
+                                    com.meta.wearable.dat.camera.types.StreamState
+                                            .STOPPING &&
+                            st != com.meta.wearable.dat.camera.types.StreamState.CLOSED
+            if (live) {
+                if (deviceId == pinnedDeviceId) {
+                    val entry = textureEntry
+                    if (entry != null) {
+                        result.success(entry.id())
+                    } else {
+                        result.error(
+                                "TEXTURE_REGISTRATION_FAILED",
+                                "No texture registered for session $key",
+                                null,
+                        )
+                    }
                 } else {
                     result.error(
-                            "TEXTURE_REGISTRATION_FAILED",
-                            "No texture registered for session $key",
+                            "STREAM_ACTIVE",
+                            "A stream is already active on another device. Stop it before switching devices.",
                             null,
                     )
                 }
-            } else {
-                result.error(
-                        "STREAM_ACTIVE",
-                        "A stream is already active on another device. Stop it before switching devices.",
-                        null,
-                )
+                return
             }
+            // Stale (terminal) stream — drop it and recreate below.
+            teardownStreamOnly()
+        }
+
+        // Reject a concurrent start: a second start that tore down the first's
+        // in-flight session (on a pin change) would leave the first awaiting
+        // STARTED forever.
+        if (startInProgress) {
+            result.error(
+                    "STREAM_ACTIVE",
+                    "A stream start is already in progress.",
+                    null,
+            )
             return
         }
+        startInProgress = true
 
         scope.launch {
             try {
@@ -1124,6 +1156,8 @@ class MetaWearablesDatPlugin :
                 Log.e(TAG, "Failed to start stream session", e)
                 teardownStreamOnly()
                 result.error("STREAM_ERROR", e.message ?: "Failed to start stream session.", null)
+            } finally {
+                startInProgress = false
             }
         }
     }
@@ -1181,9 +1215,17 @@ class MetaWearablesDatPlugin :
                     }
                 }
 
-        // Wait until the session transitions to STARTED before we try to add
-        // a stream — mirrors the reference app pattern.
-        newSession.state.first { it == DeviceSessionState.STARTED }
+        // Wait until the session transitions to STARTED before we try to add a
+        // stream — mirrors the reference app pattern. Also bail on a terminal
+        // STOPPED so a session torn down underneath us can't hang the awaiter.
+        val reached =
+                newSession.state.first {
+                    it == DeviceSessionState.STARTED || it == DeviceSessionState.STOPPED
+                }
+        if (reached != DeviceSessionState.STARTED) {
+            Log.w(TAG, "Session reached $reached before STARTED; aborting start")
+            return null
+        }
 
         // Subscribe to the active-device flow so we tear the Session down
         // when the device disappears. Safe to call multiple times.
