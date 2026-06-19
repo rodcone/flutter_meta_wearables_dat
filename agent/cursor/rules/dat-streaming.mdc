@@ -17,7 +17,7 @@ final textureId = await MetaWearablesDat.startStreamSession(
 ```
 
 ## Pinning a specific pair
-- Pass a `WearableDevice.id` from `getDevices()` as the first arg to stream from that exact pair (uses `SpecificDeviceSelector`); `null` auto-selects.
+- Pass a `WearableDevice.id` from `getDevices()` as the first arg to stream from that exact pair (implemented via `SpecificDeviceSelector` on Android and a filtered `AutoDeviceSelector` on iOS); `null` auto-selects.
 - Calling `startStreamSession` for a *different* device while one is already streaming throws a `PlatformException` `STREAM_ACTIVE` — stop the current stream first.
 
 ## Subscribe to state/errors BEFORE starting

@@ -63,8 +63,8 @@ class _StreamScreenState extends State<StreamScreen> {
                 error.isThermalCritical
                     ? Icons.thermostat
                     : isDatUpdate
-                        ? Icons.system_update
-                        : Icons.error_outline,
+                    ? Icons.system_update
+                    : Icons.error_outline,
                 color: Colors.white,
                 size: 20,
               ),
@@ -78,8 +78,8 @@ class _StreamScreenState extends State<StreamScreen> {
           duration: isTransient
               ? const Duration(seconds: 3)
               : isDatUpdate
-                  ? const Duration(seconds: 10)
-                  : const Duration(seconds: 6),
+              ? const Duration(seconds: 10)
+              : const Duration(seconds: 6),
           action: isDatUpdate
               ? SnackBarAction(
                   label: 'Update',
@@ -101,8 +101,11 @@ class _StreamScreenState extends State<StreamScreen> {
       stream_providers.StreamSessionProvider
     >(
       builder: (context, deviceProvider, mockDeviceProvider, streamProvider, child) {
-        // Use the actual active device status from the DAT SDK
-        final hasActiveDevice = streamProvider.hasActiveDevice;
+        // Whether Start is enabled for the current selection: in Automatic mode
+        // this is the active-device status; with a pair pinned it's that pair's
+        // connectivity, so you can switch to a connected pair even if a
+        // previously pinned pair has gone away.
+        final canStart = streamProvider.canStartSelected;
 
         return Stack(
           children: [
@@ -180,8 +183,10 @@ class _StreamScreenState extends State<StreamScreen> {
                   children: [
                     // Session state label
                     if (streamProvider.sessionState != null &&
-                        streamProvider.sessionState != StreamSessionState.streaming &&
-                        streamProvider.sessionState != StreamSessionState.stopped)
+                        streamProvider.sessionState !=
+                            StreamSessionState.streaming &&
+                        streamProvider.sessionState !=
+                            StreamSessionState.stopped)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 5),
                         child: Text(
@@ -195,7 +200,7 @@ class _StreamScreenState extends State<StreamScreen> {
                     // Show "Waiting for an active device" message when no device is available
                     // Always render it but control visibility with opacity (like native sample app)
                     Opacity(
-                      opacity: hasActiveDevice ? 0.0 : 1.0,
+                      opacity: canStart ? 0.0 : 1.0,
                       child: Padding(
                         padding: const EdgeInsets.only(bottom: 5),
                         child: Row(
@@ -222,11 +227,11 @@ class _StreamScreenState extends State<StreamScreen> {
                     if (!streamProvider.isStreaming)
                       MetaButton.text(
                         text: 'Start streaming',
-                        enabled: hasActiveDevice,
+                        enabled: canStart,
                         onPressed: () async {
                           unawaited(HapticFeedback.mediumImpact());
 
-                          if (!hasActiveDevice) return;
+                          if (!canStart) return;
 
                           final hasPermission = await deviceProvider
                               .ensureCameraPermission();
@@ -343,8 +348,7 @@ class _ThermalChip extends StatelessWidget {
     return switch (level) {
       ThermalLevel.unknown ||
       ThermalLevel.none ||
-      ThermalLevel.light =>
-        Colors.green.shade700,
+      ThermalLevel.light => Colors.green.shade700,
       ThermalLevel.moderate => Colors.amber.shade800,
       ThermalLevel.severe => Colors.orange.shade800,
       ThermalLevel.critical => Colors.red.shade700,

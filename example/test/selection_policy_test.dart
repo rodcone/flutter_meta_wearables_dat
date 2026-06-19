@@ -87,4 +87,51 @@ void main() {
       sp.dispose();
     },
   );
+
+  test('canStartSelected reflects the selected pair connectivity', () async {
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('flutter_meta_wearables_dat'),
+      (call) async {
+        if (call.method == 'getDevices') {
+          return <Object?>[
+            <Object?, Object?>{
+              'id': 'A',
+              'name': 'A',
+              'deviceType': 'rayBanMeta',
+              'linkState': 'connected',
+              'compatibility': 'compatible',
+              'supportsDisplay': false,
+              'isActive': false,
+              'isStreamingDevice': false,
+            },
+            <Object?, Object?>{
+              'id': 'B',
+              'name': 'B',
+              'deviceType': 'rayBanMeta',
+              'linkState': 'disconnected',
+              'compatibility': 'compatible',
+              'supportsDisplay': false,
+              'isActive': false,
+              'isStreamingDevice': false,
+            },
+          ];
+        }
+        return null;
+      },
+    );
+
+    final sp = build();
+    addTearDown(sp.dispose);
+    await sp.refreshDevices();
+
+    // No selection + no active device → Start disabled.
+    expect(sp.canStartSelected, isFalse);
+    // A connected pair selected → Start enabled even with no auto-active device
+    // (this is the deadlock fix: you can pick a connected pair to switch to).
+    sp.selectDevice('A');
+    expect(sp.canStartSelected, isTrue);
+    // A disconnected pair selected → Start disabled.
+    sp.selectDevice('B');
+    expect(sp.canStartSelected, isFalse);
+  });
 }

@@ -85,6 +85,20 @@ class StreamSessionProvider extends ChangeNotifier {
   /// or `null` for Automatic (SDK auto-selects).
   String? get selectedDeviceId => _selectedDeviceId;
 
+  /// Whether "Start" should be enabled for the current selection. In Automatic
+  /// mode (`selectedDeviceId == null`) this mirrors [hasActiveDevice]; with a
+  /// specific pair selected it reflects that pair's connectivity from the last
+  /// [refreshDevices] snapshot — so the user can switch to a connected pair
+  /// even while a previously pinned pair is gone (the native selector re-pins
+  /// on the next [startStreamSession], which is what makes that pair active).
+  bool get canStartSelected {
+    final id = _selectedDeviceId;
+    if (id == null) return _hasActiveDevice;
+    final match = _devices.where((d) => d.id == id);
+    if (match.isEmpty) return _hasActiveDevice;
+    return match.first.linkState == WearableLinkState.connected;
+  }
+
   /// Selects the device to stream from on the next start. `null` = Automatic.
   void selectDevice(String? id) {
     if (_selectedDeviceId == id) return;
