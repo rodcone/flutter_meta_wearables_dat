@@ -60,7 +60,7 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
   /// Starts a stream session. Returns a texture ID (int) for rendering
   /// via the Flutter `Texture` widget (zero-copy path).
   Future<int> startStreamSession(
-    String? deviceUUID, {
+    String? deviceId, {
     double fps = 30.0,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
@@ -68,12 +68,12 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     throw UnimplementedError('startStreamSession() has not been implemented.');
   }
 
-  Future<bool> stopStreamSession(String? deviceUUID) {
+  Future<bool> stopStreamSession(String? deviceId) {
     throw UnimplementedError('stopStreamSession() has not been implemented.');
   }
 
   Future<CapturedPhoto> capturePhoto(
-    String? deviceUUID, {
+    String? deviceId, {
     PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
   }) {
     throw UnimplementedError('capturePhoto() has not been implemented.');

@@ -1,7 +1,8 @@
 ## 0.6.0
-* New `getDevices()` returning `List<WearableDevice>` — enumerate the paired glasses with their `name`, model (`WearableDeviceType`), link state, compatibility, and display capability. `isStreamingDevice` flags the pair the current stream is actually using; `isActive` flags the pair the shared auto-selector would bind a *new* stream to (the two differ when more than one pair is connected). Use it to tell two pairs of the same model apart and see which one you're streaming from. Read-only — *selecting* (pinning) a specific pair is planned for a follow-up.
+* New `getDevices()` returning `List<WearableDevice>` — enumerate the paired glasses with their `name`, model (`WearableDeviceType`), link state, compatibility, and display capability. `isStreamingDevice` flags the pair the current stream is using; `isActive` flags the pair the shared auto-selector would bind a *new* stream to (the two differ when more than one pair is connected). Use it to tell two pairs of the same model apart.
+* **Device pinning** — `startStreamSession(deviceId)` now streams from a *specific* pair: pass a `WearableDevice.id` from `getDevices()` to pin it (via the SDK's `SpecificDeviceSelector`), or `null` to auto-select. Throws a `PlatformException` with code `STREAM_ACTIVE` if a *different* device is already streaming — stop it first. The positional `deviceUUID` parameter on `startStreamSession`/`stopStreamSession`/`capturePhoto` is renamed to `deviceId` (positional, so existing call sites are unaffected).
 * New types: `WearableDevice`, `WearableDeviceType`, `WearableLinkState`, `WearableCompatibility`. Non-breaking, drop-in addition.
-* Example app: a "Paired devices" sheet (devices button, top-right) lists every paired pair and marks the streaming / selected one.
+* Example app: a "Paired devices" sheet (devices button, top-right) lists every paired pair, marks the streaming pair, and lets you tap a pair (or "Automatic") to choose which one streams next.
 
 ## 0.5.3
 * iOS: Fix first-registration device discovery and a `startStreamSession` hang after a failed start; surface genuine session errors.

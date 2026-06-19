@@ -258,18 +258,19 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 
 ### 3. Session (After registration and permissions)
 - Once registered and permissions are granted, start a streaming session
-- Call `MetaWearablesDat.startStreamSession(deviceUUID)` — returns a `textureId`
+- Call `MetaWearablesDat.startStreamSession(deviceId)` — pass a `WearableDevice.id` from `getDevices()` to stream from a specific pair, or `null` to auto-select the active one. Returns a `textureId`
 - Render the live video feed using Flutter's `Texture` widget with the returned ID
 - Monitor session state via `MetaWearablesDat.streamSessionStateStream()`
 - Monitor errors via `MetaWearablesDat.streamSessionErrorStream()`
+- (Optional) Pin which pair streams by passing its `WearableDevice.id`; switching to a *different* pair while one is streaming throws a `PlatformException` with code `STREAM_ACTIVE` — stop the current stream first
 - (Optional) Monitor device thermal level via `MetaWearablesDat.deviceStateStream()` to warn the user *before* a thermal error stops the stream
 - (Optional) On `datAppOnTheGlassesUpdateRequired`, call `MetaWearablesDat.openDATGlassesAppUpdate()` to drive a "tap to update" UI
-- Call `MetaWearablesDat.stopStreamSession(deviceUUID)` to end the session
+- Call `MetaWearablesDat.stopStreamSession(deviceId)` to end the session
 
 ```dart
 // Start streaming — returns a texture ID for zero-copy rendering
 final textureId = await MetaWearablesDat.startStreamSession(
-  deviceUUID,
+  deviceId,
   fps: 24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw, // or VideoCodec.hvc1 (iOS only, supports background streaming)
@@ -313,12 +314,12 @@ for (final d in devices) {
 
 // Capture a photo during streaming
 final photo = await MetaWearablesDat.capturePhoto(
-  deviceUUID,
+  deviceId,
   format: PhotoCaptureFormat.jpeg, // or PhotoCaptureFormat.heic
 );
 
 // Stop streaming when done
-await MetaWearablesDat.stopStreamSession(deviceUUID);
+await MetaWearablesDat.stopStreamSession(deviceId);
 ```
 
 Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
@@ -353,10 +354,10 @@ await MetaWearablesDat.enableBackgroundStreaming(
   ),
 );
 
-final textureId = await MetaWearablesDat.startStreamSession(deviceUUID);
+final textureId = await MetaWearablesDat.startStreamSession(deviceId);
 
 // ...later, when you no longer need background execution:
-await MetaWearablesDat.stopStreamSession(deviceUUID);
+await MetaWearablesDat.stopStreamSession(deviceId);
 await MetaWearablesDat.disableBackgroundStreaming();
 ```
 

@@ -9,7 +9,7 @@ import MWDATCore
 /// an outer subscription to `activeDeviceStream()` and switches its inner
 /// subscription whenever the active device changes.
 class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
-  private let deviceSelectorProvider: @MainActor () -> AutoDeviceSelector
+  private let deviceSelectorProvider: @MainActor () -> any DeviceSelector
   private var outerTask: Task<Void, Never>?
   private var eventSink: FlutterEventSink?
   // See `ActiveDeviceStreamHandler`: the outer `activeDeviceStream()` loop dies
@@ -18,7 +18,7 @@ class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
   private var isMonitoring = false
   private var monitoringGeneration = 0
 
-  init(deviceSelectorProvider: @escaping @MainActor () -> AutoDeviceSelector) {
+  init(deviceSelectorProvider: @escaping @MainActor () -> any DeviceSelector) {
     self.deviceSelectorProvider = deviceSelectorProvider
     super.init()
   }

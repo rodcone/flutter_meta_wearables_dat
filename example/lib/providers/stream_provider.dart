@@ -41,7 +41,17 @@ class StreamSessionProvider extends ChangeNotifier {
   bool _refreshingDevices = false;
   bool _pendingDevicesRefresh = false;
 
+  // Device the user picked to stream from (a WearableDevice.id), or null for
+  // Automatic. Sole source of truth — null is reserved exclusively for
+  // Automatic, so the mock is pinned explicitly (see [syncMockSelection]).
+  String? _selectedDeviceId;
+  // Tracks the mock's UUID across pair/unpair so the selection can be
+  // reconciled without clobbering a real-pair choice.
+  String? _lastMockUUID;
+
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
+    _lastMockUUID = mockDeviceProvider.deviceUUID;
+    mockDeviceProvider.addListener(_onMockDeviceChanged);
     _initializeActiveDeviceMonitoring();
     _initializeDeviceStateMonitoring();
   }
@@ -70,6 +80,41 @@ class StreamSessionProvider extends ChangeNotifier {
 
   /// Human-readable error from the last [refreshDevices] call, or null.
   String? get devicesError => _devicesError;
+
+  /// The pair the next [startStreamSession] pins to (a [WearableDevice.id]),
+  /// or `null` for Automatic (SDK auto-selects).
+  String? get selectedDeviceId => _selectedDeviceId;
+
+  /// Selects the device to stream from on the next start. `null` = Automatic.
+  void selectDevice(String? id) {
+    if (_selectedDeviceId == id) return;
+    _selectedDeviceId = id;
+    notifyListeners();
+  }
+
+  void _onMockDeviceChanged() {
+    final current = mockDeviceProvider.deviceUUID;
+    if (current == _lastMockUUID) return;
+    syncMockSelection(mockId: current, previousMockId: _lastMockUUID);
+    _lastMockUUID = current;
+  }
+
+  /// Reconciles the selection when the mock device is paired/unpaired. Pinning
+  /// the mock explicitly keeps targeting deterministic (`null` stays reserved
+  /// for Automatic); unpairing only clears the selection when it still points
+  /// at the mock, so a real-pair selection made afterward is preserved.
+  @visibleForTesting
+  void syncMockSelection({
+    required String? mockId,
+    required String? previousMockId,
+  }) {
+    if (mockId == previousMockId) return;
+    if (mockId != null) {
+      selectDevice(mockId);
+    } else if (_selectedDeviceId == previousMockId) {
+      selectDevice(null);
+    }
+  }
 
   /// Current thermal level of the active device, or `null` if no device is
   /// active or the SDK hasn't reported a level yet. Updated live via
@@ -166,6 +211,7 @@ class StreamSessionProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    mockDeviceProvider.removeListener(_onMockDeviceChanged);
     _activeDeviceSubscription?.cancel();
     _sessionStateSubscription?.cancel();
     _sessionErrorSubscription?.cancel();
@@ -300,7 +346,7 @@ class StreamSessionProvider extends ChangeNotifier {
       // Start the stream session - deviceUUID is optional (uses AutoDeviceSelector if null).
       // Returns a texture ID for zero-copy rendering via the Flutter Texture widget.
       _textureId = await MetaWearablesDat.startStreamSession(
-        mockDeviceProvider.deviceUUID,
+        _selectedDeviceId,
         fps: _fps,
         streamQuality: _streamQuality,
         videoCodec: _videoCodec,
@@ -318,7 +364,7 @@ class StreamSessionProvider extends ChangeNotifier {
     unawaited(HapticFeedback.mediumImpact());
 
     try {
-      await MetaWearablesDat.stopStreamSession(mockDeviceProvider.deviceUUID);
+      await MetaWearablesDat.stopStreamSession(_selectedDeviceId);
       unawaited(_sessionStateSubscription?.cancel());
       _sessionStateSubscription = null;
       unawaited(_sessionErrorSubscription?.cancel());
@@ -361,7 +407,7 @@ class StreamSessionProvider extends ChangeNotifier {
   Future<CapturedPhoto?> capturePhoto() async {
     try {
       final photo = await MetaWearablesDat.capturePhoto(
-        mockDeviceProvider.deviceUUID,
+        _selectedDeviceId,
       );
       return photo;
     } catch (e) {

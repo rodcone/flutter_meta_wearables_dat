@@ -8,12 +8,22 @@ import VideoToolbox
 
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Device session (DAT 0.7.0): created lazily on first startStreamSession
-  // call using the shared AutoDeviceSelector. Kept alive across stream
-  // start/stop so toggling streaming is fast. Torn down only when the
-  // underlying device disappears or when the plugin is disabled.
-  private lazy var deviceSelector: AutoDeviceSelector = {
-    AutoDeviceSelector(wearables: Wearables.shared)
-  }()
+  // call using the shared selector. Kept alive across stream start/stop so
+  // toggling streaming is fast. Torn down only when the underlying device
+  // disappears or when the plugin is disabled.
+  //
+  // Identifier of the pinned device, or nil for auto-select. Honored by
+  // `makeDeviceSelector()` at every construction site so a blind rebuild
+  // can't silently drop the pin.
+  private var pinnedDeviceId: DeviceIdentifier?
+  // Shared selector: `SpecificDeviceSelector` when pinned, else
+  // `AutoDeviceSelector`. Lazy so it isn't built on the init path.
+  private lazy var deviceSelector: any DeviceSelector = makeDeviceSelector()
+  /// Builds the shared selector honoring `pinnedDeviceId`.
+  private func makeDeviceSelector() -> any DeviceSelector {
+    pinnedDeviceId.map { SpecificDeviceSelector(device: $0) }
+      ?? AutoDeviceSelector(wearables: Wearables.shared)
+  }
   private var deviceSession: DeviceSession?
   private var deviceSessionStateTask: Task<Void, Never>?
   private var deviceSessionErrorTask: Task<Void, Never>?
@@ -412,7 +422,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // Any idle/stopped leftover session is bound to the old selector — drop
     // it so the next startStreamSession creates against the fresh one.
     await teardownDeviceSession()
-    deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
+    deviceSelector = makeDeviceSelector()
     lastSelectorRebuild = Date()
     startDeviceAvailabilityMonitoring()
     return true
@@ -811,19 +821,39 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let videoCodecStr = args["videoCodec"] as? String ?? "raw"
     let videoCodec: MWDATCamera.VideoCodec = (videoCodecStr == "hvc1") ? .hvc1 : .raw
 
-    // `deviceUUID` is ignored in 0.6.0 — the plugin uses a single shared
-    // AutoDeviceSelector. The argument is kept for backward compatibility.
-    _ = args["deviceUUID"] as? String
+    // `deviceId` (a `WearableDevice.id` from getDevices) pins streaming to a
+    // specific pair; nil auto-selects. Applied below by rebuilding the shared
+    // selector.
+    let requestedDeviceId = args["deviceId"] as? String
 
     Task { @MainActor in
-      // Return existing texture if stream is already active.
+      // If a stream is already active: re-requesting the same selection returns
+      // the existing texture; requesting a *different* device must stop first —
+      // don't silently keep streaming the old one.
       if streamSession != nil {
-        if let texId = textureId {
-          result(texId)
+        if requestedDeviceId == pinnedDeviceId {
+          if let texId = textureId {
+            result(texId)
+          } else {
+            result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
+          }
         } else {
-          result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
+          result(FlutterError(code: "STREAM_ACTIVE", message: "A stream is already active on another device. Stop it before switching devices.", details: nil))
         }
         return
+      }
+
+      // Apply a pin change (or clear) before creating the session: rebuild the
+      // shared selector and rebind every observer (internal watchdog + the two
+      // event-channel handlers) so none keep watching the old selector.
+      if requestedDeviceId != pinnedDeviceId {
+        pinnedDeviceId = requestedDeviceId
+        await teardownDeviceSession()
+        deviceSelector = makeDeviceSelector()
+        lastSelectorRebuild = Date()
+        startDeviceAvailabilityMonitoring()
+        activeDeviceHandler?.restartMonitoring(force: true)
+        deviceStateHandler?.restartMonitoring(force: true)
       }
 
       guard let registry = textureRegistry else {

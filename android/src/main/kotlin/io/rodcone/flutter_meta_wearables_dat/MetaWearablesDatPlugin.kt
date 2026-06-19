@@ -123,9 +123,31 @@ class MetaWearablesDatPlugin :
 
     // Single shared device selector — mirrors reference app's WearablesViewModel pattern.
     // One instance is shared across device monitoring and stream session creation.
-    // Lazy init: constructing an `AutoDeviceSelector` before `Wearables.initialize()`
-    // crashes the plugin class load, which silently drops method-channel registration.
-    private val deviceSelector: DeviceSelector by lazy { AutoDeviceSelector() }
+    //
+    // Built lazily via [deviceSelector] only AFTER `Wearables.initialize()`:
+    // constructing an `AutoDeviceSelector`/`SpecificDeviceSelector` before init
+    // crashes the plugin class load, which silently drops method-channel
+    // registration. Hence a nullable holder + accessor, not `by lazy` (whose
+    // initializer could still run pre-init from a handler provider) or an eager
+    // field.
+    private var deviceSelectorRef: DeviceSelector? = null
+
+    // Identifier of the pinned device, or null for auto-select. Honored by
+    // [makeDeviceSelector] at every construction site so a rebuild can't
+    // silently drop the pin.
+    private var pinnedDeviceId: String? = null
+
+    /** Shared selector, built on first use (post-init) and cached. */
+    private fun deviceSelector(): DeviceSelector =
+            deviceSelectorRef ?: makeDeviceSelector().also { deviceSelectorRef = it }
+
+    /** Builds the shared selector honoring [pinnedDeviceId]. Call only post-init. */
+    private fun makeDeviceSelector(): DeviceSelector =
+            pinnedDeviceId?.let {
+                com.meta.wearable.dat.core.selectors.SpecificDeviceSelector(
+                        com.meta.wearable.dat.core.types.DeviceIdentifier(it)
+                )
+            } ?: AutoDeviceSelector()
 
     // Streaming state — the DAT SDK splits what was historically one
     // `StreamSession` into a `DeviceSession` (device lifecycle) and a `Stream`
@@ -163,7 +185,7 @@ class MetaWearablesDatPlugin :
                 )
         activeDeviceStreamHandler =
                 ActiveDeviceStreamHandler(
-                        { deviceSelector },
+                        { deviceSelector() },
                         { btPermissionsGranted },
                         { ensureWearablesInitialized() },
                 )
@@ -220,7 +242,7 @@ class MetaWearablesDatPlugin :
                 )
         deviceStateStreamHandler =
                 DeviceStateStreamHandler(
-                        deviceSelectorProvider = { deviceSelector },
+                        deviceSelectorProvider = { deviceSelector() },
                         isInitialized = { btPermissionsGranted },
                 )
         deviceStateChannel.setStreamHandler(deviceStateStreamHandler)
@@ -636,7 +658,7 @@ class MetaWearablesDatPlugin :
         scope.launch {
             try {
                 ensureWearablesInitialized()
-                val active = deviceSelector.activeDevice()?.identifier
+                val active = deviceSelector().activeDevice()?.identifier
                 val streaming =
                         stream?.state?.value ==
                                 com.meta.wearable.dat.camera.types.StreamState.STREAMING
@@ -933,26 +955,47 @@ class MetaWearablesDatPlugin :
             return
         }
 
+        // Guard: the SDK can't create a selector/session until initialized, and
+        // `ensureWearablesInitialized()` no-ops without BT permission. Bail with a
+        // defined error before any pin mutation / selector construction / texture.
+        if (!btPermissionsGranted) {
+            result.error(
+                    "NOT_INITIALIZED",
+                    "Bluetooth permissions not granted; call requestAndroidPermissions() first.",
+                    null,
+            )
+            return
+        }
+
         val args = call.arguments as? Map<*, *>
         val fps = (args?.get("fps") as? Double) ?: 30.0
         val streamQuality = parseStreamQuality(args?.get("streamQuality") as? String)
         val videoCodec = args?.get("videoCodec") as? String
-        val deviceUUID = args?.get("deviceUUID") as? String
-        val key = deviceUUID ?: "auto"
+        val deviceId = args?.get("deviceId") as? String
+        val key = deviceId ?: "auto"
 
         if (videoCodec != null && videoCodec != "raw") {
             Log.d(TAG, "videoCodec '$videoCodec' ignored on Android (only raw I420 supported)")
         }
 
-        // Fast path: a Stream is already attached to the current Session.
+        // If a Stream is already active: re-requesting the same selection returns
+        // the existing texture; a *different* device must stop first.
         if (stream != null) {
-            val entry = textureEntry
-            if (entry != null) {
-                result.success(entry.id())
+            if (deviceId == pinnedDeviceId) {
+                val entry = textureEntry
+                if (entry != null) {
+                    result.success(entry.id())
+                } else {
+                    result.error(
+                            "TEXTURE_REGISTRATION_FAILED",
+                            "No texture registered for session $key",
+                            null,
+                    )
+                }
             } else {
                 result.error(
-                        "TEXTURE_REGISTRATION_FAILED",
-                        "No texture registered for session $key",
+                        "STREAM_ACTIVE",
+                        "A stream is already active on another device. Stop it before switching devices.",
                         null,
                 )
             }
@@ -962,6 +1005,18 @@ class MetaWearablesDatPlugin :
         scope.launch {
             try {
                 ensureWearablesInitialized()
+
+                // Apply a pin change (or clear) before creating the session:
+                // rebuild the shared selector and rebind every observer. The
+                // availability watchdog is relaunched by ensureSessionStarted()
+                // below (it re-reads deviceSelector()).
+                if (deviceId != pinnedDeviceId) {
+                    pinnedDeviceId = deviceId
+                    teardownSession()
+                    deviceSelectorRef = makeDeviceSelector()
+                    activeDeviceStreamHandler?.restartMonitoring(force = true)
+                    deviceStateStreamHandler?.restartMonitoring(force = true)
+                }
 
                 sessionKey = key
                 frameProcessor.configure(fps)
@@ -1089,9 +1144,9 @@ class MetaWearablesDatPlugin :
 
         // Capture the auto-selector's current pick *before* createSession so a
         // later A→B switch can't misattribute which device this session bound.
-        val candidate = deviceSelector.activeDevice()?.identifier
+        val candidate = deviceSelector().activeDevice()?.identifier
         var created: DeviceSession? = null
-        Wearables.createSession(deviceSelector)
+        Wearables.createSession(deviceSelector())
                 .onSuccess {
                     created = it
                     sessionDeviceId = candidate
@@ -1141,7 +1196,7 @@ class MetaWearablesDatPlugin :
         if (deviceAvailabilityJob != null) return
         deviceAvailabilityJob =
                 scope.launch {
-                    deviceSelector.activeDeviceFlow().collect { device ->
+                    deviceSelector().activeDeviceFlow().collect { device ->
                         if (device == null && session != null) {
                             Log.d(TAG, "Active device lost — tearing down Session")
                             teardownSession()

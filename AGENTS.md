@@ -105,12 +105,12 @@ static Future<bool> restartActiveDeviceMonitoring()  // No-op on iOS
 
 // Streaming
 static Future<int> startStreamSession(
-  String? deviceUUID, {
+  String? deviceId, { // WearableDevice.id (getDevices) pins a pair; null = auto-select
   double fps = 30.0,
   StreamQuality streamQuality = StreamQuality.high,
   VideoCodec videoCodec = VideoCodec.raw,
-})  // Returns textureId for Texture widget
-static Future<bool> stopStreamSession(String? deviceUUID)
+})  // Returns textureId. Throws PlatformException 'STREAM_ACTIVE' if a different device is already streaming
+static Future<bool> stopStreamSession(String? deviceId)
 static Stream<StreamSessionState> streamSessionStateStream()
 static Stream<StreamSessionError> streamSessionErrorStream()
 static Stream<VideoStreamSize> videoStreamSizeStream()
@@ -134,7 +134,7 @@ static Future<bool> openDATGlassesAppUpdate()
 
 // Photo capture
 static Future<CapturedPhoto> capturePhoto(
-  String? deviceUUID, {
+  String? deviceId, {
   PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
 })
 

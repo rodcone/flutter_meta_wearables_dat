@@ -8,7 +8,7 @@ import MWDATCore
 /// moment to discover the active device, which produced spurious "waiting for
 /// an active device" states when Dart subscribed late in the app lifecycle.
 class ActiveDeviceStreamHandler: NSObject, FlutterStreamHandler {
-  private let deviceSelectorProvider: @MainActor () -> AutoDeviceSelector
+  private let deviceSelectorProvider: @MainActor () -> any DeviceSelector
   private var activeDeviceTask: Task<Void, Never>?
   private var eventSink: FlutterEventSink?
   // True while the `activeDeviceStream()` collection loop is running. The SDK
@@ -21,7 +21,7 @@ class ActiveDeviceStreamHandler: NSObject, FlutterStreamHandler {
   // defer from clearing `isMonitoring` out from under the live run.
   private var monitoringGeneration = 0
 
-  init(deviceSelectorProvider: @escaping @MainActor () -> AutoDeviceSelector) {
+  init(deviceSelectorProvider: @escaping @MainActor () -> any DeviceSelector) {
     self.deviceSelectorProvider = deviceSelectorProvider
     super.init()
   }
