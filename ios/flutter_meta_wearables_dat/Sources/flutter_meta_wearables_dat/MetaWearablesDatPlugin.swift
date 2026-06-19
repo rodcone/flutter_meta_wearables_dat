@@ -50,6 +50,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // the SDK leaves in a non-terminal state forever would otherwise hang the
   // awaiting Dart future indefinitely.
   private let deviceSessionStartTimeout: TimeInterval = 20.0
+  // After a pin change the shared selector is rebuilt and resolves its active
+  // device asynchronously; `createSession` against an unresolved selector
+  // returns `noEligibleDevice`. Bound how long we wait for the pinned device
+  // to resolve before attempting the session.
+  private let selectorResolveTimeout: TimeInterval = 8.0
   // Timestamp of the last `AutoDeviceSelector` rebuild (see
   // `rebuildDeviceSelectorIfBlind`). A freshly-rebuilt selector needs a moment
   // to discover devices; this debounces back-to-back rebuilds so we don't
@@ -873,7 +878,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // Apply a pin change (or clear) before creating the session: rebuild the
       // shared selector and rebind every observer (internal watchdog + the two
       // event-channel handlers) so none keep watching the old selector.
-      if requestedDeviceId != pinnedDeviceId {
+      let pinChanged = requestedDeviceId != pinnedDeviceId
+      if pinChanged {
         pinnedDeviceId = requestedDeviceId
         await teardownDeviceSession()
         deviceSelector = makeDeviceSelector()
@@ -881,6 +887,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         startDeviceAvailabilityMonitoring()
         activeDeviceHandler?.restartMonitoring(force: true)
         deviceStateHandler?.restartMonitoring(force: true)
+      }
+
+      // The just-rebuilt selector resolves its active device asynchronously;
+      // creating the session before it resolves returns `noEligibleDevice`.
+      // When a specific device is pinned, wait briefly for it to resolve.
+      if pinChanged, requestedDeviceId != nil {
+        let deadline = Date().addingTimeInterval(selectorResolveTimeout)
+        while deviceSelector.activeDevice == nil, Date() < deadline {
+          try? await Task.sleep(nanoseconds: 150_000_000)
+        }
       }
 
       guard let registry = textureRegistry else {

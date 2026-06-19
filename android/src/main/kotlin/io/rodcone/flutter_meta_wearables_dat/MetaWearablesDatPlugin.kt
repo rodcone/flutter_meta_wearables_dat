@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -1042,12 +1043,23 @@ class MetaWearablesDatPlugin :
                 // rebuild the shared selector and rebind every observer. The
                 // availability watchdog is relaunched by ensureSessionStarted()
                 // below (it re-reads deviceSelector()).
-                if (deviceId != pinnedDeviceId) {
+                val pinChanged = deviceId != pinnedDeviceId
+                if (pinChanged) {
                     pinnedDeviceId = deviceId
                     teardownSession()
                     deviceSelectorRef = makeDeviceSelector()
                     activeDeviceStreamHandler?.restartMonitoring(force = true)
                     deviceStateStreamHandler?.restartMonitoring(force = true)
+                }
+
+                // The just-rebuilt selector resolves its active device
+                // asynchronously; creating the session before it resolves
+                // returns noEligibleDevice. When a specific device is pinned,
+                // wait briefly for it to resolve.
+                if (pinChanged && deviceId != null) {
+                    withTimeoutOrNull(8_000L) {
+                        deviceSelector().activeDeviceFlow().first { it != null }
+                    }
                 }
 
                 sessionKey = key
