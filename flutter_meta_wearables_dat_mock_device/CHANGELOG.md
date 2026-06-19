@@ -1,3 +1,7 @@
+## 0.6.0
+
+* Version aligned with the core package's 0.6.0 release (read-only `getDevices()`). No mock-add-on API changes.
+
 ## 0.5.3
 
 * Docs: clarify that `setPermission` / `setPermissionRequestResult` are iOS only — the Android mock SDK exposes no permission-injection hook, so they no-op there. Version aligned with the core package.
