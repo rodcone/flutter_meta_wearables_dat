@@ -46,6 +46,9 @@ Communication:
 | `PhotoCaptureFormat` | `heic('heic')`, `jpeg('jpeg')` |
 | `FrameFormat` | `rawRgba`, `rawStraightRgba`, `png` |
 | `ThermalLevel` | `unknown(0)`, `none(1)`, `light(2)`, `moderate(3)`, `severe(4)`, `critical(5)`, `emergency(6)`, `shutdown(7)` |
+| `WearableDeviceType` | `rayBanMeta`, `oakleyMetaHSTN`, `oakleyMetaVanguard`, `metaRayBanDisplay`, `rayBanMetaOptics`, `unknown` |
+| `WearableLinkState` | `disconnected`, `connecting`, `connected`, `unknown` |
+| `WearableCompatibility` | `undefined`, `compatible`, `deviceUpdateRequired`, `sdkUpdateRequired` |
 
 ### Classes
 
@@ -59,6 +62,7 @@ Communication:
 | `VideoFrame` | `codec` (VideoCodec), `bytes` (Uint8List), `width`, `height`, `presentationTimestampUs`, `isKeyframe` |
 | `BackgroundNotification` | `title`, `text`, `channelId`, `channelName`, `iconResourceName?` (Android only) |
 | `DeviceState` | `thermalLevel` (ThermalLevel) |
+| `WearableDevice` | `id`, `name`, `type` (WearableDeviceType), `linkState` (WearableLinkState), `compatibility` (WearableCompatibility), `supportsDisplay`, `isActive`, `isStreamingDevice`, `firmwareInfo?` |
 
 ### Error codes (StreamSessionError)
 
@@ -96,6 +100,7 @@ static Future<bool> getCameraPermissionStatus()
 
 // Device monitoring
 static Stream<bool> activeDeviceStream()
+static Future<List<WearableDevice>> getDevices()  // paired glasses; isStreamingDevice/isActive flag the streaming/selected pair. Android throws NOT_INITIALIZED before BT permission
 static Future<bool> restartActiveDeviceMonitoring()  // No-op on iOS
 
 // Streaming

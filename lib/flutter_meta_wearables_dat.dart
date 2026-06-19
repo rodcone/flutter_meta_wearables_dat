@@ -221,6 +221,208 @@ class DeviceState {
   int get hashCode => thermalLevel.hashCode;
 }
 
+/// Hardware model of a paired Meta wearable, as reported by the DAT SDK.
+///
+/// Note that two pairs of the *same* model both report the same value here
+/// (e.g. two Ray-Ban Meta both report [rayBanMeta]) — use
+/// [WearableDevice.name] or [WearableDevice.id] to tell them apart.
+enum WearableDeviceType {
+  rayBanMeta('rayBanMeta'),
+  oakleyMetaHSTN('oakleyMetaHSTN'),
+  oakleyMetaVanguard('oakleyMetaVanguard'),
+  metaRayBanDisplay('metaRayBanDisplay'),
+  rayBanMetaOptics('rayBanMetaOptics'),
+
+  /// Model not reported, or a newer model this plugin version predates.
+  unknown('unknown');
+
+  const WearableDeviceType(this.code);
+
+  /// Canonical code sent over the platform channel (identical on iOS/Android).
+  final String code;
+
+  /// Converts a platform code to a [WearableDeviceType], defaulting to
+  /// [unknown] for missing/unrecognized values.
+  static WearableDeviceType fromCode(String? code) {
+    return WearableDeviceType.values.firstWhere(
+      (t) => t.code == code,
+      orElse: () => WearableDeviceType.unknown,
+    );
+  }
+}
+
+/// BLE link state of a paired wearable.
+enum WearableLinkState {
+  disconnected('disconnected'),
+  connecting('connecting'),
+  connected('connected'),
+
+  /// Link state not reported (e.g. SDK metadata not yet available).
+  unknown('unknown');
+
+  const WearableLinkState(this.code);
+
+  /// Canonical code sent over the platform channel.
+  final String code;
+
+  /// Converts a platform code to a [WearableLinkState], defaulting to
+  /// [unknown] for missing/unrecognized values.
+  static WearableLinkState fromCode(String? code) {
+    return WearableLinkState.values.firstWhere(
+      (s) => s.code == code,
+      orElse: () => WearableLinkState.unknown,
+    );
+  }
+}
+
+/// SDK/device compatibility for a paired wearable.
+enum WearableCompatibility {
+  /// Compatibility not yet determined.
+  undefined('undefined'),
+  compatible('compatible'),
+
+  /// The on-device DAT app/firmware must be updated before use.
+  deviceUpdateRequired('deviceUpdateRequired'),
+
+  /// The host app's bundled DAT SDK must be updated before use.
+  sdkUpdateRequired('sdkUpdateRequired');
+
+  const WearableCompatibility(this.code);
+
+  /// Canonical code sent over the platform channel.
+  final String code;
+
+  /// Converts a platform code to a [WearableCompatibility], defaulting to
+  /// [undefined] for missing/unrecognized values.
+  static WearableCompatibility fromCode(String? code) {
+    return WearableCompatibility.values.firstWhere(
+      (c) => c.code == code,
+      orElse: () => WearableCompatibility.undefined,
+    );
+  }
+}
+
+/// A paired Meta wearable (glasses) known to the DAT SDK, returned by
+/// [MetaWearablesDat.getDevices].
+///
+/// Distinguishing two pairs of the same model: the model ([type]) is identical
+/// for both, so rely on [name] (the user-assigned name from the Meta AI app)
+/// or [id] (the stable identifier). [isStreamingDevice] tells you which pair
+/// the *current* stream is actually using; [isActive] tells you which pair the
+/// shared auto-selector would bind a *new* stream to — these can differ when
+/// more than one pair is connected.
+@immutable
+class WearableDevice {
+  const WearableDevice({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.linkState,
+    required this.compatibility,
+    required this.supportsDisplay,
+    required this.isActive,
+    required this.isStreamingDevice,
+    this.firmwareInfo,
+  });
+
+  /// Builds a [WearableDevice] from a platform-channel map.
+  ///
+  /// Throws [ArgumentError] when `id` is missing or blank — identity is never
+  /// fabricated. All other fields tolerate missing/null values and fall back
+  /// to sensible defaults ([name] → [id], enums → their `unknown`/`undefined`
+  /// case, bools → `false`).
+  factory WearableDevice.fromMap(Map<String, dynamic> map) {
+    final id = (map['id'] as String?)?.trim() ?? '';
+    if (id.isEmpty) {
+      throw ArgumentError.value(
+        map['id'],
+        'id',
+        'WearableDevice requires a non-empty id',
+      );
+    }
+    final name = map['name'] as String?;
+    return WearableDevice(
+      id: id,
+      name: (name == null || name.isEmpty) ? id : name,
+      type: WearableDeviceType.fromCode(map['deviceType'] as String?),
+      linkState: WearableLinkState.fromCode(map['linkState'] as String?),
+      compatibility: WearableCompatibility.fromCode(
+        map['compatibility'] as String?,
+      ),
+      supportsDisplay: (map['supportsDisplay'] as bool?) ?? false,
+      isActive: (map['isActive'] as bool?) ?? false,
+      isStreamingDevice: (map['isStreamingDevice'] as bool?) ?? false,
+      firmwareInfo: map['firmwareInfo'] as String?,
+    );
+  }
+
+  /// Stable identifier (`DeviceIdentifier`). Tells two pairs of the same model
+  /// apart, and is the value a future release will use to pin streaming to a
+  /// specific pair.
+  final String id;
+
+  /// User-assigned name from the Meta AI app (e.g. "Gautier's glasses").
+  /// Falls back to [id] when the SDK hasn't surfaced a name.
+  final String name;
+
+  /// Hardware model.
+  final WearableDeviceType type;
+
+  /// Current BLE link state.
+  final WearableLinkState linkState;
+
+  /// SDK/device compatibility.
+  final WearableCompatibility compatibility;
+
+  /// Whether this device exposes a display (e.g. Meta Ray-Ban Display).
+  final bool supportsDisplay;
+
+  /// Whether this is the device the shared auto-selector currently treats as
+  /// active — i.e. the pair a *new* stream session would bind to. Can differ
+  /// from [isStreamingDevice] when more than one pair is connected.
+  final bool isActive;
+
+  /// Whether this device is the one the *current* stream session is actively
+  /// streaming from. `false` for every device when nothing is streaming.
+  final bool isStreamingDevice;
+
+  /// Firmware version string. Currently Android-only; `null` on iOS.
+  final String? firmwareInfo;
+
+  @override
+  String toString() =>
+      'WearableDevice(id: $id, name: $name, type: ${type.code}, '
+      'linkState: ${linkState.code}, isActive: $isActive, '
+      'isStreamingDevice: $isStreamingDevice)';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is WearableDevice &&
+          other.id == id &&
+          other.name == name &&
+          other.type == type &&
+          other.linkState == linkState &&
+          other.compatibility == compatibility &&
+          other.supportsDisplay == supportsDisplay &&
+          other.isActive == isActive &&
+          other.isStreamingDevice == isStreamingDevice &&
+          other.firmwareInfo == firmwareInfo;
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    name,
+    type,
+    linkState,
+    compatibility,
+    supportsDisplay,
+    isActive,
+    isStreamingDevice,
+    firmwareInfo,
+  );
+}
+
 /// Dimensions of the active video stream, reported from the native layer
 /// when a new stream starts or the underlying frame size changes.
 ///
@@ -622,6 +824,23 @@ class MetaWearablesDat {
   /// Returns true when an active device is available, false otherwise.
   static Stream<bool> activeDeviceStream() {
     return MetaWearablesDatPlatform.instance.activeDeviceStream();
+  }
+
+  /// Returns the paired Meta wearables currently known to the DAT SDK, with
+  /// their names, models, link state, and which pair (if any) is actively
+  /// streaming ([WearableDevice.isStreamingDevice]) or auto-selected
+  /// ([WearableDevice.isActive]).
+  ///
+  /// This is a one-shot snapshot; call it again to refresh. Devices only
+  /// appear after registration completes and camera permission is granted —
+  /// before that the list is empty.
+  ///
+  /// **Android:** throws a `PlatformException` with code `NOT_INITIALIZED` if
+  /// called before [requestAndroidPermissions] has granted Bluetooth
+  /// permissions (the SDK can't enumerate devices until then). iOS returns an
+  /// empty list instead.
+  static Future<List<WearableDevice>> getDevices() {
+    return MetaWearablesDatPlatform.instance.getDevices();
   }
 
   /// Stream of video frame dimensions for the active stream session.

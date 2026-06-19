@@ -249,6 +249,7 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - Handle the callback URL with `MetaWearablesDat.handleUrl(url)` to complete registration
 - Monitor registration state via `MetaWearablesDat.registrationStateStream()`
 - Monitor active device availability via `MetaWearablesDat.activeDeviceStream()`
+- List the paired glasses (name, model, and which pair is streaming) via `MetaWearablesDat.getDevices()` — useful when more than one pair is paired
 
 ### 2. Permissions (First-time camera access)
 - When your app first attempts to access the camera, request permission
@@ -301,6 +302,14 @@ MetaWearablesDat.deviceStateStream().listen((state) {
   // state.thermalLevel: unknown, none, light, moderate, severe, critical, emergency, shutdown
   print('Thermal: ${state.thermalLevel}');
 });
+
+// (Optional) List the paired glasses — names, models, and which pair is
+// streaming. Handy when two pairs of the same model are paired.
+final devices = await MetaWearablesDat.getDevices();
+for (final d in devices) {
+  print('${d.name} (${d.type.code})'
+      '${d.isStreamingDevice ? ' — streaming' : ''}');
+}
 
 // Capture a photo during streaming
 final photo = await MetaWearablesDat.capturePhoto(

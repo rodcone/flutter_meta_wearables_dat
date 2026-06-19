@@ -35,6 +35,12 @@ class StreamSessionProvider extends ChangeNotifier {
   int? _textureId;
   bool _backgroundStreamingEnabled = false;
 
+  List<WearableDevice> _devices = <WearableDevice>[];
+  bool _devicesLoading = false;
+  String? _devicesError;
+  bool _refreshingDevices = false;
+  bool _pendingDevicesRefresh = false;
+
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
     _initializeActiveDeviceMonitoring();
     _initializeDeviceStateMonitoring();
@@ -56,6 +62,15 @@ class StreamSessionProvider extends ChangeNotifier {
   bool get supportsHvc1 => Platform.isIOS;
   bool get backgroundStreamingEnabled => _backgroundStreamingEnabled;
 
+  /// Snapshot of paired devices from the last [refreshDevices] call.
+  List<WearableDevice> get devices => _devices;
+
+  /// True while a [refreshDevices] call is in flight.
+  bool get devicesLoading => _devicesLoading;
+
+  /// Human-readable error from the last [refreshDevices] call, or null.
+  String? get devicesError => _devicesError;
+
   /// Current thermal level of the active device, or `null` if no device is
   /// active or the SDK hasn't reported a level yet. Updated live via
   /// [MetaWearablesDat.deviceStateStream].
@@ -71,6 +86,9 @@ class StreamSessionProvider extends ChangeNotifier {
           _thermalLevel = null;
         }
         notifyListeners();
+        // Refresh on both attach and detach so an open paired-devices sheet
+        // reflects connection / active-device changes.
+        unawaited(refreshDevices());
       },
       onError: (dynamic error) {
         debugPrint('[MetaWearablesDAT] Error in active device stream: $error');
@@ -93,6 +111,45 @@ class StreamSessionProvider extends ChangeNotifier {
         debugPrint('[MetaWearablesDAT] Device state stream error: $error');
       },
     );
+  }
+
+  /// Fetches the current paired-device list via [MetaWearablesDat.getDevices]
+  /// and notifies listeners. Safe to call repeatedly: while a call is in
+  /// flight, a concurrent call is coalesced into a single follow-up run so the
+  /// latest transition is never dropped.
+  Future<void> refreshDevices() async {
+    if (_refreshingDevices) {
+      _pendingDevicesRefresh = true;
+      return;
+    }
+    _refreshingDevices = true;
+    _devicesLoading = true;
+    _devicesError = null;
+    notifyListeners();
+    try {
+      final list = await MetaWearablesDat.getDevices();
+      // Android returns an unordered Set, so sort for stable UI.
+      list.sort((a, b) {
+        final byName = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        return byName != 0 ? byName : a.id.compareTo(b.id);
+      });
+      _devices = list;
+      _devicesError = null;
+    } on PlatformException catch (e) {
+      _devicesError = e.code == 'NOT_INITIALIZED'
+          ? 'Grant Bluetooth permission and register first.'
+          : (e.message ?? 'Failed to load devices.');
+    } catch (e) {
+      _devicesError = 'Failed to load devices.';
+    } finally {
+      _devicesLoading = false;
+      _refreshingDevices = false;
+      notifyListeners();
+      if (_pendingDevicesRefresh) {
+        _pendingDevicesRefresh = false;
+        unawaited(refreshDevices());
+      }
+    }
   }
 
   /// Opens the Meta AI app to the DAT-app-update screen on the connected
@@ -196,42 +253,49 @@ class StreamSessionProvider extends ChangeNotifier {
 
       // Subscribe to session state and error streams
       unawaited(_sessionStateSubscription?.cancel());
-      _sessionStateSubscription =
-          MetaWearablesDat.streamSessionStateStream().listen(
-        (state) {
-          _sessionState = state;
-          if (state == StreamSessionState.stopped) {
-            _isStreaming = false;
-            _textureId = null;
-          }
-          notifyListeners();
-        },
-        onError: (dynamic error) {
-          debugPrint('[MetaWearablesDAT] Session state stream error: $error');
-        },
-      );
+      _sessionStateSubscription = MetaWearablesDat.streamSessionStateStream()
+          .listen(
+            (state) {
+              _sessionState = state;
+              if (state == StreamSessionState.stopped) {
+                _isStreaming = false;
+                _textureId = null;
+              }
+              notifyListeners();
+              // Keep an open paired-devices sheet's "Streaming" badge in sync as
+              // the session moves through streaming / paused / stopped.
+              unawaited(refreshDevices());
+            },
+            onError: (dynamic error) {
+              debugPrint(
+                '[MetaWearablesDAT] Session state stream error: $error',
+              );
+            },
+          );
 
       unawaited(_sessionErrorSubscription?.cancel());
-      _sessionErrorSubscription =
-          MetaWearablesDat.streamSessionErrorStream().listen(
-        _setError,
-        onError: (dynamic error) {
-          debugPrint('[MetaWearablesDAT] Session error stream error: $error');
-        },
-      );
+      _sessionErrorSubscription = MetaWearablesDat.streamSessionErrorStream()
+          .listen(
+            _setError,
+            onError: (dynamic error) {
+              debugPrint(
+                '[MetaWearablesDAT] Session error stream error: $error',
+              );
+            },
+          );
 
       unawaited(_videoStreamSizeSubscription?.cancel());
       _videoStreamSize = null;
-      _videoStreamSizeSubscription =
-          MetaWearablesDat.videoStreamSizeStream().listen(
-        (size) {
-          _videoStreamSize = size;
-          notifyListeners();
-        },
-        onError: (dynamic error) {
-          debugPrint('[MetaWearablesDAT] Video size stream error: $error');
-        },
-      );
+      _videoStreamSizeSubscription = MetaWearablesDat.videoStreamSizeStream()
+          .listen(
+            (size) {
+              _videoStreamSize = size;
+              notifyListeners();
+            },
+            onError: (dynamic error) {
+              debugPrint('[MetaWearablesDAT] Video size stream error: $error');
+            },
+          );
 
       // Start the stream session - deviceUUID is optional (uses AutoDeviceSelector if null).
       // Returns a texture ID for zero-copy rendering via the Flutter Texture widget.

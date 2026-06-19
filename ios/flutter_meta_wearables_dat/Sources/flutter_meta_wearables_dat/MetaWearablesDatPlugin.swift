@@ -159,6 +159,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         capturePhoto(call: call, result: result)
       case "getRegistrationState":
         getRegistrationState(result: result)
+      case "getDevices":
+        getDevices(result: result)
       case "enableBackgroundStreaming":
         enableBackgroundStreaming(result: result)
       case "disableBackgroundStreaming":
@@ -952,6 +954,89 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     Task { @MainActor in
       let state = Wearables.shared.registrationState
       result(state.rawValue)
+    }
+  }
+
+  /// Returns a snapshot of all paired devices as an array of maps, decoded by
+  /// `WearableDevice.fromMap` on the Dart side. `isActive` reflects the shared
+  /// auto-selector's current pick (what a new stream would bind to);
+  /// `isStreamingDevice` reflects what the *live* stream is using, gated on the
+  /// stream's actual `.streaming` state (not just a non-nil reference, which
+  /// can be stale after an SDK-driven stop).
+  func getDevices(result: @escaping FlutterResult) {
+    Task { @MainActor in
+      let active = deviceSelector.activeDevice
+      let sessionId = deviceSession?.deviceId
+      let streaming = streamSession?.state == .streaming
+      var devices: [[String: Any]] = []
+      for id in Wearables.shared.devices {
+        guard !id.isEmpty else { continue }
+        let isActive = (id == active)
+        let isStreamingDevice = streaming && (id == sessionId)
+        if let device = Wearables.shared.deviceForIdentifier(id) {
+          devices.append([
+            "id": id,
+            "name": device.name,
+            "deviceType": Self.deviceTypeCode(device.deviceType()),
+            "linkState": Self.linkStateCode(device.linkState),
+            "compatibility": Self.compatibilityCode(device.compatibility()),
+            "supportsDisplay": device.supportsDisplay(),
+            "isActive": isActive,
+            "isStreamingDevice": isStreamingDevice,
+            "firmwareInfo": NSNull(),
+          ])
+        } else {
+          // Metadata unavailable — emit a complete fallback so the device
+          // count still matches `Wearables.shared.devices`.
+          devices.append([
+            "id": id,
+            "name": id,
+            "deviceType": "unknown",
+            "linkState": "unknown",
+            "compatibility": "undefined",
+            "supportsDisplay": false,
+            "isActive": isActive,
+            "isStreamingDevice": isStreamingDevice,
+            "firmwareInfo": NSNull(),
+          ])
+        }
+      }
+      result(devices)
+    }
+  }
+
+  /// Canonical device-type code, kept identical to the Android side.
+  private static func deviceTypeCode(_ type: MWDATCore.DeviceType) -> String {
+    switch type {
+      case .rayBanMeta:         return "rayBanMeta"
+      case .oakleyMetaHSTN:     return "oakleyMetaHSTN"
+      case .oakleyMetaVanguard: return "oakleyMetaVanguard"
+      case .metaRayBanDisplay:  return "metaRayBanDisplay"
+      case .rayBanMetaOptics:   return "rayBanMetaOptics"
+      case .unknown:            return "unknown"
+      @unknown default:         return "unknown"
+    }
+  }
+
+  /// Canonical link-state code, kept identical to the Android side.
+  private static func linkStateCode(_ state: MWDATCore.LinkState) -> String {
+    switch state {
+      case .disconnected: return "disconnected"
+      case .connecting:   return "connecting"
+      case .connected:    return "connected"
+    }
+  }
+
+  /// Canonical compatibility code, kept identical to the Android side.
+  private static func compatibilityCode(
+    _ compatibility: MWDATCore.Compatibility
+  ) -> String {
+    switch compatibility {
+      case .undefined:            return "undefined"
+      case .compatible:           return "compatible"
+      case .deviceUpdateRequired: return "deviceUpdateRequired"
+      case .sdkUpdateRequired:    return "sdkUpdateRequired"
+      @unknown default:           return "undefined"
     }
   }
 
