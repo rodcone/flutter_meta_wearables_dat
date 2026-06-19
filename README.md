@@ -268,9 +268,11 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - Call `MetaWearablesDat.stopStreamSession(deviceId)` to end the session
 
 ```dart
-// Start streaming — returns a texture ID for zero-copy rendering
+// Start streaming — returns a texture ID for zero-copy rendering.
+// Pass null to auto-select the active pair, or a WearableDevice.id from
+// getDevices() to stream from a specific pair.
 final textureId = await MetaWearablesDat.startStreamSession(
-  deviceId,
+  null,
   fps: 24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw, // or VideoCodec.hvc1 (iOS only, supports background streaming)
@@ -314,12 +316,12 @@ for (final d in devices) {
 
 // Capture a photo during streaming
 final photo = await MetaWearablesDat.capturePhoto(
-  deviceId,
+  null,
   format: PhotoCaptureFormat.jpeg, // or PhotoCaptureFormat.heic
 );
 
 // Stop streaming when done
-await MetaWearablesDat.stopStreamSession(deviceId);
+await MetaWearablesDat.stopStreamSession(null);
 ```
 
 Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
@@ -354,10 +356,10 @@ await MetaWearablesDat.enableBackgroundStreaming(
   ),
 );
 
-final textureId = await MetaWearablesDat.startStreamSession(deviceId);
+final textureId = await MetaWearablesDat.startStreamSession(null);
 
 // ...later, when you no longer need background execution:
-await MetaWearablesDat.stopStreamSession(deviceId);
+await MetaWearablesDat.stopStreamSession(null);
 await MetaWearablesDat.disableBackgroundStreaming();
 ```
 
@@ -454,8 +456,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.5.2
-  flutter_meta_wearables_dat_mock_device: ^0.5.2
+  flutter_meta_wearables_dat: ^0.6.0
+  flutter_meta_wearables_dat_mock_device: ^0.6.0
 ```
 
 ```dart

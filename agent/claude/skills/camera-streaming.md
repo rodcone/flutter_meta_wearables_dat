@@ -132,7 +132,7 @@ The stream switches its underlying subscription automatically when the active de
 
 ```dart
 final photo = await MetaWearablesDat.capturePhoto(
-  null, // or specific deviceUUID
+  null, // or a WearableDevice.id from getDevices() to target a specific pair
   format: PhotoCaptureFormat.jpeg, // or .heic (iOS only)
 );
 // photo.bytes — Uint8List of the image
