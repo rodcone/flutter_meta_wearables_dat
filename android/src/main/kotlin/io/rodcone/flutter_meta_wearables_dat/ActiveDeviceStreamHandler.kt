@@ -56,17 +56,20 @@ internal class ActiveDeviceStreamHandler(
      * double-subscribing. Matches the official CameraAccess sample's one-shot `startMonitoring()`
      * pattern.
      */
-    fun restartMonitoring() {
+    fun restartMonitoring(force: Boolean = false) {
         val sink = eventSink
         if (sink == null) {
             Log.d(TAG, "ActiveDeviceStream restartMonitoring — no sink yet, skipping")
             return
         }
-        if (job?.isActive == true) {
+        // `force` rebinds to a freshly-swapped selector even while a job is live
+        // (e.g. after a device-pin change). startCollecting() cancels the old job
+        // and re-reads the selector provider.
+        if (!force && job?.isActive == true) {
             Log.d(TAG, "ActiveDeviceStream restartMonitoring — already collecting, skipping")
             return
         }
-        Log.d(TAG, "ActiveDeviceStream restartMonitoring — starting collection")
+        Log.d(TAG, "ActiveDeviceStream restartMonitoring — starting collection (force=$force)")
         startCollecting(sink)
     }
 

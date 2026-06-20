@@ -28,7 +28,7 @@ final errorSub = MetaWearablesDat.streamSessionErrorStream().listen((error) {
 
 // Start streaming — returns texture ID
 final textureId = await MetaWearablesDat.startStreamSession(
-  null, // null = AutoDeviceSelector (recommended for real devices)
+  null, // null = auto-select; or a WearableDevice.id from getDevices() to pin a pair
   fps: 24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw,
@@ -132,7 +132,7 @@ The stream switches its underlying subscription automatically when the active de
 
 ```dart
 final photo = await MetaWearablesDat.capturePhoto(
-  null, // or specific deviceUUID
+  null, // or a WearableDevice.id from getDevices() to target a specific pair
   format: PhotoCaptureFormat.jpeg, // or .heic (iOS only)
 );
 // photo.bytes — Uint8List of the image

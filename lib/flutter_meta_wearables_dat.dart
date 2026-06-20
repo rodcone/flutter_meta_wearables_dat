@@ -684,47 +684,54 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.disconnect();
   }
 
-  /// Starts a stream session with the given device UUID, FPS, and stream quality.
+  /// Starts a stream session.
   ///
-  /// Returns a texture ID for rendering via the Flutter `Texture` widget.
-  /// Video frames are pushed directly from native to the GPU — no encoding,
-  /// no byte copying, no Dart-side decoding.
+  /// Pass a [WearableDevice.id] (from [getDevices]) as [deviceId] to stream
+  /// from that specific pair; pass `null` to let the SDK auto-select the
+  /// active device. Returns a texture ID for rendering via the Flutter
+  /// `Texture` widget — frames are pushed native→GPU (no encoding, no byte
+  /// copying, no Dart-side decoding).
+  ///
+  /// Throws a `PlatformException` with code `STREAM_ACTIVE` if a stream is
+  /// already running on a *different* device — stop it first, then start.
   static Future<int> startStreamSession(
-    String? deviceUUID, {
+    String? deviceId, {
     double fps = 30.0,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
   }) {
     if (kDebugMode) {
       debugPrint(
-        '[MetaWearablesDAT] Starting stream session with device UUID: $deviceUUID, FPS: $fps, Stream quality: $streamQuality, Video codec: $videoCodec',
+        '[MetaWearablesDAT] Starting stream session with deviceId: $deviceId, FPS: $fps, Stream quality: $streamQuality, Video codec: $videoCodec',
       );
     }
     return MetaWearablesDatPlatform.instance.startStreamSession(
-      deviceUUID,
+      deviceId,
       fps: fps,
       streamQuality: streamQuality,
       videoCodec: videoCodec,
     );
   }
 
-  /// Stops a stream session with the given device UUID.
-  static Future<bool> stopStreamSession(String? deviceUUID) {
-    return MetaWearablesDatPlatform.instance.stopStreamSession(deviceUUID);
+  /// Stops the active stream session. [deviceId] is accepted for call symmetry
+  /// but isn't required — there is a single active session.
+  static Future<bool> stopStreamSession(String? deviceId) {
+    return MetaWearablesDatPlatform.instance.stopStreamSession(deviceId);
   }
 
-  /// Captures a photo from the active stream session.
+  /// Captures a photo from the active stream session. [deviceId] is accepted
+  /// for call symmetry; the capture targets the active session.
   static Future<CapturedPhoto> capturePhoto(
-    String? deviceUUID, {
+    String? deviceId, {
     PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
   }) {
     if (kDebugMode) {
       debugPrint(
-        '[MetaWearablesDAT] Capturing photo with device UUID: $deviceUUID, format: $format',
+        '[MetaWearablesDAT] Capturing photo with deviceId: $deviceId, format: $format',
       );
     }
     return MetaWearablesDatPlatform.instance.capturePhoto(
-      deviceUUID,
+      deviceId,
       format: format,
     );
   }

@@ -122,7 +122,7 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
 
   @override
   Future<int> startStreamSession(
-    String? deviceUUID, {
+    String? deviceId, {
     double fps = 30.0,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
@@ -132,8 +132,8 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
       'streamQuality': streamQuality.value,
       'videoCodec': videoCodec.value,
     };
-    if (deviceUUID != null) {
-      args['deviceUUID'] = deviceUUID;
+    if (deviceId != null) {
+      args['deviceId'] = deviceId;
     }
     final textureId = await methodChannel.invokeMethod<int>(
       'startStreamSession',
@@ -149,10 +149,10 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
-  Future<bool> stopStreamSession(String? deviceUUID) async {
+  Future<bool> stopStreamSession(String? deviceId) async {
     final args = <String, dynamic>{};
-    if (deviceUUID != null) {
-      args['deviceUUID'] = deviceUUID;
+    if (deviceId != null) {
+      args['deviceId'] = deviceId;
     }
     final ok = await methodChannel.invokeMethod<bool>(
       'stopStreamSession',
@@ -163,14 +163,14 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
 
   @override
   Future<CapturedPhoto> capturePhoto(
-    String? deviceUUID, {
+    String? deviceId, {
     PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
   }) async {
     final args = <String, dynamic>{
       'format': format.value,
     };
-    if (deviceUUID != null) {
-      args['deviceUUID'] = deviceUUID;
+    if (deviceId != null) {
+      args['deviceId'] = deviceId;
     }
     final result = await methodChannel.invokeMapMethod<String, dynamic>(
       'capturePhoto',

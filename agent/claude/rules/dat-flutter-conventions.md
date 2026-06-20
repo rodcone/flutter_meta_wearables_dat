@@ -5,7 +5,7 @@
 - Always use `MetaWearablesDat` static methods — never instantiate the class.
 - Single import: `import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';`
 - All DAT operations are `async` — always `await` them.
-- Pass `null` as `deviceUUID` to use AutoDeviceSelector (recommended for real devices). Only pass a specific UUID for mock devices.
+- `startStreamSession(deviceId)`: `null` auto-selects the active pair; pass a `WearableDevice.id` from `getDevices()` to pin a specific pair (real or mock). Switching pairs while streaming throws `STREAM_ACTIVE` — stop first, then start.
 
 ## Lifecycle order
 

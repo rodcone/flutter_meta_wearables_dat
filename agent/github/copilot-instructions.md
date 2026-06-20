@@ -12,20 +12,21 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 2. `startRegistration()` → user confirms in Meta AI → `handleUrl(url)` deep link callback
 3. `restartActiveDeviceMonitoring()` — call after registration (critical on Android)
 4. `requestCameraPermission()` — Meta AI permission bottom sheet
-5. `startStreamSession(deviceUUID, fps:, streamQuality:, videoCodec:)` → returns `textureId`
+5. `startStreamSession(deviceId, fps:, streamQuality:, videoCodec:)` → returns `textureId` — pass a `WearableDevice.id` from `getDevices()` to pin a specific pair, or `null` to auto-select
 6. Render: `Texture(textureId: textureId)` — zero-copy GPU rendering
 
 ### Key methods
 
 - `registrationStateStream()` — RegistrationState: unavailable(0), available(1), registering(2), registered(3)
 - `activeDeviceStream()` — bool, device availability
+- `getDevices()` → `List<WearableDevice>` (id, name, type, linkState, compatibility, supportsDisplay, isActive, isStreamingDevice). Pass an `id` to `startStreamSession` to pin that pair; requesting a *different* device while one is streaming throws `PlatformException` `STREAM_ACTIVE`. Android throws `NOT_INITIALIZED` if called before Bluetooth permission.
 - `streamSessionStateStream()` — stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
 - `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, thermalEmergency, peakPowerShutdown, batteryCritical, hingesClosed, permissionDenied, deviceNotConnected, datAppOnTheGlassesUpdateRequired (recover via `openDATGlassesAppUpdate()`), dwaUnavailable, plus device-session variants (deviceThermalCritical etc.).
 - `deviceStateStream()` — `Stream<DeviceState>` of live `ThermalLevel` (unknown, none, light, moderate, severe, critical, emergency, shutdown). Use to warn the user *before* a thermal error stops the stream.
 - `openDATGlassesAppUpdate()` — opens the Meta AI app to the DAT-app-update screen. Pair with the `datAppOnTheGlassesUpdateRequired` error code to drive a "tap to update" UI.
 - `videoStreamSizeStream()` — VideoStreamSize (width/height/aspectRatio) emitted on stream start and resolution changes
-- `stopStreamSession(deviceUUID)` — end session
-- `capturePhoto(deviceUUID, format:)` — PhotoCaptureFormat.jpeg or .heic
+- `stopStreamSession(deviceId)` — end session
+- `capturePhoto(deviceId, format:)` — PhotoCaptureFormat.jpeg or .heic
 - `captureStreamFrame(textureId, width:, height:, format:)` — Dart-side rasterization for ML/OCR. Returns `null` while backgrounded.
 - `enableBackgroundStreaming(androidNotification: BackgroundNotification(...))` — opt-in; call BEFORE `startStreamSession()` to keep the session alive while backgrounded or screen-locked. iOS + Android. `BackgroundNotification` is required on Android.
 - `disableBackgroundStreaming()` — tears down the iOS `AVAudioSession` / stops the Android foreground service. Idempotent.
@@ -35,7 +36,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 
 Mock support lives in the optional add-on `flutter_meta_wearables_dat_mock_device` (since 0.4.0). Production builds that omit it skip `MWDATMockDevice` linkage and don't need `NSCameraUsageDescription` / `CAMERA`.
 
-- Add `flutter_meta_wearables_dat_mock_device: ^0.5.2` to dev/staging `pubspec.yaml`.
+- Add `flutter_meta_wearables_dat_mock_device: ^0.6.0` to dev/staging `pubspec.yaml`.
 - Import: `import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';`
 - Optional bypass for registration/permission flows: `MetaWearablesDatMockDevice.configure(initiallyRegistered: true, initialPermissionsGranted: true)`
 - Lifecycle: `MetaWearablesDatMockDevice.pairRayBanMeta()` → UUID, then `.powerOn(uuid)` + `.don(uuid)`, optionally `.setCameraFacing(uuid, CameraFacing.back)`

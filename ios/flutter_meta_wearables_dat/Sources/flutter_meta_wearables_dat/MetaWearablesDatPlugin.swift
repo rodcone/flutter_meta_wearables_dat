@@ -8,12 +8,34 @@ import VideoToolbox
 
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Device session (DAT 0.7.0): created lazily on first startStreamSession
-  // call using the shared AutoDeviceSelector. Kept alive across stream
-  // start/stop so toggling streaming is fast. Torn down only when the
-  // underlying device disappears or when the plugin is disabled.
-  private lazy var deviceSelector: AutoDeviceSelector = {
-    AutoDeviceSelector(wearables: Wearables.shared)
-  }()
+  // call using the shared selector. Kept alive across stream start/stop so
+  // toggling streaming is fast. Torn down only when the underlying device
+  // disappears or when the plugin is disabled.
+  //
+  // Identifier of the pinned device, or nil for auto-select. Honored by
+  // `makeDeviceSelector()` at every construction site so a blind rebuild
+  // can't silently drop the pin.
+  private var pinnedDeviceId: DeviceIdentifier?
+  // Shared selector. When pinned, an `AutoDeviceSelector` *constrained by a
+  // filter* to the chosen device — NOT a `SpecificDeviceSelector`, whose iOS
+  // `activeDeviceStream()` emits once then completes (which would stop the
+  // availability watchdog from ever observing the pinned device disconnect).
+  // A filtered `AutoDeviceSelector` keeps a continuous stream that emits nil
+  // when the pinned device drops. Lazy so it isn't built on the init path.
+  private lazy var deviceSelector: AutoDeviceSelector = makeDeviceSelector()
+  /// Builds the shared selector honoring `pinnedDeviceId`.
+  private func makeDeviceSelector() -> AutoDeviceSelector {
+    guard let id = pinnedDeviceId else {
+      return AutoDeviceSelector(wearables: Wearables.shared)
+    }
+    return AutoDeviceSelector(
+      wearables: Wearables.shared,
+      filter: { $0.identifier == id }
+    )
+  }
+  // Guards concurrent startStreamSession calls: a second start that tore down
+  // the first's in-flight session would leave the first awaiting `.started`.
+  private var isStartingSession = false
   private var deviceSession: DeviceSession?
   private var deviceSessionStateTask: Task<Void, Never>?
   private var deviceSessionErrorTask: Task<Void, Never>?
@@ -28,6 +50,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // the SDK leaves in a non-terminal state forever would otherwise hang the
   // awaiting Dart future indefinitely.
   private let deviceSessionStartTimeout: TimeInterval = 20.0
+  // After a pin change the shared selector is rebuilt and resolves its active
+  // device asynchronously; `createSession` against an unresolved selector
+  // returns `noEligibleDevice`. Bound how long we wait for the pinned device
+  // to resolve before attempting the session.
+  private let selectorResolveTimeout: TimeInterval = 8.0
   // Timestamp of the last `AutoDeviceSelector` rebuild (see
   // `rebuildDeviceSelectorIfBlind`). A freshly-rebuilt selector needs a moment
   // to discover devices; this debounces back-to-back rebuilds so we don't
@@ -412,7 +439,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // Any idle/stopped leftover session is bound to the old selector — drop
     // it so the next startStreamSession creates against the fresh one.
     await teardownDeviceSession()
-    deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
+    deviceSelector = makeDeviceSelector()
     lastSelectorRebuild = Date()
     startDeviceAvailabilityMonitoring()
     return true
@@ -811,19 +838,65 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let videoCodecStr = args["videoCodec"] as? String ?? "raw"
     let videoCodec: MWDATCamera.VideoCodec = (videoCodecStr == "hvc1") ? .hvc1 : .raw
 
-    // `deviceUUID` is ignored in 0.6.0 — the plugin uses a single shared
-    // AutoDeviceSelector. The argument is kept for backward compatibility.
-    _ = args["deviceUUID"] as? String
+    // `deviceId` (a `WearableDevice.id` from getDevices) pins streaming to a
+    // specific pair; nil auto-selects. Applied below by rebuilding the shared
+    // selector.
+    let requestedDeviceId = args["deviceId"] as? String
 
     Task { @MainActor in
-      // Return existing texture if stream is already active.
-      if streamSession != nil {
-        if let texId = textureId {
-          result(texId)
-        } else {
-          result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
-        }
+      // Reject a concurrent start: a second start that tears down the first's
+      // in-flight session (on a pin change) would leave the first awaiting
+      // `.started` forever.
+      if isStartingSession {
+        result(FlutterError(code: "STREAM_ACTIVE", message: "A stream start is already in progress.", details: nil))
         return
+      }
+      isStartingSession = true
+      defer { isStartingSession = false }
+
+      // A non-nil `streamSession` only counts as active if it's not terminal:
+      // the SDK can stop a stream (hinges, thermal) without clearing our
+      // reference, so check the actual state. Same selection → return the
+      // existing texture; a *different* device → caller must stop first.
+      if let existing = streamSession {
+        if existing.state != .stopped && existing.state != .stopping {
+          if requestedDeviceId == pinnedDeviceId {
+            if let texId = textureId {
+              result(texId)
+            } else {
+              result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
+            }
+          } else {
+            result(FlutterError(code: "STREAM_ACTIVE", message: "A stream is already active on another device. Stop it before switching devices.", details: nil))
+          }
+          return
+        }
+        // Stale (stopped/stopping) stream — drop the reference and recreate.
+        await teardownStreamOnly()
+      }
+
+      // Apply a pin change (or clear) before creating the session: rebuild the
+      // shared selector and rebind every observer (internal watchdog + the two
+      // event-channel handlers) so none keep watching the old selector.
+      let pinChanged = requestedDeviceId != pinnedDeviceId
+      if pinChanged {
+        pinnedDeviceId = requestedDeviceId
+        await teardownDeviceSession()
+        deviceSelector = makeDeviceSelector()
+        lastSelectorRebuild = Date()
+        startDeviceAvailabilityMonitoring()
+        activeDeviceHandler?.restartMonitoring(force: true)
+        deviceStateHandler?.restartMonitoring(force: true)
+      }
+
+      // The just-rebuilt selector resolves its active device asynchronously;
+      // creating the session before it resolves returns `noEligibleDevice`.
+      // When a specific device is pinned, wait briefly for it to resolve.
+      if pinChanged, requestedDeviceId != nil {
+        let deadline = Date().addingTimeInterval(selectorResolveTimeout)
+        while deviceSelector.activeDevice == nil, Date() < deadline {
+          try? await Task.sleep(nanoseconds: 150_000_000)
+        }
       }
 
       guard let registry = textureRegistry else {

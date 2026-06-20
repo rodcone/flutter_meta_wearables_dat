@@ -61,9 +61,12 @@ internal class DeviceStateStreamHandler(
      * Restart the active-device subscription. Called after BT permissions are
      * granted so we don't miss the first device emission.
      */
-    fun restartMonitoring() {
+    fun restartMonitoring(force: Boolean = false) {
         val sink = eventSink ?: return
-        if (outerJob?.isActive == true) return
+        // `force` rebinds to a freshly-swapped selector even while the outer job
+        // is live (e.g. after a device-pin change); startCollecting() cancels and
+        // re-reads the selector provider.
+        if (!force && outerJob?.isActive == true) return
         if (!isInitialized()) return
         startCollecting(sink)
     }
