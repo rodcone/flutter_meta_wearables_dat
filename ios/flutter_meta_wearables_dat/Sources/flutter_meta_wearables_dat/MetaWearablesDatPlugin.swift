@@ -75,6 +75,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // this cache and deterministically re-warms the selector when devices appear.
   private var knownDeviceIds: [DeviceIdentifier] = []
   private var devicesStreamTask: Task<Void, Never>?
+  // True once the live `devicesStream()` subscription has delivered at least
+  // one value. Distinguishes "`knownDeviceIds` is empty because nothing has
+  // emitted yet" (cold start) from "the SDK confirmed there are no devices" —
+  // only the latter justifies the already-granted fast path returning without
+  // waiting. Reset whenever the subscription is (re)launched.
+  private var didReceiveDeviceListEmission = false
   // Upper bound on how long `awaitDeviceAfterPermissionGrant` waits for a device
   // to resolve after a camera-permission grant. Comfortably exceeds
   // `selectorRebuildCooldown` so a blind selector can be rebuilt and resolve
@@ -529,9 +535,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func startDeviceListMonitoring() {
     devicesStreamTask?.cancel()
+    // A relaunched subscription hasn't confirmed the current device list yet,
+    // so an empty cache is once again "unknown", not "no devices".
+    didReceiveDeviceListEmission = false
     devicesStreamTask = Task { [weak self] in
       guard let self else { return }
       for await ids in Wearables.shared.devicesStream() {
+        self.didReceiveDeviceListEmission = true
         self.knownDeviceIds = ids.filter { !$0.isEmpty }
         if !self.knownDeviceIds.isEmpty {
           await self.rewarmSelectorForNewlyAppearedDevices()
@@ -563,18 +573,24 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   ///
   /// Pass `returnEarlyIfNoDevices: true` on the already-granted fast path: a
   /// grant that already happened would have surfaced the glasses on
-  /// `devicesStream()`, so an empty `knownDeviceIds` there means there is
-  /// genuinely no device to wait for (glasses off / out of range) — returning
-  /// immediately avoids burning the full timeout on a routine status re-check.
-  /// On a *fresh* grant we keep waiting: the device is expected imminently and
-  /// the cache may simply not have emitted yet.
+  /// `devicesStream()`, so a *confirmed* empty device list there means there is
+  /// genuinely nothing to wait for (glasses off / out of range) and we return
+  /// immediately rather than burning the full timeout on a routine re-check.
+  /// "Confirmed" is load-bearing: the early return is gated on
+  /// `didReceiveDeviceListEmission`, so a cache that is empty only because the
+  /// subscription hasn't delivered its first value yet still waits — otherwise
+  /// the fast path could return before the list arrives and the selector warms.
+  /// On a *fresh* grant we always keep waiting: the device is expected
+  /// imminently.
   @MainActor
   private func awaitDeviceAfterPermissionGrant(returnEarlyIfNoDevices: Bool = false) async {
     let deadline = Date().addingTimeInterval(permissionDeviceResolveTimeout)
     while Date() < deadline {
       if deviceSelector.activeDevice != nil { return }
       if knownDeviceIds.isEmpty {
-        if returnEarlyIfNoDevices { return }
+        // Only bail when an emission has actually confirmed the empty list; a
+        // pre-first-emission empty cache is "unknown", so fall through and wait.
+        if returnEarlyIfNoDevices, didReceiveDeviceListEmission { return }
       } else {
         // Devices are known but the (pre-registration) selector hasn't resolved
         // one — rebuild it deterministically. The cooldown inside
