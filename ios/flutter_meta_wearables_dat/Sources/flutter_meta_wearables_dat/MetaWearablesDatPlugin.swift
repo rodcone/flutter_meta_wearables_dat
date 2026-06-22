@@ -61,6 +61,26 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // discard a still-discovering selector and prolong the no-device window.
   private var lastSelectorRebuild: Date?
   private let selectorRebuildCooldown: TimeInterval = 3.0
+  // Serializes `rebuildDeviceSelectorIfBlind` across its now-multiple concurrent
+  // callers — see the guard there for why the cooldown alone isn't enough.
+  private var isRebuildingSelector = false
+  // Most recent device-identifier list observed on
+  // `Wearables.shared.devicesStream()`. The SDK surfaces devices reactively and
+  // only *after* a camera-permission grant; Meta's CameraAccess sample keeps a
+  // `devicesStream()` subscription alive from `configure()` onward so the
+  // discovery pipeline stays warm. The plugin used to observe only the
+  // selector's `activeDeviceStream()` — never the raw device list — so a device
+  // that surfaced post-grant was caught by nothing, leaving `getDevices()` empty
+  // and the selector blind. `startDeviceListMonitoring()` fixes that: it feeds
+  // this cache and deterministically re-warms the selector when devices appear.
+  private var knownDeviceIds: [DeviceIdentifier] = []
+  private var devicesStreamTask: Task<Void, Never>?
+  // Upper bound on how long `awaitDeviceAfterPermissionGrant` waits for a device
+  // to resolve after a camera-permission grant. Comfortably exceeds
+  // `selectorRebuildCooldown` so a blind selector can be rebuilt and resolve
+  // within the window. Granting permission implies the glasses are connected,
+  // so a device should appear well inside this bound.
+  private let permissionDeviceResolveTimeout: TimeInterval = 8.0
 
   // Stream session state (single session at a time)
   private var streamSession: MWDATCamera.Stream?
@@ -140,6 +160,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
     Task { @MainActor in
       try? Wearables.configure()
+      // Keep a lifetime subscription on the SDK device list (Meta's canonical
+      // pattern, started right after `configure()`) so discovery stays warm and
+      // devices that surface after a permission grant are actually observed.
+      instance.startDeviceListMonitoring()
       instance.startDeviceAvailabilityMonitoring()
     }
   }
@@ -160,6 +184,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // registration — see `rebuildDeviceSelectorIfBlind`), it is recreated
         // and the loops are force-restarted onto the new instance.
         Task { @MainActor in
+          // The SDK terminates its device streams on unregistration — including
+          // `devicesStream()`, which feeds `knownDeviceIds` and drives the
+          // selector re-warm. Relaunch that lifetime subscription here (it's
+          // idempotent: `startDeviceListMonitoring` cancels any live task first)
+          // so a disconnect/re-register cycle doesn't leave the device-list
+          // cache permanently stale — mirroring the sibling availability loop.
+          self.startDeviceListMonitoring()
           let rebuilt = await self.rebuildDeviceSelectorIfBlind()
           self.activeDeviceHandler?.restartMonitoring(force: rebuilt)
           self.deviceStateHandler?.restartMonitoring(force: rebuilt)
@@ -266,6 +297,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // through to it instead of surfacing DEVICE_DISCONNECTED.
         if let currentStatus = try? await Wearables.shared.checkPermissionStatus(.camera),
            currentStatus == .granted {
+          // Already granted, but the selector may still be blind (e.g. the app
+          // launched already-registered and nothing has resolved a device yet).
+          // Re-warm and wait briefly so a subsequent stream start succeeds —
+          // but skip the wait when no device is known (nothing to resolve), so
+          // a routine re-check doesn't block for the full timeout.
+          await awaitDeviceAfterPermissionGrant(returnEarlyIfNoDevices: true)
           result(true)
           return
         }
@@ -273,6 +310,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         let status = try await Wearables.shared.requestPermission(.camera)
         // Convert PermissionStatus enum to Bool for Flutter
         let granted = status == .granted
+        if granted {
+          // The grant is exactly what brings the glasses (back) into
+          // `devicesStream()`. Re-warm the selector and wait (bounded) for a
+          // device to resolve so the app's next `startStreamSession` /
+          // `getDevices` doesn't race the SDK and hit `noEligibleDevice` / an
+          // empty list — the failure this whole change set targets.
+          await awaitDeviceAfterPermissionGrant()
+        }
         result(granted)
       } catch let e as MWDATCore.PermissionError {
         let code = Self.mapPermissionError(e)
@@ -417,6 +462,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// force-restart loops still attached to the old instance.
   @MainActor
   private func rebuildDeviceSelectorIfBlind() async -> Bool {
+    // Re-entrancy guard. This method now has two concurrent callers (the
+    // devices-stream loop and the post-permission wait) on top of the existing
+    // `restartActiveDeviceMonitoring` path. There is an `await` between the
+    // cooldown check and the `lastSelectorRebuild` write below, so without this
+    // flag two entrants could both pass the guards while one is suspended in
+    // `teardownDeviceSession()` and double-rebuild. The check-and-set is atomic
+    // on the main actor (no `await` between them).
+    if isRebuildingSelector {
+      return false
+    }
     if let session = deviceSession, session.state == .started {
       return false
     }
@@ -436,6 +491,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
        Date().timeIntervalSince(last) < selectorRebuildCooldown {
       return false
     }
+    isRebuildingSelector = true
+    defer { isRebuildingSelector = false }
     // Any idle/stopped leftover session is bound to the old selector — drop
     // it so the next startStreamSession creates against the fresh one.
     await teardownDeviceSession()
@@ -457,6 +514,79 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           await self.teardownDeviceSession()
         }
       }
+    }
+  }
+
+  /// Keeps a lifetime subscription on `Wearables.shared.devicesStream()` so the
+  /// SDK's device discovery stays warm and the plugin always holds an
+  /// up-to-date device list. This mirrors Meta's CameraAccess sample, which
+  /// subscribes immediately after `configure()`. It is the missing observer
+  /// that left `getDevices()` empty and the selector blind after a camera
+  /// permission grant: glasses only surface on `devicesStream()` *after* a
+  /// grant, and nothing in the plugin used to watch that stream. When devices
+  /// appear while the shared selector is still blind, re-warm it so the active
+  /// device resolves deterministically rather than via a racy retry.
+  @MainActor
+  private func startDeviceListMonitoring() {
+    devicesStreamTask?.cancel()
+    devicesStreamTask = Task { [weak self] in
+      guard let self else { return }
+      for await ids in Wearables.shared.devicesStream() {
+        self.knownDeviceIds = ids.filter { !$0.isEmpty }
+        if !self.knownDeviceIds.isEmpty {
+          await self.rewarmSelectorForNewlyAppearedDevices()
+        }
+      }
+    }
+  }
+
+  /// Rebuilds the shared selector (and rebinds its observers) when devices have
+  /// appeared but the selector is still blind. Reuses `rebuildDeviceSelectorIfBlind`
+  /// — which no-ops when a session is started, the selector already has an
+  /// active device, or a rebuild happened within the cooldown — so concurrent
+  /// callers (the devices-stream loop and `awaitDeviceAfterPermissionGrant`)
+  /// can't thrash the selector.
+  @MainActor
+  private func rewarmSelectorForNewlyAppearedDevices() async {
+    let rebuilt = await rebuildDeviceSelectorIfBlind()
+    if rebuilt {
+      activeDeviceHandler?.restartMonitoring(force: true)
+      deviceStateHandler?.restartMonitoring(force: true)
+    }
+  }
+
+  /// After a camera-permission grant the glasses (re)surface on
+  /// `devicesStream()`. Give the SDK a bounded window to discover a device and
+  /// the shared selector to resolve one — re-warming the selector if it's blind
+  /// — so the app's next `startStreamSession` / `getDevices` doesn't race the
+  /// SDK. Returns as soon as a device resolves; otherwise after the timeout.
+  ///
+  /// Pass `returnEarlyIfNoDevices: true` on the already-granted fast path: a
+  /// grant that already happened would have surfaced the glasses on
+  /// `devicesStream()`, so an empty `knownDeviceIds` there means there is
+  /// genuinely no device to wait for (glasses off / out of range) — returning
+  /// immediately avoids burning the full timeout on a routine status re-check.
+  /// On a *fresh* grant we keep waiting: the device is expected imminently and
+  /// the cache may simply not have emitted yet.
+  @MainActor
+  private func awaitDeviceAfterPermissionGrant(returnEarlyIfNoDevices: Bool = false) async {
+    let deadline = Date().addingTimeInterval(permissionDeviceResolveTimeout)
+    while Date() < deadline {
+      if deviceSelector.activeDevice != nil { return }
+      if knownDeviceIds.isEmpty {
+        if returnEarlyIfNoDevices { return }
+      } else {
+        // Devices are known but the (pre-registration) selector hasn't resolved
+        // one — rebuild it deterministically. The cooldown inside
+        // `rebuildDeviceSelectorIfBlind` is shorter than this timeout, so even
+        // if a rebuild was just debounced it will go through on a later pass.
+        await rewarmSelectorForNewlyAppearedDevices()
+        if deviceSelector.activeDevice != nil { return }
+      }
+      // The rewarm above can run a teardown + selector rebuild; re-check the
+      // deadline before sleeping so a late iteration doesn't overshoot it.
+      if Date() >= deadline { return }
+      try? await Task.sleep(nanoseconds: 200_000_000)
     }
   }
 
@@ -1042,7 +1172,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let sessionId = deviceSession?.deviceId
       let streaming = streamSession?.state == .streaming
       var devices: [[String: Any]] = []
-      for id in Wearables.shared.devices {
+      // Prefer the warm cache fed by `startDeviceListMonitoring()`: the raw
+      // `Wearables.shared.devices` snapshot can read empty when nothing is
+      // actively observing the device stream (the original bug), whereas the
+      // cache reflects the most recent `devicesStream()` emission. Fall back to
+      // the snapshot only before the stream has emitted its first value.
+      let ids = knownDeviceIds.isEmpty ? Wearables.shared.devices : knownDeviceIds
+      for id in ids {
         guard !id.isEmpty else { continue }
         let isActive = (id == active)
         let isStreamingDevice = streaming && (id == sessionId)

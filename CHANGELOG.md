@@ -1,3 +1,8 @@
+## 0.6.1
+* **iOS: Fix `noEligibleDevice` and empty `getDevices()` right after granting the camera-access prompt.** The plugin only ever observed the device selector's active-device stream and never the SDK device list itself; glasses surface in the SDK device flow *after* a permission grant, so with nothing watching that flow the selector stayed blind and `Wearables.shared.devices` read empty — `startStreamSession()` failed with `noEligibleDevice` and `getDevices()` returned 0 even with paired, worn glasses. The plugin now keeps a lifetime `devicesStream()` subscription (Meta's canonical pattern, started right after `configure()`) that warms the device list and deterministically re-warms a blind selector when devices appear. `getDevices()` reads the warm list.
+* `requestCameraPermission()` now waits briefly (bounded) on a grant for the glasses to resolve before returning, so an immediately-following `startStreamSession()` / `getDevices()` doesn't race device discovery. Returns as soon as a device resolves, and returns immediately on a routine re-check when no device is present. A `false` return still means the user denied the request.
+* Android: parity — `requestCameraPermission()` re-kicks active-device monitoring and waits (bounded) for the selector to resolve on a grant. Android's device list is already a hot stream that stays warm, so it needed no equivalent of the iOS device-list subscription.
+
 ## 0.6.0
 * Add `getDevices()` and wearable device types for listing paired glasses, connection state, compatibility, and the active/streaming pair.
 * Add device pinning via `startStreamSession(deviceId)` (`null` keeps automatic selection), with `STREAM_ACTIVE` protection and a paired-device picker in the example app.
