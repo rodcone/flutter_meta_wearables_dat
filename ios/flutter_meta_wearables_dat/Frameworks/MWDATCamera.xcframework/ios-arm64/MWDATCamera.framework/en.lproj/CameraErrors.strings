@@ -1,0 +1,21 @@
+/* (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary. */
+
+/* Localized error descriptions.
+   Keys match Android strings.xml for cross-platform parity. */
+
+/* Stream */
+"dat_error_stream_battery_low" = "Device battery is too low for streaming";
+"dat_error_stream_critical_error" = "Critical error, the stream should end";
+"dat_error_stream_device_not_connected" = "Device is not connected";
+"dat_error_stream_device_not_found" = "Device not found";
+"dat_error_stream_error" = "Unspecified error, the stream can continue regardless";
+"dat_error_stream_hinge_closed" = "The hinges on the glasses were closed";
+"dat_error_stream_peak_power_limit" = "Device peak power limit reached";
+"dat_error_stream_permissions_denied" = "Permissions denied";
+"dat_error_stream_thermal_emergency" = "Device reached a thermal emergency, streaming has been stopped";
+"dat_error_stream_thermal_hot" = "Device thermal level is too high for streaming";
+"dat_error_stream_timeout" = "The operation timed out";
+
+/* Photo Capture */
+"dat_error_photo_capture_failed" = "Photo capture failed";
+"dat_error_photo_capture_timeout" = "Photo capture timed out";

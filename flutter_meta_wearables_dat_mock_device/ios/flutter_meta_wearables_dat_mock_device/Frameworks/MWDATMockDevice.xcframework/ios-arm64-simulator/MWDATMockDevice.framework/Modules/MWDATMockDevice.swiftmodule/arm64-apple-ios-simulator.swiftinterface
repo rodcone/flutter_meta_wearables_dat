@@ -1,12 +1,13 @@
 // swift-interface-format-version: 1.0
-// swift-compiler-version: Apple Swift version 6.2.3 (swiftlang-6.2.3.3.21 clang-1700.6.3.2)
-// swift-module-flags: -target arm64-apple-ios15.2-simulator -enable-objc-interop -enable-library-evolution -swift-version 6 -Osize -module-name MWDATMockDevice -package-name MetaWearablesDAT
-// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.2.3
+// swift-compiler-version: Facebook Swift version 6.3.2-dev (LLVM 89596864ad4cf55, Swift 5a76897d25af804)
+// swift-module-flags: -target arm64-apple-ios15.2-simulator -enable-objc-interop -enable-library-evolution -swift-version 6 -Osize -enable-experimental-feature PikaUnsafeImplementationOnlyImportDiagnostics -enable-experimental-feature PikaNonResilientImplementationOnlyWarnings -module-name MWDATMockDevice -package-name MetaWearablesDAT
+// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.3.2
 import AVFoundation
+import CoreMedia
 import Foundation
 import ImageIO
 import MWDATCore
-import Network
+@preconcurrency import Network
 import Swift
 import _Concurrency
 import _StringProcessing
@@ -17,6 +18,22 @@ public enum CameraFacing : Swift.Sendable {
   public static func == (a: MWDATMockDevice.CameraFacing, b: MWDATMockDevice.CameraFacing) -> Swift.Bool
   public func hash(into hasher: inout Swift.Hasher)
   public var hashValue: Swift.Int {
+    get
+  }
+}
+public enum GlassesModel : Swift.String, Swift.CaseIterable, Swift.Sendable {
+  case rayBanMeta
+  case oakleyMetaHSTN
+  case oakleyMetaVanguard
+  case rayBanMetaOptics
+  case metaGlasses
+  public init?(rawValue: Swift.String)
+  public typealias AllCases = [MWDATMockDevice.GlassesModel]
+  public typealias RawValue = Swift.String
+  nonisolated public static var allCases: [MWDATMockDevice.GlassesModel] {
+    get
+  }
+  public var rawValue: Swift.String {
     get
   }
 }
@@ -36,17 +53,23 @@ public protocol MockDevice : Swift.Sendable {
   func don()
   func doff()
 }
+public enum MockDeviceKitError : Swift.Error, Swift.Sendable, Swift.Equatable {
+  case notEnabled
+  public static func == (a: MWDATMockDevice.MockDeviceKitError, b: MWDATMockDevice.MockDeviceKitError) -> Swift.Bool
+  public func hash(into hasher: inout Swift.Hasher)
+  public var hashValue: Swift.Int {
+    get
+  }
+}
 public protocol MockDeviceKitInterface : Swift.Sendable {
   var isEnabled: Swift.Bool { get }
   func enable(config: MWDATMockDevice.MockDeviceKitConfig)
   func disable()
-  func pairRaybanMeta() -> any MWDATMockDevice.MockRaybanMeta
+  func pairGlasses(model: MWDATMockDevice.GlassesModel) throws(MWDATMockDevice.MockDeviceKitError) -> any MWDATMockDevice.MockGlasses
   func unpairDevice(_ device: any MWDATMockDevice.MockDevice)
   var pairedDevices: [any MWDATMockDevice.MockDevice] { get }
   var permissions: any MWDATMockDevice.MockPermissions { get }
-  #if compiler(>=5.3) && $NonescapableTypes
   func startTestServer(portFilePath: Swift.String?) async throws -> Swift.UInt16
-  #endif
   func stopTestServer() async
 }
 extension MWDATMockDevice.MockDeviceKitInterface {
@@ -60,20 +83,18 @@ public enum MockDeviceKit : Swift.Sendable {
   public let initialPermissionsGranted: Swift.Bool
   public init(initiallyRegistered: Swift.Bool = true, initialPermissionsGranted: Swift.Bool = true)
 }
-public protocol MockDisplaylessGlasses : MWDATMockDevice.MockDevice {
+public protocol MockGlasses : MWDATMockDevice.MockDevice {
   func fold()
   func unfold()
-  var services: any MWDATMockDevice.MockDisplaylessGlassesServices { get }
+  var services: any MWDATMockDevice.MockGlassesServices { get }
 }
-public protocol MockDisplaylessGlassesServices : Swift.Sendable {
+public protocol MockGlassesServices : Swift.Sendable {
   var camera: any MWDATMockDevice.MockCameraKit { get }
   var captouch: any MWDATMockDevice.MockCaptouchKit { get }
 }
 public protocol MockPermissions : Swift.Sendable {
   func set(_ permission: MWDATCore.Permission, _ status: MWDATCore.PermissionStatus)
   func setRequestResult(_ permission: MWDATCore.Permission, result: MWDATCore.PermissionStatus)
-}
-public protocol MockRaybanMeta : MWDATMockDevice.MockDisplaylessGlasses {
 }
 @_hasMissingDesignatedInitializers @objc(MockCameraKit) final public class ObjC_MockCameraKit : ObjectiveC.NSObject, Swift.Sendable {
   @objc final public func setCameraFeed(fileURL: Foundation.URL)
@@ -104,22 +125,24 @@ public protocol MockRaybanMeta : MWDATMockDevice.MockDisplaylessGlasses {
   @objc final public var pairedDevices: [any MWDATMockDevice.ObjC_MockDevice] {
     @objc get
   }
-  @objc final public func pairRaybanMeta() -> any MWDATMockDevice.ObjC_MockRaybanMeta
+  @objc final public func pairGlasses(modelRawValue: Swift.String) -> (any MWDATMockDevice.ObjC_MockGlasses)?
   @objc final public func unpairDevice(_ device: any MWDATMockDevice.ObjC_MockDevice)
   @objc deinit
 }
-@objc(MockDisplaylessGlasses) public protocol ObjC_MockDisplaylessGlasses : MWDATMockDevice.ObjC_MockDevice {
+@objc(MockGlasses) public protocol ObjC_MockGlasses : MWDATMockDevice.ObjC_MockDevice {
   @objc func fold()
   @objc func unfold()
-  @objc var services: MWDATMockDevice.ObjC_MockDisplaylessGlassesServices { get }
+  @objc var services: MWDATMockDevice.ObjC_MockGlassesServices { get }
 }
-@_hasMissingDesignatedInitializers @objc(MockDisplaylessGlassesServices) final public class ObjC_MockDisplaylessGlassesServices : ObjectiveC.NSObject, Swift.Sendable {
+@_hasMissingDesignatedInitializers @objc(MockGlassesServices) final public class ObjC_MockGlassesServices : ObjectiveC.NSObject, Swift.Sendable {
   @objc final public let camera: MWDATMockDevice.ObjC_MockCameraKit
   @objc final public let captouch: MWDATMockDevice.ObjC_MockCaptouchKit
   @objc deinit
 }
-@objc(MockRaybanMeta) public protocol ObjC_MockRaybanMeta : MWDATMockDevice.ObjC_MockDisplaylessGlasses {
-}
 extension MWDATMockDevice.CameraFacing : Swift.Equatable {}
 extension MWDATMockDevice.CameraFacing : Swift.Hashable {}
+extension MWDATMockDevice.GlassesModel : Swift.Equatable {}
+extension MWDATMockDevice.GlassesModel : Swift.Hashable {}
+extension MWDATMockDevice.GlassesModel : Swift.RawRepresentable {}
+extension MWDATMockDevice.MockDeviceKitError : Swift.Hashable {}
 extension MWDATMockDevice.MockDeviceKitConfig : Swift.BitwiseCopyable {}
