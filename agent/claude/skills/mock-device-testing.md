@@ -11,8 +11,8 @@ Since `flutter_meta_wearables_dat` 0.4.0 the mock APIs live in a separate option
 ```yaml
 # pubspec.yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.6.0
-  flutter_meta_wearables_dat_mock_device: ^0.6.0
+  flutter_meta_wearables_dat: ^0.7.0
+  flutter_meta_wearables_dat_mock_device: ^0.7.0
 ```
 
 ```dart
@@ -36,7 +36,9 @@ await MetaWearablesDatMockDevice.configure(
 ## Creating a mock device
 
 ```dart
-final deviceUUID = await MetaWearablesDatMockDevice.pairRayBanMeta();
+// `model` defaults to GlassesModel.rayBanMeta. Other values: oakleyMetaHSTN,
+// oakleyMetaVanguard, rayBanMetaOptics, metaGlasses.
+final deviceUUID = await MetaWearablesDatMockDevice.pairGlasses();
 // Returns a UUID string, e.g. "550e8400-e29b-41d4-a716-446655440000"
 ```
 
@@ -91,7 +93,7 @@ final textureId = await MetaWearablesDat.startStreamSession(
 
 ```dart
 await MetaWearablesDat.stopStreamSession(deviceUUID);
-await MetaWearablesDatMockDevice.unpairRayBanMeta(deviceUUID);
+await MetaWearablesDatMockDevice.unpairGlasses(deviceUUID);
 ```
 
 ## Key differences from real devices

@@ -1,8 +1,65 @@
+// ⚠️ Reference snapshot of the DAT public API — may lag the vendored binaries.
+// Authoritative source: the vendored `.swiftinterface` under
+// ios/flutter_meta_wearables_dat/Frameworks/MWDATCamera.xcframework/.../*.swiftinterface
 import AVFoundation
 import CoreMedia
 import Foundation
 import MWDATCore
 import UIKit
+
+public enum CaptureError : MWDATCore.DatError, Equatable {
+
+    case photo_capture_timeout
+
+    case photo_capture_failed
+
+    /// A human-readable description of the error suitable for logging, debugging,
+    /// and display to developers. This should return the English version of the error.
+    public var description: String { get }
+
+    /// A localized message describing what error occurred.
+    public var errorDescription: String? { get }
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCamera.CaptureError, b: MWDATCamera.CaptureError) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension CaptureError : Hashable {
+}
 
 /// A device selector that automatically selects the best available device.
 /// Selects the first connected device from the devices list.
@@ -168,22 +225,12 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
     /// -> `.streaming` (with device).
     @objc final public func start()
 
-    /// Starts video streaming from the device and calls the completion handler when the start
-    /// request has been processed.
-    ///
-    /// The completion handler does not report streaming errors. Subscribe to `onError`,
-    /// `addErrorListener(_:)`, or `NSNotification.streamErrorOccurred` to observe failures.
-    @objc(startWithCompletion:) final public func start(completion: (@convention(block) () -> Void)?)
-
     /// Stops video streaming and releases all resources.
     ///
     /// Shuts down the streaming pipeline and transitions to `.stopped` state.
     ///
     /// State transitions: Any state -> `.stopping` -> `.stopped`
     @objc final public func stop()
-
-    /// Stops video streaming and calls the completion handler when the stop transition completes.
-    @objc(stopWithCompletion:) final public func stop(completion: (@convention(block) () -> Void)?)
 
     /// Captures a still photo during streaming.
     ///
@@ -193,7 +240,8 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
     ///
     /// - Parameter format: The desired image format.
     /// - Returns: `true` if the capture request was accepted, `false` if no device session is
-    ///   active or a capture is already in progress.
+    ///   active, no high-bandwidth link lease (BTC or WiFi) is held, or a capture is already in
+    ///   progress.
     @discardableResult
     @objc final public func capturePhoto(format: MWDATCamera.ObjC_PhotoCaptureFormat) -> Bool
 
@@ -694,14 +742,14 @@ final public class Stream : Sendable {
     /// - ``StreamError/permissionDenied``
     /// - ``StreamError/hingesClosed``
     /// - ``StreamError/internalError``
-    final public func start() async
+    final public func start()
 
     /// Stops video streaming and releases all resources.
     ///
     /// Shuts down the streaming pipeline and transitions to `.stopped` state.
     ///
     /// State transitions: Any state -> `.stopping` -> `.stopped`
-    final public func stop() async
+    final public func stop()
 
     /// Captures a still photo during streaming.
     ///
@@ -711,15 +759,10 @@ final public class Stream : Sendable {
     ///
     /// - Parameter format: The desired image format.
     /// - Returns: `true` if the capture request was accepted, `false` if no device session is
-    ///   active, a capture is already in progress, or the underlying capture request fails.
+    ///   active, no high-bandwidth link lease (BTC or WiFi) is held, a capture is already in
+    ///   progress, or the underlying capture request fails.
     @discardableResult
     final public func capturePhoto(format: MWDATCamera.PhotoCaptureFormat) -> Bool
-}
-
-extension Stream : MWDATCore.Capability {
-
-    /// The current state of this capability.
-    final public var capabilityState: MWDATCore.CapabilityState { get }
 }
 
 /// Configuration for a media streaming session with a Meta Wearables device.
@@ -748,7 +791,7 @@ public struct StreamConfiguration : Sendable {
 }
 
 /// Errors that can occur during streaming sessions.
-public enum StreamError : Error, Equatable, LocalizedError {
+public enum StreamError : MWDATCore.DatError, Equatable {
 
     /// An internal error occurred.
     case internalError
@@ -784,6 +827,9 @@ public enum StreamError : Error, Equatable, LocalizedError {
     case batteryCritical
 
     /// A description of the error
+    public var description: String { get }
+
+    /// A localized message describing what error occurred.
     public var errorDescription: String? { get }
 
     /// Returns a Boolean value indicating whether two values are equal.

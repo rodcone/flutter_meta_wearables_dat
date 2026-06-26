@@ -1,3 +1,9 @@
+## 0.7.0
+
+* Update to Meta Wearables DAT **0.8.0**.
+* **BREAKING:** `pairRayBanMeta()` → `pairGlasses({GlassesModel model = GlassesModel.rayBanMeta})` and `unpairRayBanMeta(uuid)` → `unpairGlasses(uuid)`.
+* New `GlassesModel` enum to simulate any supported model: `rayBanMeta`, `oakleyMetaHSTN`, `oakleyMetaVanguard`, `rayBanMetaOptics`, `metaGlasses`.
+
 ## 0.6.1
 
 * Align version with core package's 0.6.1 release. No API changes.

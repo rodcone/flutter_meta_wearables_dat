@@ -11,6 +11,8 @@ class MockDeviceProvider extends ChangeNotifier {
   bool _isPoweredOn = false;
   bool _isDonned = false;
   CameraFacing? _cameraFacing;
+  GlassesModel _selectedModel = GlassesModel.rayBanMeta;
+  GlassesModel? _pairedModel;
 
   String? get deviceUUID => _deviceUUID;
   bool get hasDevice => _deviceUUID != null;
@@ -22,18 +24,34 @@ class MockDeviceProvider extends ChangeNotifier {
   bool get isActive => _isPoweredOn && _isDonned;
   CameraFacing? get cameraFacing => _cameraFacing;
 
-  Future<void> pairMockRayBanMeta() async {
-    unawaited(HapticFeedback.lightImpact());
+  /// The model to pair next (driven by the model picker in the UI).
+  GlassesModel get selectedModel => _selectedModel;
 
-    final deviceUUID = await MetaWearablesDatMockDevice.pairRayBanMeta();
-    _deviceUUID = deviceUUID;
+  /// The model of the currently paired mock device, or `null` if none.
+  GlassesModel? get pairedModel => _pairedModel;
+
+  void selectModel(GlassesModel model) {
+    if (_selectedModel == model) return;
+    _selectedModel = model;
     notifyListeners();
   }
 
-  Future<void> unpairMockRayBanMeta() async {
+  Future<void> pairMockGlasses() async {
+    unawaited(HapticFeedback.lightImpact());
+
+    final deviceUUID = await MetaWearablesDatMockDevice.pairGlasses(
+      model: _selectedModel,
+    );
+    _deviceUUID = deviceUUID;
+    _pairedModel = _selectedModel;
+    notifyListeners();
+  }
+
+  Future<void> unpairMockGlasses() async {
     if (_deviceUUID == null) return;
-    await MetaWearablesDatMockDevice.unpairRayBanMeta(_deviceUUID!);
+    await MetaWearablesDatMockDevice.unpairGlasses(_deviceUUID!);
     _deviceUUID = null;
+    _pairedModel = null;
     _isPoweredOn = false;
     _isDonned = false;
     _cameraFacing = null;

@@ -37,6 +37,25 @@ enum CameraFacing {
   final String value;
 }
 
+/// A Meta Wearables glasses model that MockDeviceKit can simulate.
+///
+/// Mirrors the DAT SDK's `GlassesModel` (DAT 0.8.0+). Pass one to
+/// [MetaWearablesDatMockDevice.pairGlasses] to pick which device the mock
+/// pairs as; the resulting device reports the matching `WearableDeviceType`.
+enum GlassesModel {
+  rayBanMeta('rayBanMeta'),
+  oakleyMetaHSTN('oakleyMetaHSTN'),
+  oakleyMetaVanguard('oakleyMetaVanguard'),
+  rayBanMetaOptics('rayBanMetaOptics'),
+  metaGlasses('metaGlasses');
+
+  const GlassesModel(this.value);
+
+  /// String token sent over the platform channel; the native layer maps it to
+  /// the SDK's `GlassesModel` enum case.
+  final String value;
+}
+
 /// Public façade for the optional MockDeviceKit add-on.
 ///
 /// MockDeviceKit lets you exercise the full registration / pairing / streaming
@@ -48,7 +67,7 @@ enum CameraFacing {
 class MetaWearablesDatMockDevice {
   /// Configures the mock device subsystem.
   ///
-  /// Call before [pairRayBanMeta] to simulate specific registration /
+  /// Call before [pairGlasses] to simulate specific registration /
   /// permission states. Calling this after devices have been paired tears
   /// down the existing mock state and re-enables MockDeviceKit with the new
   /// configuration.
@@ -73,14 +92,22 @@ class MetaWearablesDatMockDevice {
     return MetaWearablesDatMockDevicePlatform.instance.disable();
   }
 
-  /// Pairs a mock RayBan Meta device. Returns the new device's UUID.
-  static Future<String?> pairRayBanMeta() {
-    return MetaWearablesDatMockDevicePlatform.instance.pairRayBanMeta();
+  /// Pairs a mock glasses device of the given [model]. Returns the new
+  /// device's UUID, or `null` if pairing failed.
+  ///
+  /// Defaults to [GlassesModel.rayBanMeta]. The DAT SDK simulates the chosen
+  /// model, so the paired device reports the matching `WearableDeviceType`.
+  static Future<String?> pairGlasses({
+    GlassesModel model = GlassesModel.rayBanMeta,
+  }) {
+    return MetaWearablesDatMockDevicePlatform.instance.pairGlasses(
+      model: model,
+    );
   }
 
-  /// Unpairs a previously paired mock RayBan Meta device.
-  static Future<bool> unpairRayBanMeta(String deviceUUID) {
-    return MetaWearablesDatMockDevicePlatform.instance.unpairRayBanMeta(
+  /// Unpairs a previously paired mock glasses device.
+  static Future<bool> unpairGlasses(String deviceUUID) {
+    return MetaWearablesDatMockDevicePlatform.instance.unpairGlasses(
       deviceUUID,
     );
   }
@@ -118,22 +145,22 @@ class MetaWearablesDatMockDevice {
         .setPermissionRequestResult(permission, status);
   }
 
-  /// Powers on a mock RayBan Meta device.
+  /// Powers on a mock glasses device.
   static Future<bool> powerOn(String deviceUUID) {
     return MetaWearablesDatMockDevicePlatform.instance.powerOn(deviceUUID);
   }
 
-  /// Powers off a mock RayBan Meta device.
+  /// Powers off a mock glasses device.
   static Future<bool> powerOff(String deviceUUID) {
     return MetaWearablesDatMockDevicePlatform.instance.powerOff(deviceUUID);
   }
 
-  /// Simulates putting on (donning) a mock RayBan Meta device.
+  /// Simulates putting on (donning) a mock glasses device.
   static Future<bool> don(String deviceUUID) {
     return MetaWearablesDatMockDevicePlatform.instance.don(deviceUUID);
   }
 
-  /// Simulates taking off (doffing) a mock RayBan Meta device.
+  /// Simulates taking off (doffing) a mock glasses device.
   static Future<bool> doff(String deviceUUID) {
     return MetaWearablesDatMockDevicePlatform.instance.doff(deviceUUID);
   }

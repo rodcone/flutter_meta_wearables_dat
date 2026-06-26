@@ -108,10 +108,10 @@ Update the version in **both** `build.gradle` files (each plugin owns its own `e
 
 ```groovy
 // android/build.gradle (core)
-ext.mwdat_version = "0.7.0"  // mwdat-core, mwdat-camera
+ext.mwdat_version = "0.8.0"  // mwdat-core, mwdat-camera
 
 // flutter_meta_wearables_dat_mock_device/android/build.gradle
-ext.mwdat_version = "0.7.0"  // mwdat-mockdevice
+ext.mwdat_version = "0.8.0"  // mwdat-mockdevice
 ```
 
 Keep the two values in sync — mixing versions across the two plugins risks ABI breakage at runtime.

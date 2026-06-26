@@ -7,7 +7,8 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.meta.wearable.dat.mockdevice.MockDeviceKit
-import com.meta.wearable.dat.mockdevice.api.MockRaybanMeta
+import com.meta.wearable.dat.mockdevice.api.GlassesModel
+import com.meta.wearable.dat.mockdevice.api.MockGlasses
 import com.meta.wearable.dat.mockdevice.api.camera.CameraFacing
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -120,8 +121,8 @@ class MetaWearablesDatMockDevicePlugin :
         when (call.method) {
             "configure" -> configure(call, result)
             "disable" -> disable(result)
-            "pairRayBanMeta" -> pairRayBanMeta(result)
-            "unpairRayBanMeta" -> unpairRayBanMeta(call, result)
+            "pairGlasses" -> pairGlasses(call, result)
+            "unpairGlasses" -> unpairGlasses(call, result)
             "powerOn", "powerOff", "don", "doff" -> mockDeviceAction(call, result)
             "setCameraFeed" -> setCameraFeed(call, result)
             "setCameraFacing" -> setCameraFacing(call, result)
@@ -194,22 +195,49 @@ class MetaWearablesDatMockDevicePlugin :
         }
     }
 
-    private fun pairRayBanMeta(result: Result) {
+    /** Maps the Dart `GlassesModel.value` token to the SDK's `GlassesModel`. */
+    private fun parseGlassesModel(raw: String?): GlassesModel? =
+            when (raw) {
+                "rayBanMeta" -> GlassesModel.RAYBAN_META
+                "oakleyMetaHSTN" -> GlassesModel.OAKLEY_META_HSTN
+                "oakleyMetaVanguard" -> GlassesModel.OAKLEY_META_VANGUARD
+                "rayBanMetaOptics" -> GlassesModel.RAYBAN_META_OPTICS
+                "metaGlasses" -> GlassesModel.META_GLASSES
+                else -> null
+            }
+
+    private fun pairGlasses(call: MethodCall, result: Result) {
         val app = application
         if (app == null) {
             result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
             return
         }
+        // Default to Ray-Ban Meta to match the Dart facade's default.
+        val model = parseGlassesModel(call.argument<String>("model") ?: "rayBanMeta")
+        if (model == null) {
+            result.error(
+                    "INVALID_ARGS",
+                    "Unknown glasses model: ${call.argument<String>("model")}",
+                    null,
+            )
+            return
+        }
         try {
             ensureMockKitEnabled()
-            val mockDevice = MockDeviceKit.getInstance(app).pairRaybanMeta()
-            result.success(mockDevice.deviceIdentifier.toString())
+            MockDeviceKit.getInstance(app)
+                    .pairGlasses(model)
+                    .onSuccess { glasses ->
+                        result.success(glasses.deviceIdentifier.toString())
+                    }
+                    .onFailure { error, _ ->
+                        result.error("MOCK_DEVICE_ERROR", error.description, null)
+                    }
         } catch (e: Exception) {
             result.error("MOCK_DEVICE_ERROR", e.message ?: "Failed to pair mock device", null)
         }
     }
 
-    private fun unpairRayBanMeta(call: MethodCall, result: Result) {
+    private fun unpairGlasses(call: MethodCall, result: Result) {
         val app = application
         if (app == null) {
             result.error("MOCK_DEVICE_ERROR", "Application context is not available.", null)
@@ -283,7 +311,7 @@ class MetaWearablesDatMockDevicePlugin :
         try {
             val kit = MockDeviceKit.getInstance(app)
             val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
-            if (device is MockRaybanMeta) {
+            if (device is MockGlasses) {
                 if (videoPath != null) {
                     val uri = android.net.Uri.parse(videoPath)
                     // MockDeviceKit extracts raw NAL units from the file without
@@ -410,7 +438,7 @@ class MetaWearablesDatMockDevicePlugin :
         try {
             val kit = MockDeviceKit.getInstance(app)
             val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
-            if (device is MockRaybanMeta) {
+            if (device is MockGlasses) {
                 // Physical camera frames are already oriented correctly by the
                 // SDK's internal CameraFrameRotator — clear any rotation left
                 // over from a previous video-feed session.
@@ -443,7 +471,7 @@ class MetaWearablesDatMockDevicePlugin :
         try {
             val kit = MockDeviceKit.getInstance(app)
             val device = kit.pairedDevices.find { it.deviceIdentifier.toString() == deviceId }
-            if (device is MockRaybanMeta) {
+            if (device is MockGlasses) {
                 if (imagePath != null) {
                     device.services.camera.setCapturedImage(android.net.Uri.parse(imagePath))
                 }

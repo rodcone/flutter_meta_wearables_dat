@@ -770,6 +770,7 @@ class MetaWearablesDatPlugin :
             com.meta.wearable.dat.core.types.DeviceType.META_RAYBAN_DISPLAY ->
                     "metaRayBanDisplay"
             com.meta.wearable.dat.core.types.DeviceType.RAYBAN_META_OPTICS -> "rayBanMetaOptics"
+            com.meta.wearable.dat.core.types.DeviceType.META_GLASSES -> "metaGlasses"
             com.meta.wearable.dat.core.types.DeviceType.UNKNOWN -> "unknown"
             else -> "unknown"
         }

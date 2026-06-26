@@ -33,11 +33,14 @@ migrate_working_dir/
 .dart_tool/
 .flutter-plugins-dependencies
 /build/
+# The mock add-on is a sibling package, so the root-anchored /build/ above
+# doesn't cover its build artifacts.
+flutter_meta_wearables_dat_mock_device/build/
 /coverage/
 
-# Meta Sample app used as reference
-doc/ios/CameraAccess/
-doc/android/CameraAccess/
+# Meta GitHub repos used as reference
+doc/android/meta-wearables-dat-android/
+doc/ios/meta-wearables-dat-ios/
 
 # --- SENSITIVE: Never commit these ---
 # Android local.properties (contains flutter.sdk path + GitHub token for DAT SDK)

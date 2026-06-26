@@ -16,6 +16,14 @@ void main() {
         WearableDeviceType.fromCode('metaRayBanDisplay'),
         WearableDeviceType.metaRayBanDisplay,
       );
+      expect(
+        WearableDeviceType.fromCode('rayBanMetaOptics'),
+        WearableDeviceType.rayBanMetaOptics,
+      );
+      expect(
+        WearableDeviceType.fromCode('metaGlasses'),
+        WearableDeviceType.metaGlasses,
+      );
     });
 
     test('falls back to unknown for null/unrecognized', () {

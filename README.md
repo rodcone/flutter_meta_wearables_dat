@@ -456,8 +456,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.6.0
-  flutter_meta_wearables_dat_mock_device: ^0.6.0
+  flutter_meta_wearables_dat: ^0.7.0
+  flutter_meta_wearables_dat_mock_device: ^0.7.0
 ```
 
 ```dart
@@ -470,7 +470,8 @@ await MetaWearablesDatMockDevice.configure(
   initialPermissionsGranted: true,
 );
 
-final uuid = await MetaWearablesDatMockDevice.pairRayBanMeta();
+// Pick any model via GlassesModel; defaults to GlassesModel.rayBanMeta.
+final uuid = await MetaWearablesDatMockDevice.pairGlasses();
 await MetaWearablesDatMockDevice.powerOn(uuid);
 await MetaWearablesDatMockDevice.don(uuid);
 await MetaWearablesDatMockDevice.setCameraFacing(uuid, CameraFacing.back);

@@ -232,6 +232,7 @@ enum WearableDeviceType {
   oakleyMetaVanguard('oakleyMetaVanguard'),
   metaRayBanDisplay('metaRayBanDisplay'),
   rayBanMetaOptics('rayBanMetaOptics'),
+  metaGlasses('metaGlasses'),
 
   /// Model not reported, or a newer model this plugin version predates.
   unknown('unknown');
@@ -729,6 +730,21 @@ class MetaWearablesDat {
 
   /// Captures a photo from the active stream session. [deviceId] is accepted
   /// for call symmetry; the capture targets the active session.
+  ///
+  /// On failure throws a `PlatformException`. Codes:
+  /// - `SESSION_NOT_FOUND` — no active stream session.
+  /// - `CAPTURE_NOT_READY` — the request was rejected synchronously (no
+  ///   high-bandwidth BTC/WiFi lease, or a capture already in progress).
+  /// - `CAPTURE_PHOTO_FAILED` — the capture failed or timed out. `details`
+  ///   carries a granular reason string.
+  ///
+  /// The granular `details` reasons differ per platform because the two SDKs'
+  /// `CaptureError` types differ:
+  /// - Android: `deviceDisconnected`, `notStreaming`, `captureInProgress`,
+  ///   `captureFailed` (from the SDK's typed `CaptureError`).
+  /// - iOS: `photoCaptureTimeout` — the SDK's `capturePhoto` returns only a
+  ///   bool and never delivers a typed `CaptureError`, so the plugin enforces a
+  ///   client-side timeout to guarantee this `Future` always resolves.
   static Future<CapturedPhoto> capturePhoto(
     String? deviceId, {
     PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,

@@ -1,3 +1,12 @@
+## 0.7.0
+**BREAKING CHANGES**
+* Update to Meta Wearables DAT **0.8.0** on both platforms.
+* Add the **Meta Glasses** device type (`WearableDeviceType.metaGlasses`).
+* Android: observe the new `StreamState.paused` mid-session (parity with iOS).
+* iOS: `capturePhoto()` no longer hangs on an accepted-but-undelivered capture — it now times out with `PlatformException(CAPTURE_PHOTO_FAILED, details: photoCaptureTimeout)`.
+* Surface the SDK's new registration/unregistration `timeout` errors.
+* **Mock add-on:** `pairRayBanMeta()` → `pairGlasses(model:)` with a new `GlassesModel` enum (see its changelog).
+
 ## 0.6.1
 * iOS: Fix `noEligibleDevice` and empty `getDevices()` right after camera permission grant by keeping the SDK device list warm.
 * `requestCameraPermission()` waits briefly for device discovery before returning (iOS and Android).

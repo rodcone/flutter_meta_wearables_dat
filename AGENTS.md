@@ -469,8 +469,8 @@ Develop and test without physical Meta glasses. Mock support lives in the option
 ```yaml
 # pubspec.yaml — add only in dev/staging configs
 dependencies:
-  flutter_meta_wearables_dat: ^0.6.0
-  flutter_meta_wearables_dat_mock_device: ^0.6.0
+  flutter_meta_wearables_dat: ^0.7.0
+  flutter_meta_wearables_dat_mock_device: ^0.7.0
 ```
 
 ```dart
@@ -483,8 +483,10 @@ await MetaWearablesDatMockDevice.configure(
   initialPermissionsGranted: true,
 );
 
-// Pair a simulated Ray-Ban Meta backed by the phone's camera
-final deviceUUID = await MetaWearablesDatMockDevice.pairRayBanMeta();
+// Pair a simulated pair of glasses backed by the phone's camera.
+// `model` defaults to GlassesModel.rayBanMeta — pass any GlassesModel
+// (rayBanMeta, oakleyMetaHSTN, oakleyMetaVanguard, rayBanMetaOptics, metaGlasses).
+final deviceUUID = await MetaWearablesDatMockDevice.pairGlasses();
 
 // Simulate glasses lifecycle
 await MetaWearablesDatMockDevice.powerOn(deviceUUID!);
@@ -501,7 +503,7 @@ await MetaWearablesDatMockDevice.setCapturedImage(deviceUUID, imagePath);
 final textureId = await MetaWearablesDat.startStreamSession(deviceUUID);
 
 // Clean up
-await MetaWearablesDatMockDevice.unpairRayBanMeta(deviceUUID);
+await MetaWearablesDatMockDevice.unpairGlasses(deviceUUID);
 ```
 
 Mock-only types (`Permission`, `PermissionStatus`, `CameraFacing`) are exported from `flutter_meta_wearables_dat_mock_device`. Apps using the mock package **must** declare `NSCameraUsageDescription` (iOS) and the `CAMERA` permission (Android), since the simulated glasses use the phone's camera as their feed.

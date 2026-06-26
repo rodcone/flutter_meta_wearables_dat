@@ -14,8 +14,8 @@ Optional **MockDeviceKit** add-on for [`flutter_meta_wearables_dat`](https://pub
 ```yaml
 # pubspec.yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.5.2
-  flutter_meta_wearables_dat_mock_device: ^0.5.2
+  flutter_meta_wearables_dat: ^0.7.0
+  flutter_meta_wearables_dat_mock_device: ^0.7.0
 ```
 
 Apps using this package **must** declare the camera permission strings the simulated feed needs:
@@ -37,7 +37,8 @@ await MetaWearablesDatMockDevice.configure(
   initialPermissionsGranted: true,
 );
 
-final uuid = await MetaWearablesDatMockDevice.pairRayBanMeta();
+// `model` defaults to GlassesModel.rayBanMeta; pass any GlassesModel value.
+final uuid = await MetaWearablesDatMockDevice.pairGlasses();
 await MetaWearablesDatMockDevice.powerOn(uuid!);
 await MetaWearablesDatMockDevice.don(uuid);
 await MetaWearablesDatMockDevice.setCameraFacing(uuid, CameraFacing.back);
@@ -58,7 +59,7 @@ The `Permission`, `PermissionStatus`, and `CameraFacing` enums are exported from
 |---|---|
 | `configure({initiallyRegistered, initialPermissionsGranted})` | Reset & enable the mock subsystem |
 | `disable()` | Tear down the mock subsystem |
-| `pairRayBanMeta()` / `unpairRayBanMeta(uuid)` | Pair / unpair a simulated device |
+| `pairGlasses({model})` / `unpairGlasses(uuid)` | Pair / unpair a simulated device (`model` defaults to `GlassesModel.rayBanMeta`) |
 | `powerOn(uuid)` / `powerOff(uuid)` | Power the device on / off |
 | `don(uuid)` / `doff(uuid)` | Simulate the user wearing / removing the glasses |
 | `setCameraFacing(uuid, facing)` | Switch front / back camera |

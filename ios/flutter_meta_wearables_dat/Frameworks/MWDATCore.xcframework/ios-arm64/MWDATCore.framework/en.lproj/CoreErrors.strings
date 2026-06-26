@@ -1,0 +1,83 @@
+/* (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary. */
+
+/* Localized error descriptions.
+   Keys match Android strings.xml for cross-platform parity. */
+
+/* Permission */
+"dat_error_permission_connection_error" = "A connection error occurred while communicating with the device";
+"dat_error_permission_internal_error" = "An unexpected internal error occurred";
+"dat_error_permission_meta_ai_not_installed" = "The Meta AI companion app is not installed on the device";
+"dat_error_permission_no_device" = "No wearable devices have been discovered or registered";
+"dat_error_permission_no_device_with_connection" = "All discovered devices are powered off or disconnected";
+"dat_error_permission_request_in_progress" = "A permission request is already in progress";
+"dat_error_permission_request_timeout" = "The permission request exceeded the allowed time limit";
+
+/* Registration */
+"dat_error_registration_already_registered" = "User is already registered when attempting to register again";
+"dat_error_registration_configuration_invalid" = "The Wearables Device Access Toolkit configuration is invalid or incomplete";
+"dat_error_registration_failed_to_register" = "Registration process failed for an unspecified reason";
+"dat_error_registration_failed_to_unregister" = "Unregistration process failed for an unspecified reason";
+"dat_error_registration_incompatible_sdk_level" = "Android SDK level is below the minimum supported by the Wearables Device Access Toolkit";
+"dat_error_registration_meta_ai_not_installed" = "The Meta AI app is not installed on the device, which is required for registration";
+"dat_error_registration_network_unavailable" = "No internet connection available. Please check your connection and try again";
+"dat_error_registration_timeout" = "Registration timeout expired, no response from Meta AI";
+"dat_error_registration_unknown" = "An unknown error occurred during the registration process";
+
+/* Session */
+"dat_error_session_already_exists" = "A session already exists for this device";
+"dat_error_session_already_stopped" = "Session has already been stopped";
+"dat_error_session_battery_critical" = "Device battery critically low";
+"dat_error_session_capability_already_active" = "A capability of this type is already active on the session";
+"dat_error_session_capability_denied" = "Capability denied by device";
+"dat_error_session_capability_not_found" = "No capability of this type is attached to the session";
+"dat_error_session_dat_app_on_the_glasses_update_required" = "Your glasses need an update. Go to App Connections page in Meta AI to update";
+"dat_error_session_dat_app_update_required" = "The app on your glasses needs an update before this session can start. Go to the App Connections page in Meta AI to update it.";
+"dat_error_session_device_disconnected" = "Device disconnected";
+"dat_error_session_device_powered_off" = "Device powered off";
+"dat_error_session_dwa_unavailable" = "DAT Wearables App on the glasses is not reachable";
+"dat_error_session_ended_by_device" = "Session ended by device";
+"dat_error_session_idle" = "Session is idle. Start the session before adding capabilities";
+"dat_error_session_no_eligible_device" = "No eligible device available";
+"dat_error_session_not_initialized" = "Wearables SDK is not initialized";
+"dat_error_session_peak_power_shutdown" = "Device peak power shutdown";
+"dat_error_session_thermal_critical" = "Device thermal state is critical";
+"dat_error_session_thermal_emergency" = "Device thermal state is emergency — shutting down";
+"dat_error_session_unexpected_error" = "An unexpected error occurred";
+
+/* Unregistration */
+"dat_error_unregistration_already_unregistered" = "User is already unregistered when attempting to unregister again";
+"dat_error_unregistration_configuration_invalid" = "The Wearables Device Access Toolkit configuration is invalid or incomplete";
+"dat_error_unregistration_meta_ai_not_installed" = "The Meta AI app is not installed on the device, which is required for unregistration";
+"dat_error_unregistration_timeout" = "Unregistration timeout expired, no response from Meta AI";
+"dat_error_unregistration_unknown" = "An unknown error occurred during the unregistration process";
+
+/* Voice */
+"dat_error_voice_action_failed" = "Action failed";
+"dat_error_voice_channel_error" = "Channel error occurred";
+"dat_error_voice_channel_not_connected" = "Channel is not connected";
+"dat_error_voice_channel_setup_failed" = "Failed to setup AI Actions channel";
+"dat_error_voice_connection_not_available" = "Device connection not available";
+"dat_error_voice_device_not_found" = "Device not found";
+"dat_error_voice_fail_to_send_init_request" = "Failed to send init request";
+"dat_error_voice_init_request_error" = "Failed to initialize request";
+"dat_error_voice_init_request_returned_error" = "Init request returned an error";
+"dat_error_voice_invalid_action_message_proto" = "Invalid action message proto";
+"dat_error_voice_invalid_ai_action" = "Invalid AI action: missing requestId";
+"dat_error_voice_invalid_message_proto" = "Invalid Message proto";
+"dat_error_voice_invalid_session_state" = "Invalid session state for operation";
+"dat_error_voice_invalid_wearables_interface" = "Invalid WearablesInterface provided";
+"dat_error_voice_send_message_error" = "Failed to send message";
+"dat_error_voice_unknown_message_type" = "Unknown message type received";
+
+/* Navigation */
+"dat_error_navigation_meta_ai_not_installed" = "The Meta AI app is not installed on the device";
+"dat_error_navigation_not_registered" = "The DAT app is not registered with AI glasses";
+
+/* Wearables */
+"dat_error_wearables_already_configured" = "Already configured";
+"dat_error_wearables_already_initialized" = "Wearables has been already initialized.";
+"dat_error_wearables_configuration_error" = "Configuration error";
+"dat_error_wearables_internal_error" = "Internal error";
+"dat_error_wearables_not_initialized" = "Wearables not initialized. Call Wearables.initialize(context) first.";
+"dat_error_wearables_url_registration_error" = "Registration error";
+"dat_error_wearables_url_unregistration_error" = "Unregistration error";
