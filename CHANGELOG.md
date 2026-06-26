@@ -1,10 +1,11 @@
 ## 0.7.0
+**BREAKING CHANGES**
 * Update to Meta Wearables DAT **0.8.0** on both platforms.
-* Add the **Meta Glasses** device type (`WearableDeviceType.metaGlasses`); `getDevices()` and the active-device stream now report it instead of `unknown`.
-* Observe the new `StreamState.paused` on Android (the camera stream can now report a paused state mid-session, matching iOS).
-* `capturePhoto()` no longer hangs if a capture is accepted but never completes — iOS now enforces a client-side timeout and throws a `PlatformException` (`CAPTURE_PHOTO_FAILED`, `details: photoCaptureTimeout`). See the `capturePhoto` docs for the full per-platform error contract.
-* Registration/unregistration now surface the SDK's new `timeout` error with a clear message.
-* **Mock add-on:** `pairRayBanMeta()` is replaced by `pairGlasses(model:)` with a new `GlassesModel` enum (Ray-Ban Meta, Oakley Meta HSTN, Oakley Meta Vanguard, Ray-Ban Meta Optics, Meta Glasses). See `flutter_meta_wearables_dat_mock_device`'s changelog for the migration.
+* Add the **Meta Glasses** device type (`WearableDeviceType.metaGlasses`).
+* Android: observe the new `StreamState.paused` mid-session (parity with iOS).
+* iOS: `capturePhoto()` no longer hangs on an accepted-but-undelivered capture — it now times out with `PlatformException(CAPTURE_PHOTO_FAILED, details: photoCaptureTimeout)`.
+* Surface the SDK's new registration/unregistration `timeout` errors.
+* **Mock add-on:** `pairRayBanMeta()` → `pairGlasses(model:)` with a new `GlassesModel` enum (see its changelog).
 
 ## 0.6.1
 * iOS: Fix `noEligibleDevice` and empty `getDevices()` right after camera permission grant by keeping the SDK device list warm.
