@@ -1,3 +1,7 @@
+## 0.6.1
+* iOS: Fix `noEligibleDevice` and empty `getDevices()` right after camera permission grant by keeping the SDK device list warm.
+* `requestCameraPermission()` waits briefly for device discovery before returning (iOS and Android).
+
 ## 0.6.0
 * Add `getDevices()` and wearable device types for listing paired glasses, connection state, compatibility, and the active/streaming pair.
 * Add device pinning via `startStreamSession(deviceId)` (`null` keeps automatic selection), with `STREAM_ACTIVE` protection and a paired-device picker in the example app.

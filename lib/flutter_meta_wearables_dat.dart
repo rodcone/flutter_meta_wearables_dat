@@ -657,7 +657,15 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.requestAndroidPermissions();
   }
 
-  /// Requests camera permission.
+  /// Requests camera permission from the connected glasses (shows the Meta AI
+  /// camera-access prompt when not already granted).
+  ///
+  /// On a grant, the call waits briefly (bounded) for the glasses to surface in
+  /// the SDK device flow before returning, so an immediately-following
+  /// [startStreamSession] or [getDevices] does not race device discovery and
+  /// hit `noEligibleDevice` / an empty list. Returns as soon as a device
+  /// resolves; otherwise after a short timeout. A `false` return means the user
+  /// denied the request.
   static Future<bool> requestCameraPermission() {
     return MetaWearablesDatPlatform.instance.requestCameraPermission();
   }

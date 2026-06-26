@@ -62,6 +62,11 @@ class MetaWearablesDatPlugin :
         private const val PERMISSION_REQUEST_CODE = 48291
         private const val BT_PERMISSION_REQUEST_CODE = 48292
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 48294
+        // Upper bound on how long we wait, after a camera-permission grant, for
+        // the shared selector to resolve a device before returning to Dart.
+        // Granting permission implies the glasses are connected, so a device
+        // should appear well inside this bound.
+        private const val PERMISSION_DEVICE_RESOLVE_TIMEOUT_MS = 8_000L
         private val REQUIRED_PERMISSIONS: Array<String> =
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                     arrayOf(
@@ -541,6 +546,7 @@ class MetaWearablesDatPlugin :
 
                     val currentStatus = checkCameraPermissionStatus(result) ?: return@withLock
                     if (currentStatus == PermissionStatus.Granted) {
+                        awaitDeviceAfterPermissionGrant(returnEarlyIfNoDevices = true)
                         result.success(true)
                         return@withLock
                     }
@@ -582,6 +588,13 @@ class MetaWearablesDatPlugin :
                     }
                     val permissionStatus =
                             parseResult.getOrNull() ?: PermissionStatus.Denied
+                    if (permissionStatus == PermissionStatus.Granted) {
+                        // The grant brings the glasses (back) into the SDK device
+                        // flow. Re-kick monitoring and wait (bounded) for the
+                        // selector to resolve a device so the app's next
+                        // startStreamSession / getDevices doesn't race the SDK.
+                        awaitDeviceAfterPermissionGrant()
+                    }
                     result.success(permissionStatus == PermissionStatus.Granted)
                 } catch (e: Exception) {
                     result.error(
@@ -591,6 +604,38 @@ class MetaWearablesDatPlugin :
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * After a camera-permission grant the glasses (re)surface in the SDK device
+     * flow. Re-kick active-device / device-state monitoring and give the shared
+     * selector a bounded window to resolve a device, so the app's next
+     * startStreamSession / getDevices doesn't race the SDK and hit
+     * noEligibleDevice / an empty list.
+     *
+     * Unlike iOS, Android's `Wearables.devices` is a hot `StateFlow` that stays
+     * warm post-init and the `AutoDeviceSelector` tracks it, so there is no
+     * cold-snapshot device list or permanently-blind selector to rebuild here —
+     * the selector resolves on its own once a device is present. We only need to
+     * (re)kick the observers and wait.
+     */
+    private suspend fun awaitDeviceAfterPermissionGrant(
+            returnEarlyIfNoDevices: Boolean = false,
+    ) {
+        activeDeviceStreamHandler?.restartMonitoring()
+        deviceStateStreamHandler?.restartMonitoring()
+        // Already resolved — nothing to wait for.
+        if (deviceSelector().activeDevice() != null) return
+        // On the already-granted fast path, if the SDK currently lists no
+        // devices there is nothing to resolve — return rather than holding the
+        // permission mutex for the full timeout on a routine re-check.
+        // `Wearables.devices` is a hot StateFlow, so its value reflects current
+        // reality; on a *fresh* grant we instead keep waiting (default false),
+        // since the just-granted device is expected to appear momentarily.
+        if (returnEarlyIfNoDevices && Wearables.devices.value.isEmpty()) return
+        withTimeoutOrNull(PERMISSION_DEVICE_RESOLVE_TIMEOUT_MS) {
+            deviceSelector().activeDeviceFlow().first { it != null }
         }
     }
 
