@@ -418,7 +418,7 @@ class _CodecChip extends StatelessWidget {
       selected: selected,
       onSelected: () {
         final cb = onTap;
-        return cb != null ? (bool _) => cb() : null;
+        return cb != null ? (_) => cb() : null;
       }(),
       showCheckmark: false,
     );
