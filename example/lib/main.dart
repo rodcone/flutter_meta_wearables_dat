@@ -14,7 +14,13 @@ import 'package:flutter_meta_wearables_dat_example/screens/stream/paired_devices
 import 'package:flutter_meta_wearables_dat_example/screens/stream/stream_screen.dart';
 import 'package:provider/provider.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+  
   runApp(const MyApp());
 }
 
@@ -124,9 +130,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // Paired devices — visible whenever registered, including
-                    // while streaming, so the "Streaming" badge stays reachable.
-                    if (deviceProvider.isRegistered)
+                    // Paired devices — only worth surfacing when more than one
+                    // device is connected, since the sheet exists to switch
+                    // between active pairs. Stays reachable while streaming.
+                    if (deviceProvider.isRegistered &&
+                        streamProvider.connectedDeviceCount > 1)
                       Padding(
                         padding: const EdgeInsets.only(right: 5),
                         child: FloatingActionButton.small(
@@ -141,10 +149,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                               builder: (ctx) => const PairedDevicesSheet(),
                             );
                           },
-                          child: const Icon(
-                            Icons.devices,
-                            color: Colors.white,
-                          ),
+                          child: Image.asset('assets/images/cameraAccessIcon.png', width: 24, height: 24, color: Colors.white),
                         ),
                       ),
                     // Settings — hidden while streaming to keep the video clear.
