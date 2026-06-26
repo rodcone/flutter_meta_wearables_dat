@@ -78,9 +78,8 @@ class StreamSessionProvider extends ChangeNotifier {
   /// Number of connected (active) paired devices from the last
   /// [refreshDevices] snapshot. Used to decide whether the paired-devices
   /// picker is worth surfacing — switching only makes sense with 2+ connected.
-  int get connectedDeviceCount => _devices
-      .where((d) => d.linkState == WearableLinkState.connected)
-      .length;
+  int get connectedDeviceCount =>
+      _devices.where((d) => d.linkState == WearableLinkState.connected).length;
 
   /// True while a [refreshDevices] call is in flight.
   bool get devicesLoading => _devicesLoading;

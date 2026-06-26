@@ -1,3 +1,7 @@
+## 0.6.1
+
+* Align version with core package's 0.6.1 release. No API changes.
+
 ## 0.6.0
 
 * Version aligned with the core package's 0.6.0 release (read-only `getDevices()`). No mock-add-on API changes.

@@ -536,11 +536,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private func startDeviceListMonitoring() {
     devicesStreamTask?.cancel()
     // A relaunched subscription hasn't confirmed the current device list yet,
-    // so an empty cache is once again "unknown", not "no devices".
+    // so an empty cache is once again "unknown", not "no devices". Drop the
+    // previous emission too so callers can't observe stale IDs while the new
+    // stream is still waiting for its first value.
+    knownDeviceIds = []
     didReceiveDeviceListEmission = false
     devicesStreamTask = Task { [weak self] in
       guard let self else { return }
       for await ids in Wearables.shared.devicesStream() {
+        if Task.isCancelled { return }
         self.didReceiveDeviceListEmission = true
         self.knownDeviceIds = ids.filter { !$0.isEmpty }
         if !self.knownDeviceIds.isEmpty {
@@ -1193,7 +1197,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // actively observing the device stream (the original bug), whereas the
       // cache reflects the most recent `devicesStream()` emission. Fall back to
       // the snapshot only before the stream has emitted its first value.
-      let ids = knownDeviceIds.isEmpty ? Wearables.shared.devices : knownDeviceIds
+      let ids = didReceiveDeviceListEmission ? knownDeviceIds : Wearables.shared.devices
       for id in ids {
         guard !id.isEmpty else { continue }
         let isActive = (id == active)

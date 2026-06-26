@@ -20,7 +20,7 @@ Future<void> main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
-  
+
   runApp(const MyApp());
 }
 
@@ -149,7 +149,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                               builder: (ctx) => const PairedDevicesSheet(),
                             );
                           },
-                          child: Image.asset('assets/images/cameraAccessIcon.png', width: 24, height: 24, color: Colors.white),
+                          child: Image.asset(
+                            'assets/images/cameraAccessIcon.png',
+                            width: 24,
+                            height: 24,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                     // Settings — hidden while streaming to keep the video clear.
