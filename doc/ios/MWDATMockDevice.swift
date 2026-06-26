@@ -1,3 +1,6 @@
+// ⚠️ Reference snapshot of the DAT MockDevice API — may lag the vendored binaries.
+// Authoritative source: the vendored `.swiftinterface` under
+// flutter_meta_wearables_dat_mock_device/ios/.../Frameworks/MWDATMockDevice.xcframework/.../*.swiftinterface
 import AVFoundation
 import CoreMedia
 import Foundation

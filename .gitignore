@@ -33,6 +33,9 @@ migrate_working_dir/
 .dart_tool/
 .flutter-plugins-dependencies
 /build/
+# The mock add-on is a sibling package, so the root-anchored /build/ above
+# doesn't cover its build artifacts.
+flutter_meta_wearables_dat_mock_device/build/
 /coverage/
 
 # Meta GitHub repos used as reference

@@ -65,13 +65,17 @@ internal class StreamStateStreamHandler : EventChannel.StreamHandler {
         /**
          * Maps Android SDK StreamState to int values expected by Dart.
          *
-         * Android enum: STARTING, STARTED, STREAMING, STOPPING, STOPPED, CLOSED
+         * Android enum: STARTING, STARTED, STREAMING, STOPPING, STOPPED, CLOSED, PAUSED
          * Dart enum:    stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
          *
          * Mapping notes:
          * - STARTED has no direct Dart equivalent; mapped to starting(3) since it precedes streaming.
          * - CLOSED has no direct Dart equivalent; mapped to stopped(1).
-         * - Android has no WAITING_FOR_DEVICE or PAUSED states.
+         * - PAUSED (added in DAT 0.8.0) maps to paused(5).
+         * - Android has no WAITING_FOR_DEVICE state.
+         *
+         * `when` is exhaustive with no `else`, so a new SDK enum value is a
+         * compile error here — intentional, to force an explicit mapping.
          */
         fun mapState(state: StreamState): Int {
             return when (state) {
@@ -80,6 +84,7 @@ internal class StreamStateStreamHandler : EventChannel.StreamHandler {
                 StreamState.STARTING -> 3
                 StreamState.STARTED -> 3
                 StreamState.STREAMING -> 4
+                StreamState.PAUSED -> 5
                 StreamState.CLOSED -> 1
             }
         }

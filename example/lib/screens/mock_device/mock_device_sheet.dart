@@ -9,6 +9,22 @@ import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_da
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+/// Human-readable label for a [GlassesModel] used in the pairing UI.
+String glassesModelLabel(GlassesModel model) {
+  switch (model) {
+    case GlassesModel.rayBanMeta:
+      return 'Ray-Ban Meta';
+    case GlassesModel.oakleyMetaHSTN:
+      return 'Oakley Meta HSTN';
+    case GlassesModel.oakleyMetaVanguard:
+      return 'Oakley Meta Vanguard';
+    case GlassesModel.rayBanMetaOptics:
+      return 'Ray-Ban Meta (Optics)';
+    case GlassesModel.metaGlasses:
+      return 'Meta Glasses';
+  }
+}
+
 class MockDeviceSheet extends StatelessWidget {
   const MockDeviceSheet({super.key});
 
@@ -82,11 +98,41 @@ class _PairingCard extends StatelessWidget {
               ).textTheme.bodyMedium!.copyWith(color: Colors.grey),
             ),
             const Divider(),
+            if (!paired)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  children: [
+                    Text(
+                      'Model',
+                      style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    DropdownButton<GlassesModel>(
+                      value: mockDeviceProvider.selectedModel,
+                      onChanged: (model) {
+                        if (model != null) {
+                          context.read<MockDeviceProvider>().selectModel(model);
+                        }
+                      },
+                      items: [
+                        for (final model in GlassesModel.values)
+                          DropdownMenuItem(
+                            value: model,
+                            child: Text(glassesModelLabel(model)),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             MetaButton.text(
               enabled: !paired,
-              text: 'Pair RayBan Meta',
+              text: 'Pair glasses',
               onPressed: () {
-                context.read<MockDeviceProvider>().pairMockRayBanMeta();
+                context.read<MockDeviceProvider>().pairMockGlasses();
               },
             ),
           ],
@@ -168,7 +214,9 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'RayBan Meta Glasses',
+                        mockDeviceProvider.pairedModel != null
+                            ? glassesModelLabel(mockDeviceProvider.pairedModel!)
+                            : 'Mock glasses',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       Text(
@@ -199,7 +247,7 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
                       if (mock.isPoweredOn) {
                         await mock.powerOff();
                       }
-                      await mock.unpairMockRayBanMeta();
+                      await mock.unpairMockGlasses();
                     },
                   ),
                 ),

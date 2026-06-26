@@ -470,7 +470,8 @@ await MetaWearablesDatMockDevice.configure(
   initialPermissionsGranted: true,
 );
 
-final uuid = await MetaWearablesDatMockDevice.pairRayBanMeta();
+// Pick any model via GlassesModel; defaults to GlassesModel.rayBanMeta.
+final uuid = await MetaWearablesDatMockDevice.pairGlasses();
 await MetaWearablesDatMockDevice.powerOn(uuid);
 await MetaWearablesDatMockDevice.don(uuid);
 await MetaWearablesDatMockDevice.setCameraFacing(uuid, CameraFacing.back);

@@ -34,10 +34,10 @@ public class MetaWearablesDatMockDevicePlugin: NSObject, FlutterPlugin {
       configure(call: call, result: result)
     case "disable":
       disable(result: result)
-    case "pairRayBanMeta":
-      pairRayBanMeta(result: result)
-    case "unpairRayBanMeta":
-      unpairRayBanMeta(call: call, result: result)
+    case "pairGlasses":
+      pairGlasses(call: call, result: result)
+    case "unpairGlasses":
+      unpairGlasses(call: call, result: result)
     case "setPermission":
       setPermission(call: call, result: result)
     case "setPermissionRequestResult":
@@ -107,15 +107,39 @@ public class MetaWearablesDatMockDevicePlugin: NSObject, FlutterPlugin {
     }
   }
 
-  private func pairRayBanMeta(result: @escaping FlutterResult) {
-    Task { @MainActor in
-      ensureMockKitEnabled()
-      let mockDevice = MockDeviceKit.shared.pairRaybanMeta()
-      result(mockDevice.deviceIdentifier)
+  /// Maps the Dart `GlassesModel.value` token to the SDK's `GlassesModel`.
+  private static func parseGlassesModel(_ raw: String?) -> MWDATMockDevice.GlassesModel? {
+    switch raw {
+    case "rayBanMeta":         return .rayBanMeta
+    case "oakleyMetaHSTN":     return .oakleyMetaHSTN
+    case "oakleyMetaVanguard": return .oakleyMetaVanguard
+    case "rayBanMetaOptics":   return .rayBanMetaOptics
+    case "metaGlasses":        return .metaGlasses
+    default:                   return nil
     }
   }
 
-  private func unpairRayBanMeta(call: FlutterMethodCall, result: @escaping FlutterResult) {
+  private func pairGlasses(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let args = call.arguments as? [String: Any]
+    // Default to Ray-Ban Meta to match the Dart facade's default.
+    guard let model = Self.parseGlassesModel((args?["model"] as? String) ?? "rayBanMeta") else {
+      result(FlutterError(code: "INVALID_ARGS", message: "Unknown glasses model: \(args?["model"] ?? "nil")", details: nil))
+      return
+    }
+    Task { @MainActor in
+      ensureMockKitEnabled()
+      do {
+        let mockDevice = try MockDeviceKit.shared.pairGlasses(model: model)
+        result(mockDevice.deviceIdentifier)
+      } catch {
+        // `MockDeviceKitError.notEnabled` is the only documented case, but keep
+        // the catch general so future cases still surface cleanly to Dart.
+        result(FlutterError(code: "MOCK_DEVICE_ERROR", message: "Failed to pair glasses: \(error)", details: nil))
+      }
+    }
+  }
+
+  private func unpairGlasses(call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard let args = call.arguments as? [String: Any], let uuidString = args["deviceUUID"] as? String else {
       result(FlutterError(code: "INVALID_ARGS", message: "deviceUUID missing", details: nil))
       return
@@ -204,10 +228,10 @@ public class MetaWearablesDatMockDevicePlugin: NSObject, FlutterPlugin {
     guard let device = devices.first(where: { $0.deviceIdentifier == deviceUUID }) else {
       return nil
     }
-    guard let displayless = device as? any MWDATMockDevice.MockDisplaylessGlasses else {
+    guard let glasses = device as? any MWDATMockDevice.MockGlasses else {
       return nil
     }
-    return displayless.services.camera
+    return glasses.services.camera
   }
 
   private func setCameraFeed(call: FlutterMethodCall, result: @escaping FlutterResult) {

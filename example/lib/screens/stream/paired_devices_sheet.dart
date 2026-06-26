@@ -389,6 +389,7 @@ String _modelLabel(WearableDeviceType type) => switch (type) {
   WearableDeviceType.oakleyMetaVanguard => 'Oakley Meta Vanguard',
   WearableDeviceType.metaRayBanDisplay => 'Meta Ray-Ban Display',
   WearableDeviceType.rayBanMetaOptics => 'Ray-Ban Meta Optics',
+  WearableDeviceType.metaGlasses => 'Meta Glasses',
   WearableDeviceType.unknown => 'Unknown model',
 };
 

@@ -36,7 +36,9 @@ await MetaWearablesDatMockDevice.configure(
 ## Creating a mock device
 
 ```dart
-final deviceUUID = await MetaWearablesDatMockDevice.pairRayBanMeta();
+// `model` defaults to GlassesModel.rayBanMeta. Other values: oakleyMetaHSTN,
+// oakleyMetaVanguard, rayBanMetaOptics, metaGlasses.
+final deviceUUID = await MetaWearablesDatMockDevice.pairGlasses();
 // Returns a UUID string, e.g. "550e8400-e29b-41d4-a716-446655440000"
 ```
 
@@ -91,7 +93,7 @@ final textureId = await MetaWearablesDat.startStreamSession(
 
 ```dart
 await MetaWearablesDat.stopStreamSession(deviceUUID);
-await MetaWearablesDatMockDevice.unpairRayBanMeta(deviceUUID);
+await MetaWearablesDatMockDevice.unpairGlasses(deviceUUID);
 ```
 
 ## Key differences from real devices

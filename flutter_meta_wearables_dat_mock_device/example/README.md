@@ -18,7 +18,8 @@ Future<void> main() async {
     initialPermissionsGranted: true,
   );
 
-  final uuid = await MetaWearablesDatMockDevice.pairRayBanMeta();
+  // `model` defaults to GlassesModel.rayBanMeta; pass any GlassesModel value.
+  final uuid = await MetaWearablesDatMockDevice.pairGlasses();
   await MetaWearablesDatMockDevice.powerOn(uuid!);
   await MetaWearablesDatMockDevice.don(uuid);
   await MetaWearablesDatMockDevice.setCameraFacing(uuid, CameraFacing.back);
@@ -28,6 +29,6 @@ Future<void> main() async {
   // ... render with `Texture(textureId: textureId)` ...
   await MetaWearablesDat.stopStreamSession(uuid);
 
-  await MetaWearablesDatMockDevice.unpairRayBanMeta(uuid);
+  await MetaWearablesDatMockDevice.unpairGlasses(uuid);
 }
 ```

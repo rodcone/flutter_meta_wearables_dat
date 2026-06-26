@@ -39,10 +39,10 @@ Mock support lives in the optional add-on `flutter_meta_wearables_dat_mock_devic
 - Add `flutter_meta_wearables_dat_mock_device: ^0.6.0` to dev/staging `pubspec.yaml`.
 - Import: `import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';`
 - Optional bypass for registration/permission flows: `MetaWearablesDatMockDevice.configure(initiallyRegistered: true, initialPermissionsGranted: true)`
-- Lifecycle: `MetaWearablesDatMockDevice.pairRayBanMeta()` → UUID, then `.powerOn(uuid)` + `.don(uuid)`, optionally `.setCameraFacing(uuid, CameraFacing.back)`
+- Lifecycle: `MetaWearablesDatMockDevice.pairGlasses({model})` → UUID (`model` defaults to `GlassesModel.rayBanMeta`; other values: `oakleyMetaHSTN`, `oakleyMetaVanguard`, `rayBanMetaOptics`, `metaGlasses`), then `.powerOn(uuid)` + `.don(uuid)`, optionally `.setCameraFacing(uuid, CameraFacing.back)`
 - Override feeds: `MetaWearablesDatMockDevice.setCameraFeed(uuid, videoPath)` (H.265), `.setCapturedImage(uuid, imagePath)`
 - Streaming/capture still go through the core API: pass the specific UUID (not null) to `MetaWearablesDat.startStreamSession(uuid)`.
-- Cleanup: `MetaWearablesDatMockDevice.unpairRayBanMeta(uuid)`.
+- Cleanup: `MetaWearablesDatMockDevice.unpairGlasses(uuid)`.
 - `Permission`, `PermissionStatus`, `CameraFacing` enums all live in the mock package.
 
 ## Platform differences

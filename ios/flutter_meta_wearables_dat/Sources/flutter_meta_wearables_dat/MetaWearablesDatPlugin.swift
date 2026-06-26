@@ -394,10 +394,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           errorMessage = "Meta AI app is not installed. Please install it to proceed with registration."
         case .networkUnavailable:
           errorMessage = "Network connection is unavailable. Please check your internet connection and try again."
+        case .timeout:
+          errorMessage = "Registration timed out. Please try again."
         case .unknown:
           errorMessage = "An unknown error occurred during registration."
         @unknown default:
-          errorMessage = "Unknown registration error: \(e)"
+          errorMessage = "Unknown registration error: \(e.description)"
         }
         result(FlutterError(code: "REGISTRATION_ERROR", message: errorMessage, details: e.rawValue))
       } catch {
@@ -420,10 +422,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           errorMessage = "SDK configuration is invalid or incomplete."
         case .metaAINotInstalled:
           errorMessage = "Meta AI app is not installed. Please install it to proceed with unregistration."
+        case .timeout:
+          errorMessage = "Unregistration timed out. Please try again."
         case .unknown:
           errorMessage = "An unknown error occurred during unregistration."
         @unknown default:
-          errorMessage = "Unknown unregistration error: \(e)"
+          errorMessage = "Unknown unregistration error: \(e.description)"
         }
         result(FlutterError(code: "UNREGISTRATION_ERROR", message: errorMessage, details: e.rawValue))
       } catch {
@@ -749,7 +753,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     streamStateHandler.session = nil
     streamErrorHandler.session = nil
     if let session = streamSession {
-      await session.stop()
+      // DAT 0.8.0: Stream.stop() is synchronous (no longer async).
+      session.stop()
       streamSession = nil
     }
     if let texId = textureId {
@@ -1117,8 +1122,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       streamStateHandler.session = session
       streamErrorHandler.session = session
 
-      // 5. Start streaming.
-      await session.start()
+      // 5. Start streaming. DAT 0.8.0: Stream.start() is synchronous.
+      session.start()
       result(texId)
     }
   }
@@ -1165,10 +1170,35 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       }
 
       let accepted = streamSession.capturePhoto(format: captureFormat)
-      if !accepted, !didRespond {
+      if !accepted {
+        if !didRespond {
+          didRespond = true
+          Task { await listenerToken?.cancel() }
+          // Request rejected synchronously: no session, no high-bandwidth
+          // (BTC/WiFi) lease, or a capture already in progress.
+          result(FlutterError(
+            code: "CAPTURE_NOT_READY",
+            message: "Capture request was not accepted.",
+            details: "captureNotReady"))
+        }
+        return
+      }
+
+      // iOS's `capturePhoto(format:) -> Bool` exposes no failure/timeout
+      // delivery channel (CaptureError is never published here), so an accepted
+      // capture that never produces a photo would leave the Dart Future
+      // unresolved forever. Guard with a client-side timeout that resolves the
+      // call with a typed error matching the cross-platform capture contract.
+      let timeoutSeconds = 15.0
+      Task { @MainActor in
+        try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+        guard !didRespond else { return }
         didRespond = true
-        Task { await listenerToken?.cancel() }
-        result(FlutterError(code: "CAPTURE_NOT_READY", message: "Capture request was not accepted.", details: nil))
+        await listenerToken?.cancel()
+        result(FlutterError(
+          code: "CAPTURE_PHOTO_FAILED",
+          message: "Photo capture timed out.",
+          details: "photoCaptureTimeout"))
       }
     }
   }
@@ -1242,6 +1272,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       case .oakleyMetaVanguard: return "oakleyMetaVanguard"
       case .metaRayBanDisplay:  return "metaRayBanDisplay"
       case .rayBanMetaOptics:   return "rayBanMetaOptics"
+      case .metaGlasses:        return "metaGlasses"
       case .unknown:            return "unknown"
       @unknown default:         return "unknown"
     }

@@ -39,12 +39,12 @@ abstract class MetaWearablesDatMockDevicePlatform extends PlatformInterface {
     throw UnimplementedError('disable() has not been implemented.');
   }
 
-  Future<String?> pairRayBanMeta() {
-    throw UnimplementedError('pairRayBanMeta() has not been implemented.');
+  Future<String?> pairGlasses({GlassesModel model = GlassesModel.rayBanMeta}) {
+    throw UnimplementedError('pairGlasses() has not been implemented.');
   }
 
-  Future<bool> unpairRayBanMeta(String deviceUUID) {
-    throw UnimplementedError('unpairRayBanMeta() has not been implemented.');
+  Future<bool> unpairGlasses(String deviceUUID) {
+    throw UnimplementedError('unpairGlasses() has not been implemented.');
   }
 
   Future<bool> setPermission(

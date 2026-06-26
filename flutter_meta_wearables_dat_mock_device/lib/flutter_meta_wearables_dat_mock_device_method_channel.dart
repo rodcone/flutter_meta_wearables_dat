@@ -34,13 +34,17 @@ class MethodChannelMetaWearablesDatMockDevice
   }
 
   @override
-  Future<String?> pairRayBanMeta() async {
-    return methodChannel.invokeMethod<String>('pairRayBanMeta');
+  Future<String?> pairGlasses({
+    GlassesModel model = GlassesModel.rayBanMeta,
+  }) async {
+    return methodChannel.invokeMethod<String>('pairGlasses', {
+      'model': model.value,
+    });
   }
 
   @override
-  Future<bool> unpairRayBanMeta(String deviceUUID) async {
-    final ok = await methodChannel.invokeMethod<bool>('unpairRayBanMeta', {
+  Future<bool> unpairGlasses(String deviceUUID) async {
+    final ok = await methodChannel.invokeMethod<bool>('unpairGlasses', {
       'deviceUUID': deviceUUID,
     });
     return ok ?? false;

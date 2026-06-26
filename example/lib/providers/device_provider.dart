@@ -31,6 +31,17 @@ class DeviceProvider extends ChangeNotifier {
       _initialized = true;
       notifyListeners();
 
+      // If we launched already registered, the register-transition side
+      // effects in [_setRegistrationState] never fired. Re-resolve the SDK's
+      // active-device selector now so a pair that became available since the
+      // last launch — a second pair, or the previously-used pair being powered
+      // off in favour of another — is picked up instead of stranding the user
+      // on "Waiting for an active device". Unlike the permission request this
+      // does NOT open Meta AI, so it is safe to run on every launch.
+      if (isRegistered) {
+        unawaited(MetaWearablesDat.restartActiveDeviceMonitoring());
+      }
+
       // Listen to state changes
       _registrationStateSubscription =
           MetaWearablesDat.registrationStateStream().listen(

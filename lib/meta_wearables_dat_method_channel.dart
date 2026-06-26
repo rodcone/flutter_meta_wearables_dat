@@ -266,7 +266,7 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
         )
         .toList();
     if (kDebugMode) {
-      debugPrint('[MetaWearablesDAT] getDevices → ${devices.length} device(s)');
+      debugPrint('[MetaWearablesDAT] getDevices → ${devices.length} device(s): ${devices.map((d) => d.type.name).join(', ')}');
     }
     return devices;
   }

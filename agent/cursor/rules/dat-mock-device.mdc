@@ -24,7 +24,8 @@ await MetaWearablesDatMockDevice.configure(
   initiallyRegistered: true,
   initialPermissionsGranted: true,
 );
-final uuid = await MetaWearablesDatMockDevice.pairRayBanMeta();
+// `model` defaults to GlassesModel.rayBanMeta; pass any GlassesModel value.
+final uuid = await MetaWearablesDatMockDevice.pairGlasses();
 await MetaWearablesDatMockDevice.powerOn(uuid!);
 await MetaWearablesDatMockDevice.don(uuid); // Required for streaming
 await MetaWearablesDatMockDevice.setCameraFacing(uuid, CameraFacing.back);
@@ -45,7 +46,7 @@ final textureId = await MetaWearablesDat.startStreamSession(uuid, fps: 24);
 ## Cleanup
 ```dart
 await MetaWearablesDat.stopStreamSession(uuid);
-await MetaWearablesDatMockDevice.unpairRayBanMeta(uuid);
+await MetaWearablesDatMockDevice.unpairGlasses(uuid);
 ```
 
 `Permission`, `PermissionStatus`, and `CameraFacing` enums live in the mock package.

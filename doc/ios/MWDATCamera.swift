@@ -1,3 +1,6 @@
+// ⚠️ Reference snapshot of the DAT public API — may lag the vendored binaries.
+// Authoritative source: the vendored `.swiftinterface` under
+// ios/flutter_meta_wearables_dat/Frameworks/MWDATCamera.xcframework/.../*.swiftinterface
 import AVFoundation
 import CoreMedia
 import Foundation
