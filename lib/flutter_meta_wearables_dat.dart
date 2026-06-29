@@ -798,9 +798,7 @@ class MetaWearablesDat {
           FrameFormat.rawStraightRgba => ui.ImageByteFormat.rawStraightRgba,
           FrameFormat.png => ui.ImageByteFormat.png,
         };
-        final byteData = await image.toByteData(
-          format: imageByteFormat,
-        );
+        final byteData = await image.toByteData(format: imageByteFormat);
         if (byteData == null) return null;
         return CapturedFrame(
           bytes: byteData.buffer.asUint8List(),

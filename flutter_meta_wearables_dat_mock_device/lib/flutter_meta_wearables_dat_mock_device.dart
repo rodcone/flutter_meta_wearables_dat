@@ -178,10 +178,7 @@ class MetaWearablesDatMockDevice {
   ///
   /// Mutually exclusive with [setCameraFeed] — calling either clears
   /// the source configured by the other.
-  static Future<bool> setCameraFacing(
-    String deviceUUID,
-    CameraFacing facing,
-  ) {
+  static Future<bool> setCameraFacing(String deviceUUID, CameraFacing facing) {
     return MetaWearablesDatMockDevicePlatform.instance.setCameraFacing(
       deviceUUID,
       facing,

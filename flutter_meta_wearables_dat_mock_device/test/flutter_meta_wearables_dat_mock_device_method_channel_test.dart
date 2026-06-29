@@ -52,17 +52,20 @@ void main() {
     expect(calls.single.arguments, {'deviceUUID': 'uuid-123'});
   });
 
-  test('facade delegates pairGlasses(model) to the platform instance', () async {
-    final fake = _FakeMockPlatform();
-    MetaWearablesDatMockDevicePlatform.instance = fake;
+  test(
+    'facade delegates pairGlasses(model) to the platform instance',
+    () async {
+      final fake = _FakeMockPlatform();
+      MetaWearablesDatMockDevicePlatform.instance = fake;
 
-    final uuid = await MetaWearablesDatMockDevice.pairGlasses(
-      model: GlassesModel.oakleyMetaHSTN,
-    );
+      final uuid = await MetaWearablesDatMockDevice.pairGlasses(
+        model: GlassesModel.oakleyMetaHSTN,
+      );
 
-    expect(fake.lastModel, GlassesModel.oakleyMetaHSTN);
-    expect(uuid, 'fake-uuid');
-  });
+      expect(fake.lastModel, GlassesModel.oakleyMetaHSTN);
+      expect(uuid, 'fake-uuid');
+    },
+  );
 }
 
 class _FakeMockPlatform extends MetaWearablesDatMockDevicePlatform {

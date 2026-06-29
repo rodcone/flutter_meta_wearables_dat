@@ -50,6 +50,17 @@ jobs:
           dart analyze --fatal-infos lib/
           if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
 
+      # Hard quality gate: refuse to publish unless BOTH packages score a
+      # perfect 160/160 on pana (the analyzer behind pub.dev's pub points).
+      # --exit-code-threshold 0 fails the job if any points are lost.
+      - name: Activate pana
+        run: dart pub global activate pana
+      - name: pana — core (require full pub points)
+        run: dart pub global run pana --no-warning --exit-code-threshold 0 .
+      - name: pana — mock add-on (require full pub points)
+        working-directory: flutter_meta_wearables_dat_mock_device
+        run: dart pub global run pana --no-warning --exit-code-threshold 0 .
+
       # Publish core first; if the mock add-on fails afterwards, re-tag
       # patch-level after fixing — the core publish is not retried, so a
       # half-publish is recoverable by bumping both packages to the next

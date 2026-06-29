@@ -166,9 +166,7 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     String? deviceId, {
     PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
   }) async {
-    final args = <String, dynamic>{
-      'format': format.value,
-    };
+    final args = <String, dynamic>{'format': format.value};
     if (deviceId != null) {
       args['deviceId'] = deviceId;
     }
@@ -318,24 +316,24 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
 
   @override
   Stream<VideoFrame> videoFramesStream() {
-    return videoFramesEventChannel.receiveBroadcastStream().map(
-      (dynamic event) {
-        final map = Map<String, dynamic>.from(event as Map);
-        final codecStr = map['codec'] as String? ?? 'raw';
-        final codec = codecStr == 'hvc1' ? VideoCodec.hvc1 : VideoCodec.raw;
-        final bytes = map['bytes'] as Uint8List;
-        final bytesPerRow = (map['bytesPerRow'] as num?)?.toInt();
-        return VideoFrame(
-          codec: codec,
-          bytes: bytes,
-          width: (map['width'] as num).toInt(),
-          height: (map['height'] as num).toInt(),
-          presentationTimestampUs: (map['ptsUs'] as num).toInt(),
-          isKeyframe: (map['isKeyframe'] as bool?) ?? true,
-          bytesPerRow: bytesPerRow,
-        );
-      },
-    );
+    return videoFramesEventChannel.receiveBroadcastStream().map((
+      dynamic event,
+    ) {
+      final map = Map<String, dynamic>.from(event as Map);
+      final codecStr = map['codec'] as String? ?? 'raw';
+      final codec = codecStr == 'hvc1' ? VideoCodec.hvc1 : VideoCodec.raw;
+      final bytes = map['bytes'] as Uint8List;
+      final bytesPerRow = (map['bytesPerRow'] as num?)?.toInt();
+      return VideoFrame(
+        codec: codec,
+        bytes: bytes,
+        width: (map['width'] as num).toInt(),
+        height: (map['height'] as num).toInt(),
+        presentationTimestampUs: (map['ptsUs'] as num).toInt(),
+        isKeyframe: (map['isKeyframe'] as bool?) ?? true,
+        bytesPerRow: bytesPerRow,
+      );
+    });
   }
 
   @override

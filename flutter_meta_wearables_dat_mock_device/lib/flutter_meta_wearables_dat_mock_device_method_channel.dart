@@ -116,10 +116,7 @@ class MethodChannelMetaWearablesDatMockDevice
   }
 
   @override
-  Future<bool> setCameraFacing(
-    String deviceUUID,
-    CameraFacing facing,
-  ) async {
+  Future<bool> setCameraFacing(String deviceUUID, CameraFacing facing) async {
     final ok = await methodChannel.invokeMethod<bool>('setCameraFacing', {
       'deviceUUID': deviceUUID,
       'cameraFacing': facing.value,
