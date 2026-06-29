@@ -104,9 +104,7 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
   }
 
   Stream<bool> activeDeviceStream() {
-    throw UnimplementedError(
-      'activeDeviceStream() has not been implemented.',
-    );
+    throw UnimplementedError('activeDeviceStream() has not been implemented.');
   }
 
   Future<List<WearableDevice>> getDevices() {

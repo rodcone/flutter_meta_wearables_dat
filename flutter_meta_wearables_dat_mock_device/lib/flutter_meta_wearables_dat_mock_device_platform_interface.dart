@@ -47,10 +47,7 @@ abstract class MetaWearablesDatMockDevicePlatform extends PlatformInterface {
     throw UnimplementedError('unpairGlasses() has not been implemented.');
   }
 
-  Future<bool> setPermission(
-    Permission permission,
-    PermissionStatus status,
-  ) {
+  Future<bool> setPermission(Permission permission, PermissionStatus status) {
     throw UnimplementedError('setPermission() has not been implemented.');
   }
 
