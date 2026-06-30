@@ -224,7 +224,7 @@ The SDK streams over one of two high-bandwidth links; on iOS you pick which **pu
 </array>
 ```
 
-plus a `.entitlements` file (Xcode → Signing & Capabilities → add **Access Wi‑Fi Information** + **Hotspot Configuration**):
+plus a `.entitlements` file wired to the target via `CODE_SIGN_ENTITLEMENTS` (Xcode → Signing & Capabilities → add **Access Wi‑Fi Information** + **Hotspot Configuration** does this automatically; a hand-created file is silently ignored until that build setting points at it in every Runner configuration):
 
 ```xml
 <key>com.apple.developer.networking.HotspotConfiguration</key>

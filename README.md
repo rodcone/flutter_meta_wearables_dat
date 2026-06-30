@@ -138,7 +138,7 @@ The DAT SDK streams video over one of two high-bandwidth links to the glasses, a
 </array>
 ```
 
-and add these to your app's `.entitlements` (in Xcode: **Signing & Capabilities → + Capability → Access Wi‑Fi Information** and **Hotspot Configuration**, which also provisions them on your App ID):
+and add these to your app's `.entitlements` (in Xcode: **Signing & Capabilities → + Capability → Access Wi‑Fi Information** and **Hotspot Configuration** — which wires the file to the target via `CODE_SIGN_ENTITLEMENTS` and provisions the capabilities on your App ID; a hand-created `.entitlements` file is silently ignored until that build setting points at it in every Runner build configuration):
 
 ```xml
 <key>com.apple.developer.networking.HotspotConfiguration</key>
