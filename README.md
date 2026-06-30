@@ -82,15 +82,11 @@ Add the following to your `Info.plist`:
     <string>fb-viewapp</string>
 </array>
 
-<key>UISupportedExternalAccessoryProtocols</key>
-<array>
-    <string>com.meta.ar.wearable</string>
-</array>
-
+<!-- Camera transport (Wi-Fi or Bluetooth Classic) is configured separately —
+     see "Choose your camera transport" below. -->
 <key>UIBackgroundModes</key>
 <array>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
 </array>
 
 <!-- Deep link callback from Meta AI app - scheme must match AppLinkURLScheme below -->
@@ -126,6 +122,49 @@ Add the following to your `Info.plist`:
     </dict>
 </dict>
 ```
+
+#### Choose your camera transport: Wi‑Fi (recommended) or Bluetooth Classic
+
+The DAT SDK streams video over one of two high-bandwidth links to the glasses, and on iOS **you select which one purely through `Info.plist` + entitlements — there is no runtime switch.** Configure exactly one.
+
+**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture) and avoids the ExternalAccessory/MFi framework. On the first stream the SDK joins the glasses' Wi‑Fi access point, so iOS shows a one-time *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. Add to `Info.plist`:
+
+```xml
+<key>NSLocalNetworkUsageDescription</key>
+<string>Allows your phone to find and connect to your glasses over Wi-Fi.</string>
+<key>NSBonjourServices</key>
+<array>
+    <string>_bonjour._tcp</string>
+</array>
+```
+
+and add these to your app's `.entitlements` (in Xcode: **Signing & Capabilities → + Capability → Access Wi‑Fi Information** and **Hotspot Configuration**, which also provisions them on your App ID):
+
+```xml
+<key>com.apple.developer.networking.HotspotConfiguration</key>
+<true/>
+<key>com.apple.developer.networking.wifi-info</key>
+<true/>
+```
+
+Do **not** add the ExternalAccessory keys below — while they are present the SDK fills its high-bandwidth lease over Bluetooth Classic and never brings up Wi‑Fi.
+
+**Bluetooth Classic.** No Wi‑Fi prompt, keeps the phone on its normal Wi‑Fi, and needs no Wi‑Fi infrastructure — but lower bandwidth, and the ExternalAccessory/MFi framework it relies on is a technical blocker for public App Store submission. Add to `Info.plist`:
+
+```xml
+<key>UISupportedExternalAccessoryProtocols</key>
+<array>
+    <string>com.meta.ar.wearable</string>
+</array>
+
+<key>UIBackgroundModes</key>
+<array>
+    <string>bluetooth-peripheral</string>
+    <string>external-accessory</string>
+</array>
+```
+
+> The example app is configured for **Wi‑Fi** — see [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements).
 
 ### Android Configuration
 
@@ -371,7 +410,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
     <string>audio</string>
     <string>bluetooth-central</string>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
+    <string>external-accessory</string> <!-- only if using the Bluetooth Classic transport -->
 </array>
 ```
 

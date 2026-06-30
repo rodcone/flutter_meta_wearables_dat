@@ -9,10 +9,13 @@ Audit and configure this Flutter project for flutter_meta_wearables_dat integrat
 3. **iOS audit** — Read `ios/Runner/Info.plist` and verify these keys exist:
    - `NSBluetoothAlwaysUsageDescription`
    - `LSApplicationQueriesSchemes` containing `fb-viewapp`
-   - `UISupportedExternalAccessoryProtocols` containing `com.meta.ar.wearable`
-   - `UIBackgroundModes` containing `bluetooth-peripheral` and `external-accessory`
+   - `UIBackgroundModes` containing `bluetooth-peripheral`
    - `CFBundleURLTypes` with a URL scheme
    - `MWDAT` dict with `AppLinkURLScheme`, `MetaAppID`, `ClientToken`, `TeamID`, `Analytics`
+
+   Then check the **camera transport** (exactly one must be configured):
+   - **Wi‑Fi (recommended):** `NSLocalNetworkUsageDescription` + `NSBonjourServices` (`_bonjour._tcp`) in `Info.plist`, and the `com.apple.developer.networking.HotspotConfiguration` + `com.apple.developer.networking.wifi-info` entitlements in the app's `.entitlements` file. The ExternalAccessory keys must be **absent** (while present they force Bluetooth Classic and disable Wi‑Fi).
+   - **Bluetooth Classic:** `UISupportedExternalAccessoryProtocols` containing `com.meta.ar.wearable`, and `external-accessory` in `UIBackgroundModes`. Note: not eligible for public App Store submission (MFi).
 
    Report any missing keys and offer to add them.
 

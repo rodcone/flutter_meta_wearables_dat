@@ -173,15 +173,11 @@ Add to `Info.plist`:
     <string>fb-viewapp</string>
 </array>
 
-<key>UISupportedExternalAccessoryProtocols</key>
-<array>
-    <string>com.meta.ar.wearable</string>
-</array>
-
+<!-- Camera transport (Wi-Fi or Bluetooth Classic) is configured separately —
+     see "Choose your camera transport" below. -->
 <key>UIBackgroundModes</key>
 <array>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
 </array>
 
 <!-- Deep link callback from Meta AI app -->
@@ -211,6 +207,47 @@ Add to `Info.plist`:
         <true/>
     </dict>
 </dict>
+```
+
+#### Choose your camera transport: Wi‑Fi (recommended) or Bluetooth Classic
+
+The SDK streams over one of two high-bandwidth links; on iOS you pick which **purely via `Info.plist` + entitlements** (no runtime switch). Configure exactly one.
+
+**Wi‑Fi (recommended)** — higher bandwidth, and avoids the ExternalAccessory/MFi framework (the technical blocker for App Store submission). Triggers a one-time *"Join Wi‑Fi Network"* prompt and joins the glasses' AP (phone internet then rides cellular). Add to `Info.plist`:
+
+```xml
+<key>NSLocalNetworkUsageDescription</key>
+<string>Allows your phone to find and connect to your glasses over Wi-Fi.</string>
+<key>NSBonjourServices</key>
+<array>
+    <string>_bonjour._tcp</string>
+</array>
+```
+
+plus a `.entitlements` file (Xcode → Signing & Capabilities → add **Access Wi‑Fi Information** + **Hotspot Configuration**):
+
+```xml
+<key>com.apple.developer.networking.HotspotConfiguration</key>
+<true/>
+<key>com.apple.developer.networking.wifi-info</key>
+<true/>
+```
+
+Do **not** add the ExternalAccessory keys below — while present, the SDK uses Bluetooth Classic and never brings up Wi‑Fi.
+
+**Bluetooth Classic** — no prompt, keeps the phone on its normal Wi‑Fi, works offline, but lower bandwidth and not App-Store-eligible (MFi). Add to `Info.plist`:
+
+```xml
+<key>UISupportedExternalAccessoryProtocols</key>
+<array>
+    <string>com.meta.ar.wearable</string>
+</array>
+
+<key>UIBackgroundModes</key>
+<array>
+    <string>bluetooth-peripheral</string>
+    <string>external-accessory</string>
+</array>
 ```
 
 ### 3. Android configuration
@@ -394,7 +431,7 @@ await MetaWearablesDat.stopStreamSession(null);
 await MetaWearablesDat.disableBackgroundStreaming();
 ```
 
-**Additional iOS `Info.plist` entries** (required only if you call `enableBackgroundStreaming`): add `audio` and `bluetooth-central` alongside the existing `bluetooth-peripheral` and `external-accessory`:
+**Additional iOS `Info.plist` entries** (required only if you call `enableBackgroundStreaming`): add `audio` and `bluetooth-central` alongside `bluetooth-peripheral` (and `external-accessory` only if you use the Bluetooth Classic transport):
 
 ```xml
 <key>UIBackgroundModes</key>
@@ -402,7 +439,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
     <string>audio</string>
     <string>bluetooth-central</string>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
+    <string>external-accessory</string> <!-- only if using the Bluetooth Classic transport -->
 </array>
 ```
 

@@ -22,15 +22,10 @@ Add to `ios/Runner/Info.plist`:
     <string>fb-viewapp</string>
 </array>
 
-<key>UISupportedExternalAccessoryProtocols</key>
-<array>
-    <string>com.meta.ar.wearable</string>
-</array>
-
+<!-- Camera transport is configured separately — see "iOS camera transport" below. -->
 <key>UIBackgroundModes</key>
 <array>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
     <!-- Optional: required only if you call MetaWearablesDat.enableBackgroundStreaming()
          to keep the stream alive while backgrounded or the phone is locked. -->
     <!-- <string>audio</string>                -->
@@ -66,6 +61,13 @@ Add to `ios/Runner/Info.plist`:
 ```
 
 Replace `myexampleapp` with your app's URL scheme. Use `0` for MetaAppID in Developer Mode, or your real ID from the Meta Wearables Developer Center for production.
+
+### iOS camera transport: Wi‑Fi (recommended) or Bluetooth Classic
+
+Pick one (selected purely via `Info.plist` + entitlements — no runtime switch):
+
+- **Wi‑Fi (recommended)** — higher bandwidth, App-Store-eligible (no MFi). Add `NSLocalNetworkUsageDescription` and `NSBonjourServices` (`_bonjour._tcp`) to `Info.plist`, plus the `com.apple.developer.networking.HotspotConfiguration` and `com.apple.developer.networking.wifi-info` entitlements (Xcode → Signing & Capabilities → **Access Wi‑Fi Information** + **Hotspot Configuration**). The first stream shows a one-time "Join Wi‑Fi Network" prompt. Do **not** add the ExternalAccessory keys — they force Bluetooth Classic.
+- **Bluetooth Classic** — no prompt, works offline, lower bandwidth, not App-Store-eligible. Add `UISupportedExternalAccessoryProtocols` (`com.meta.ar.wearable`) and `external-accessory` to `UIBackgroundModes`.
 
 ## Android configuration
 

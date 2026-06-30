@@ -12,7 +12,11 @@ flutter pub add app_links
 ```
 
 ## iOS (Info.plist)
-Required keys: `NSBluetoothAlwaysUsageDescription`, `LSApplicationQueriesSchemes` (fb-viewapp), `UISupportedExternalAccessoryProtocols` (com.meta.ar.wearable), `UIBackgroundModes` (bluetooth-peripheral, external-accessory), `CFBundleURLTypes` (your URL scheme), `MWDAT` dict (AppLinkURLScheme, MetaAppID, ClientToken, TeamID). Min target: iOS 17.0.
+Always required: `NSBluetoothAlwaysUsageDescription`, `LSApplicationQueriesSchemes` (fb-viewapp), `UIBackgroundModes` (`bluetooth-peripheral`), `CFBundleURLTypes` (your URL scheme), `MWDAT` dict (AppLinkURLScheme, MetaAppID, ClientToken, TeamID). Min target: iOS 17.0.
+
+**Camera transport — pick one** (selected via Info.plist + entitlements, no runtime switch):
+- **Wi‑Fi (recommended):** `NSLocalNetworkUsageDescription` + `NSBonjourServices` (`_bonjour._tcp`) + the `com.apple.developer.networking.HotspotConfiguration` and `wifi-info` entitlements. Higher bandwidth, App-Store-eligible (no MFi). Omit the ExternalAccessory keys.
+- **Bluetooth Classic:** `UISupportedExternalAccessoryProtocols` (`com.meta.ar.wearable`) + `external-accessory` in `UIBackgroundModes`. No Wi‑Fi prompt, but not App-Store-eligible.
 
 ## Android
 - **AndroidManifest.xml**: BLUETOOTH, BLUETOOTH_CONNECT, INTERNET permissions + `com.meta.wearable.mwdat.APPLICATION_ID` meta-data + intent-filter with URL scheme
