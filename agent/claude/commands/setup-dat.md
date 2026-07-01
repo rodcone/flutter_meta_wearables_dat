@@ -19,6 +19,10 @@ Audit and configure this Flutter project for flutter_meta_wearables_dat integrat
 
    (Transport does not affect App Store eligibility — the SDK links `ExternalAccessory.framework` regardless, and Meta limits public publishing to select partners until GA.)
 
+   **If neither transport is configured** (fresh project), do not silently default to one — ask the user which they'd prefer (mention Wi‑Fi is recommended for bandwidth; Bluetooth Classic needs no Wi‑Fi prompt and works offline) before adding either recipe.
+
+   **If one transport is already configured** and the user wants to switch (migrating an older app to Wi‑Fi, or troubleshooting a transport that isn't working — e.g. Wi‑Fi never prompts, or streaming is unreliable), this is a config-only change: remove that transport's keys/entitlements, add the other's from the recipes above, and — if switching to Wi‑Fi — verify the `CODE_SIGN_ENTITLEMENTS` wiring per the Wi‑Fi check above before declaring it done. No Dart/plugin code changes are needed either way.
+
    Report any missing keys and offer to add them.
 
 4. **Android audit** — Read `android/app/src/main/AndroidManifest.xml` and verify:

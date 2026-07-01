@@ -252,6 +252,17 @@ Do **not** add the ExternalAccessory keys below — while present, the SDK uses 
 
 > **App Store note:** transport does not affect App Store eligibility — the DAT SDK links `ExternalAccessory.framework` regardless of transport (an MFi binary-scanner concern), and Meta limits public publishing to select partners until GA. Wi‑Fi's advantage is bandwidth, not publishability.
 
+#### Migrating or switching camera transport
+
+Switching transport is a **config-only change** — no plugin update or Dart code involved. Two scenarios:
+
+- **Upgrading an app configured before this transport choice was documented** — it already has `com.meta.ar.wearable` + `external-accessory` (Bluetooth Classic) and keeps working unchanged; migrating to Wi‑Fi is optional.
+- **One transport isn't working** — Wi‑Fi never prompts / won't join the AP, or Bluetooth Classic streaming is unreliable — switch to the other the same way.
+
+**To switch to Wi‑Fi:** remove `UISupportedExternalAccessoryProtocols` + `external-accessory`, add the Wi‑Fi `Info.plist` keys + entitlements above, then **verify the entitlements wiring** — a `.entitlements` file is silently ignored unless `CODE_SIGN_ENTITLEMENTS` points at it in every Runner build configuration (Xcode → Signing & Capabilities → add the two capabilities does this automatically; check by hand with `grep CODE_SIGN_ENTITLEMENTS ios/Runner.xcodeproj/project.pbxproj`). Delete the app from the test device before reinstalling to clear stale Bluetooth Classic accessory state, then rebuild.
+
+**To switch to Bluetooth Classic:** remove the Wi‑Fi keys + entitlements, add the ExternalAccessory keys above, rebuild.
+
 ### 3. Android configuration
 
 **AndroidManifest.xml:**
@@ -564,6 +575,9 @@ Stream not starting?
 ├── On Android: MainActivity extends FlutterFragmentActivity?
 ├── On Android: GitHub token configured for Maven dependency?
 └── Try restarting glasses: power off → hold capture button → power on → release when LED turns red
+
+iOS: Wi-Fi never prompts, or one transport streams unreliably?
+└── Switch transports — see "Migrating or switching camera transport" (config-only, no code change)
 ```
 
 ## Links

@@ -20,6 +20,8 @@ Always required: `NSBluetoothAlwaysUsageDescription`, `LSApplicationQueriesSchem
 
 Transport does not affect App Store eligibility — the SDK links `ExternalAccessory.framework` either way, and Meta limits public publishing to select partners until GA.
 
+**Switching later** (migrating an older app to Wi‑Fi, or troubleshooting one that isn't working) is config-only: swap the keys/entitlements above, rebuild — no code change. If migrating to Wi‑Fi, confirm `CODE_SIGN_ENTITLEMENTS` in `project.pbxproj` actually points at the `.entitlements` file in every Runner build config — a file that exists but isn't wired to the target is silently ignored.
+
 ## Android
 - **AndroidManifest.xml**: BLUETOOTH, BLUETOOTH_CONNECT, INTERNET permissions + `com.meta.wearable.mwdat.APPLICATION_ID` meta-data + intent-filter with URL scheme
 - **settings.gradle.kts**: GitHub Packages repo for `maven.pkg.github.com/facebook/meta-wearables-dat-android` with `GITHUB_TOKEN` or `local.properties` credential. Use `PREFER_SETTINGS` mode.

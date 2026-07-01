@@ -71,6 +71,8 @@ Pick one (selected purely via `Info.plist` + entitlements — no runtime switch)
 
 Transport does not affect App Store eligibility — the SDK links `ExternalAccessory.framework` either way, and Meta limits public publishing to select partners until GA.
 
+**Migrating or troubleshooting:** switching transport is config-only — remove one recipe's keys, add the other's, rebuild; no Dart/plugin change. If migrating an older app to Wi‑Fi, don't skip the entitlements wiring: a `.entitlements` file is ignored unless `CODE_SIGN_ENTITLEMENTS` points at it in every Runner build configuration (Xcode → Signing & Capabilities → adding the two capabilities wires this automatically; check by hand with `grep CODE_SIGN_ENTITLEMENTS ios/Runner.xcodeproj/project.pbxproj`). If Wi‑Fi never prompts or streaming misbehaves on either transport, switch to the other the same way.
+
 ## Android configuration
 
 **android/app/src/main/AndroidManifest.xml:**
