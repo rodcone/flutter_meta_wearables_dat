@@ -109,13 +109,17 @@ class _StreamScreenState extends State<StreamScreen> {
 
         return Stack(
           children: [
-            // Full screen video stream or placeholder
+            // Full screen video stream, reconnecting overlay, or placeholder
             Positioned.fill(
-              child: streamProvider.isStreaming
+              child:
+                  streamProvider.isStreaming &&
+                      streamProvider.textureId != null
                   ? _TextureStreamWidget(
                       textureId: streamProvider.textureId!,
                       videoStreamSize: streamProvider.videoStreamSize,
                     )
+                  : streamProvider.isRecovering
+                  ? const _ReconnectingView()
                   : ColoredBox(
                       color: Colors.black,
                       child: Center(
@@ -181,8 +185,20 @@ class _StreamScreenState extends State<StreamScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Session state label
-                    if (streamProvider.sessionState != null &&
+                    // Session state label ("Reconnecting…" takes precedence
+                    // while auto-recovery is in flight).
+                    if (streamProvider.isRecovering)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 5),
+                        child: Text(
+                          'Reconnecting…',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.white.withOpacity(0.7),
+                          ),
+                        ),
+                      )
+                    else if (streamProvider.sessionState != null &&
                         streamProvider.sessionState !=
                             StreamSessionState.streaming &&
                         streamProvider.sessionState !=
@@ -200,7 +216,9 @@ class _StreamScreenState extends State<StreamScreen> {
                     // Show "Waiting for an active device" message when no device is available
                     // Always render it but control visibility with opacity (like native sample app)
                     Opacity(
-                      opacity: canStart ? 0.0 : 1.0,
+                      opacity: canStart || streamProvider.isRecovering
+                          ? 0.0
+                          : 1.0,
                       child: Padding(
                         padding: const EdgeInsets.only(bottom: 5),
                         child: Row(
@@ -223,8 +241,10 @@ class _StreamScreenState extends State<StreamScreen> {
                         ),
                       ),
                     ),
-                    // Show Start button only when not streaming
-                    if (!streamProvider.isStreaming)
+                    // Show Start button only when not streaming and not
+                    // mid-reconnect (auto-recovery drives its own restart).
+                    if (!streamProvider.isStreaming &&
+                        !streamProvider.isRecovering)
                       MetaButton.text(
                         text: 'Start streaming',
                         enabled: canStart,
@@ -367,6 +387,45 @@ class _ThermalChip extends StatelessWidget {
       ThermalLevel.emergency => 'Emergency',
       ThermalLevel.shutdown => 'Shutdown',
     };
+  }
+}
+
+/// Shown while the provider transparently restarts a stream that hit a
+/// transient error (e.g. after the phone was locked and the app suspended).
+/// Reassures the user that the stream is coming back rather than surfacing a
+/// hard error banner.
+class _ReconnectingView extends StatelessWidget {
+  const _ReconnectingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Reconnecting…',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
