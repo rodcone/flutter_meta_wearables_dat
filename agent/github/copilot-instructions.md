@@ -56,7 +56,7 @@ Mock support lives in the optional add-on `flutter_meta_wearables_dat_mock_devic
 
 ## Setup
 
-- iOS: Info.plist needs Bluetooth usage string, URL scheme, MWDAT dict, and `bluetooth-peripheral` background mode. **Camera transport — pick one:** Wi‑Fi (recommended; `NSLocalNetworkUsageDescription` + `NSBonjourServices` + `HotspotConfiguration`/`wifi-info` entitlements — higher bandwidth, App-Store-eligible) **or** Bluetooth Classic (`com.meta.ar.wearable` + `external-accessory` background mode — no Wi‑Fi prompt, not App-Store-eligible). For background streaming also add `audio` and `bluetooth-central` to `UIBackgroundModes`.
+- iOS: Info.plist needs Bluetooth usage string, URL scheme, MWDAT dict, and `bluetooth-peripheral` background mode. **Camera transport — pick one:** Wi‑Fi (recommended; `NSLocalNetworkUsageDescription` + `NSBonjourServices` + `HotspotConfiguration`/`wifi-info` entitlements — higher bandwidth) **or** Bluetooth Classic (`com.meta.ar.wearable` + `external-accessory` background mode — no Wi‑Fi prompt, works offline). Transport doesn't affect App Store eligibility (SDK links ExternalAccessory either way; Meta limits publishing until GA). For background streaming also add `audio` and `bluetooth-central` to `UIBackgroundModes`.
 - Android: AndroidManifest permissions, GitHub Packages repo in settings.gradle.kts, GITHUB_TOKEN. No manifest changes needed for background streaming (permissions auto-merge from plugin).
 - Deep links: `app_links` package, forward all URIs to `handleUrl()`
 

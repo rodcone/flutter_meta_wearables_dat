@@ -213,7 +213,7 @@ Add to `Info.plist`:
 
 The SDK streams over one of two high-bandwidth links; on iOS you pick which **purely via `Info.plist` + entitlements** (no runtime switch). Configure exactly one.
 
-**Wi‑Fi (recommended)** — higher bandwidth, and avoids the ExternalAccessory/MFi framework (the technical blocker for App Store submission). Triggers a one-time *"Join Wi‑Fi Network"* prompt and joins the glasses' AP (phone internet then rides cellular). Add to `Info.plist`:
+**Wi‑Fi (recommended)** — higher bandwidth. Triggers a one-time *"Join Wi‑Fi Network"* prompt and joins the glasses' AP (phone internet then rides cellular). Add to `Info.plist`:
 
 ```xml
 <key>NSLocalNetworkUsageDescription</key>
@@ -235,7 +235,7 @@ plus a `.entitlements` file wired to the target via `CODE_SIGN_ENTITLEMENTS` (Xc
 
 Do **not** add the ExternalAccessory keys below — while present, the SDK uses Bluetooth Classic and never brings up Wi‑Fi.
 
-**Bluetooth Classic** — no prompt, keeps the phone on its normal Wi‑Fi, works offline, but lower bandwidth and not App-Store-eligible (MFi). Add to `Info.plist`:
+**Bluetooth Classic** — no prompt, keeps the phone on its normal Wi‑Fi, works offline, but lower bandwidth. Add to `Info.plist`:
 
 ```xml
 <key>UISupportedExternalAccessoryProtocols</key>
@@ -249,6 +249,8 @@ Do **not** add the ExternalAccessory keys below — while present, the SDK uses 
     <string>external-accessory</string>
 </array>
 ```
+
+> **App Store note:** transport does not affect App Store eligibility — the DAT SDK links `ExternalAccessory.framework` regardless of transport (an MFi binary-scanner concern), and Meta limits public publishing to select partners until GA. Wi‑Fi's advantage is bandwidth, not publishability.
 
 ### 3. Android configuration
 

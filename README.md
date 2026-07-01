@@ -127,7 +127,7 @@ Add the following to your `Info.plist`:
 
 The DAT SDK streams video over one of two high-bandwidth links to the glasses, and on iOS **you select which one purely through `Info.plist` + entitlements — there is no runtime switch.** Configure exactly one.
 
-**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture) and avoids the ExternalAccessory/MFi framework. On the first stream the SDK joins the glasses' Wi‑Fi access point, so iOS shows a one-time *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. Add to `Info.plist`:
+**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture). On the first stream the SDK joins the glasses' Wi‑Fi access point, so iOS shows a one-time *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. Add to `Info.plist`:
 
 ```xml
 <key>NSLocalNetworkUsageDescription</key>
@@ -149,7 +149,7 @@ and add these to your app's `.entitlements` (in Xcode: **Signing & Capabilities 
 
 Do **not** add the ExternalAccessory keys below — while they are present the SDK fills its high-bandwidth lease over Bluetooth Classic and never brings up Wi‑Fi.
 
-**Bluetooth Classic.** No Wi‑Fi prompt, keeps the phone on its normal Wi‑Fi, and needs no Wi‑Fi infrastructure — but lower bandwidth, and the ExternalAccessory/MFi framework it relies on is a technical blocker for public App Store submission. Add to `Info.plist`:
+**Bluetooth Classic.** No Wi‑Fi prompt, keeps the phone on its normal Wi‑Fi, and needs no Wi‑Fi infrastructure — but lower bandwidth. Add to `Info.plist`:
 
 ```xml
 <key>UISupportedExternalAccessoryProtocols</key>
@@ -165,6 +165,8 @@ Do **not** add the ExternalAccessory keys below — while they are present the S
 ```
 
 > The example app is configured for **Wi‑Fi** — see [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements).
+
+> **App Store note.** Transport choice does **not** affect App Store eligibility. The DAT SDK links `ExternalAccessory.framework` regardless of transport (Apple's binary scanner flags this MFi dependency), and Meta currently limits public publishing to select partners (see [Publishing disclaimer](#publishing-disclaimer)) until GA. Wi‑Fi's advantage is bandwidth, not publishability.
 
 ### Android Configuration
 

@@ -1,5 +1,5 @@
 ## Unreleased
-* Docs: document the iOS **camera transport** choice — Wi‑Fi (recommended) vs Bluetooth Classic. Wi‑Fi (`HotspotConfiguration` + `wifi-info` entitlements, `NSLocalNetworkUsageDescription` + `NSBonjourServices`, and **no** ExternalAccessory keys) gives higher bandwidth and avoids the MFi App Store blocker; Bluetooth Classic (`com.meta.ar.wearable` + `external-accessory`) needs no Wi‑Fi prompt but is lower-bandwidth. No API change — transport is selected entirely via `Info.plist` + entitlements. The example app now ships the Wi‑Fi configuration (adds `example/ios/Runner/Runner.entitlements`).
+* Docs: document the iOS **camera transport** choice — Wi‑Fi (recommended) vs Bluetooth Classic. Wi‑Fi (`HotspotConfiguration` + `wifi-info` entitlements, `NSLocalNetworkUsageDescription` + `NSBonjourServices`, and **no** ExternalAccessory keys in your app config) gives higher bandwidth; Bluetooth Classic (`com.meta.ar.wearable` + `external-accessory`) needs no Wi‑Fi prompt but is lower-bandwidth. Transport does not affect App Store eligibility — the SDK links `ExternalAccessory.framework` regardless. No API change — transport is selected entirely via `Info.plist` + entitlements. The example app now ships the Wi‑Fi configuration (adds `example/ios/Runner/Runner.entitlements`).
 
 ## 0.7.0
 **BREAKING CHANGES**
