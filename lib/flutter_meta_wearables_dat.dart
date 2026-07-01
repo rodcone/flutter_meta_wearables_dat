@@ -909,7 +909,8 @@ class MetaWearablesDat {
   /// GPU access from backgrounded apps) and lazily recreated on the first frame
   /// after foreground, so resume incurs a brief keyframe-wait stall. The host
   /// app's `Info.plist` must declare these `UIBackgroundModes`: `audio`,
-  /// `bluetooth-central`, `bluetooth-peripheral`, `external-accessory`.
+  /// `bluetooth-central`, `bluetooth-peripheral` (plus `external-accessory` if
+  /// you use the Bluetooth Classic camera transport).
   ///
   /// **Android** — starts a foreground service with the given
   /// [androidNotification] and acquires a `PARTIAL_WAKE_LOCK`. The plugin

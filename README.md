@@ -21,6 +21,8 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
   - [Setup](#setup)
     - [Glasses setup (Developer mode)](#glasses-setup-developer-mode)
     - [iOS Configuration](#ios-configuration)
+      - [Choose your camera transport: Wi‑Fi (recommended) or Bluetooth Classic](#choose-your-camera-transport-wifi-recommended-or-bluetooth-classic)
+      - [Migrating or switching camera transport](#migrating-or-switching-camera-transport)
     - [Android Configuration](#android-configuration)
       - [1. AndroidManifest.xml](#1-androidmanifestxml)
       - [2. Repository Configuration](#2-repository-configuration)
@@ -82,15 +84,11 @@ Add the following to your `Info.plist`:
     <string>fb-viewapp</string>
 </array>
 
-<key>UISupportedExternalAccessoryProtocols</key>
-<array>
-    <string>com.meta.ar.wearable</string>
-</array>
-
+<!-- Camera transport (Wi-Fi or Bluetooth Classic) is configured separately —
+     see "Choose your camera transport" below. -->
 <key>UIBackgroundModes</key>
 <array>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
 </array>
 
 <!-- Deep link callback from Meta AI app - scheme must match AppLinkURLScheme below -->
@@ -126,6 +124,66 @@ Add the following to your `Info.plist`:
     </dict>
 </dict>
 ```
+
+#### Choose your camera transport: Wi‑Fi (recommended) or Bluetooth Classic
+
+The DAT SDK streams video over one of two high-bandwidth links to the glasses, and on iOS **you select which one purely through `Info.plist` + entitlements — there is no runtime switch.** Configure exactly one.
+
+**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture). On the first stream the SDK joins the glasses' Wi‑Fi access point, so iOS shows a one-time *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. Add to `Info.plist`:
+
+```xml
+<key>NSLocalNetworkUsageDescription</key>
+<string>Allows your phone to find and connect to your glasses over Wi-Fi.</string>
+<key>NSBonjourServices</key>
+<array>
+    <string>_bonjour._tcp</string>
+</array>
+```
+
+and add these to your app's `.entitlements` (in Xcode: **Signing & Capabilities → + Capability → Access Wi‑Fi Information** and **Hotspot Configuration** — which wires the file to the target via `CODE_SIGN_ENTITLEMENTS` and provisions the capabilities on your App ID; a hand-created `.entitlements` file is silently ignored until that build setting points at it in every Runner build configuration):
+
+```xml
+<key>com.apple.developer.networking.HotspotConfiguration</key>
+<true/>
+<key>com.apple.developer.networking.wifi-info</key>
+<true/>
+```
+
+Do **not** add the ExternalAccessory keys below — while they are present the SDK fills its high-bandwidth lease over Bluetooth Classic and never brings up Wi‑Fi.
+
+**Bluetooth Classic.** No Wi‑Fi prompt, keeps the phone on its normal Wi‑Fi, and needs no Wi‑Fi infrastructure — but lower bandwidth. Add to `Info.plist`:
+
+```xml
+<key>UISupportedExternalAccessoryProtocols</key>
+<array>
+    <string>com.meta.ar.wearable</string>
+</array>
+
+<key>UIBackgroundModes</key>
+<array>
+    <string>bluetooth-peripheral</string>
+    <string>external-accessory</string>
+</array>
+```
+
+> The example app is configured for **Wi‑Fi** — see [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements).
+
+> **App Store note.** Transport choice does **not** affect App Store eligibility. The DAT SDK links `ExternalAccessory.framework` regardless of transport (Apple's binary scanner flags this MFi dependency), and Meta currently limits public publishing to select partners (see [Publishing disclaimer](#publishing-disclaimer)) until GA. Wi‑Fi's advantage is bandwidth, not publishability.
+
+#### Migrating or switching camera transport
+
+Switching transport — whether upgrading an older app or troubleshooting one that isn't working — is a **config-only change**: remove one recipe's keys above, add the other's, rebuild. No plugin update or Dart code change is involved.
+
+- **Upgrading an app configured before this transport choice was documented.** Your `Info.plist` likely already has `UISupportedExternalAccessoryProtocols` (`com.meta.ar.wearable`) and `external-accessory` — that's the Bluetooth Classic recipe above, and it keeps working unchanged. Wi‑Fi is optional; migrate whenever it's convenient using the steps below.
+- **One transport isn't working.** Wi‑Fi never shows the join prompt, the phone won't associate to the glasses' AP, or Bluetooth Classic streaming is unreliable: switch to the other transport with the same steps — the two are otherwise interchangeable.
+
+**To switch to Wi‑Fi:**
+1. Remove `UISupportedExternalAccessoryProtocols` and `external-accessory` (from `UIBackgroundModes`) from `Info.plist`.
+2. Add the two Wi‑Fi `Info.plist` keys and the two entitlements from the Wi‑Fi recipe above.
+3. **Don't skip the entitlements wiring** — the most common reason this migration silently "does nothing" is an `.entitlements` file that was created but never attached to the target. Add the capabilities via Xcode (**Signing & Capabilities → + Capability → Access Wi‑Fi Information** + **Hotspot Configuration**), which wires `CODE_SIGN_ENTITLEMENTS` automatically — or if editing `project.pbxproj` by hand, confirm `CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;` is set in **every** Runner build configuration (Debug, Release, Profile): `grep CODE_SIGN_ENTITLEMENTS ios/Runner.xcodeproj/project.pbxproj`.
+4. Delete the app from your test device before reinstalling — this clears any stale Bluetooth Classic accessory pairing state — then rebuild. The first stream should show the "Join Wi‑Fi Network" prompt.
+
+**To switch to Bluetooth Classic:** remove the Wi‑Fi `Info.plist` keys and entitlements, add the ExternalAccessory keys from the Bluetooth Classic recipe above, rebuild. No prompt, no entitlements needed.
 
 ### Android Configuration
 
@@ -371,7 +429,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
     <string>audio</string>
     <string>bluetooth-central</string>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
+    <string>external-accessory</string> <!-- only if using the Bluetooth Classic transport -->
 </array>
 ```
 
@@ -515,6 +573,7 @@ If you run into issues, try these steps first:
 - **From official docs**: See [Known Issues](https://wearables.developer.meta.com/docs/knownissues), [FAQ](https://developers.meta.com/wearables/faq/) and [Report a bug](https://wearables.developer.meta.com/devcenter/feedback/).
 
 Common issues:
+- **Wi‑Fi never prompts, or one transport streams unreliably** — see [Migrating or switching camera transport](#migrating-or-switching-camera-transport); switching between Wi‑Fi and Bluetooth Classic is a config-only change, no code required.
 - **Registration deep link not returning** — If registration opens the Meta AI app but the callback does not return to your app, verify that your URL scheme matches the one registered in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter). On iOS, ensure `CFBundleURLSchemes` in `Info.plist` (and `AppLinkURLScheme` in the `MWDAT` dict) use the same scheme. On Android, ensure the `data android:scheme` in your activity's intent-filter matches that scheme.
 
 **Still having issues?** — Open a [GitHub issue](https://github.com/rodcone/flutter_meta_wearables_dat/issues) with all the details you can provide. This helps us pinpoint the problem and assist you more efficiently.

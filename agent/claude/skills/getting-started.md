@@ -22,15 +22,10 @@ Add to `ios/Runner/Info.plist`:
     <string>fb-viewapp</string>
 </array>
 
-<key>UISupportedExternalAccessoryProtocols</key>
-<array>
-    <string>com.meta.ar.wearable</string>
-</array>
-
+<!-- Camera transport is configured separately — see "iOS camera transport" below. -->
 <key>UIBackgroundModes</key>
 <array>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
     <!-- Optional: required only if you call MetaWearablesDat.enableBackgroundStreaming()
          to keep the stream alive while backgrounded or the phone is locked. -->
     <!-- <string>audio</string>                -->
@@ -66,6 +61,17 @@ Add to `ios/Runner/Info.plist`:
 ```
 
 Replace `myexampleapp` with your app's URL scheme. Use `0` for MetaAppID in Developer Mode, or your real ID from the Meta Wearables Developer Center for production.
+
+### iOS camera transport: Wi‑Fi (recommended) or Bluetooth Classic
+
+Pick one (selected purely via `Info.plist` + entitlements — no runtime switch):
+
+- **Wi‑Fi (recommended)** — higher bandwidth. Add `NSLocalNetworkUsageDescription` and `NSBonjourServices` (`_bonjour._tcp`) to `Info.plist`, plus the `com.apple.developer.networking.HotspotConfiguration` and `com.apple.developer.networking.wifi-info` entitlements (Xcode → Signing & Capabilities → **Access Wi‑Fi Information** + **Hotspot Configuration**). The first stream shows a one-time "Join Wi‑Fi Network" prompt. Do **not** add the ExternalAccessory keys — they force Bluetooth Classic.
+- **Bluetooth Classic** — no prompt, works offline, lower bandwidth. Add `UISupportedExternalAccessoryProtocols` (`com.meta.ar.wearable`) and `external-accessory` to `UIBackgroundModes`.
+
+Transport does not affect App Store eligibility — the SDK links `ExternalAccessory.framework` either way, and Meta limits public publishing to select partners until GA.
+
+**Migrating or troubleshooting:** switching transport is config-only — remove one recipe's keys, add the other's, rebuild; no Dart/plugin change. If migrating an older app to Wi‑Fi, don't skip the entitlements wiring: a `.entitlements` file is ignored unless `CODE_SIGN_ENTITLEMENTS` points at it in every Runner build configuration (Xcode → Signing & Capabilities → adding the two capabilities wires this automatically; check by hand with `grep CODE_SIGN_ENTITLEMENTS ios/Runner.xcodeproj/project.pbxproj`). If Wi‑Fi never prompts or streaming misbehaves on either transport, switch to the other the same way.
 
 ## Android configuration
 

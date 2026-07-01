@@ -1,3 +1,6 @@
+## 0.7.1
+* Docs: document the iOS Wi‑Fi vs Bluetooth Classic camera transport choice, with migration/switching steps.
+
 ## 0.7.0
 **BREAKING CHANGES**
 * Update to Meta Wearables DAT **0.8.0** on both platforms.

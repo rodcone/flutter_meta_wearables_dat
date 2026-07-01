@@ -173,15 +173,11 @@ Add to `Info.plist`:
     <string>fb-viewapp</string>
 </array>
 
-<key>UISupportedExternalAccessoryProtocols</key>
-<array>
-    <string>com.meta.ar.wearable</string>
-</array>
-
+<!-- Camera transport (Wi-Fi or Bluetooth Classic) is configured separately —
+     see "Choose your camera transport" below. -->
 <key>UIBackgroundModes</key>
 <array>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
 </array>
 
 <!-- Deep link callback from Meta AI app -->
@@ -212,6 +208,60 @@ Add to `Info.plist`:
     </dict>
 </dict>
 ```
+
+#### Choose your camera transport: Wi‑Fi (recommended) or Bluetooth Classic
+
+The SDK streams over one of two high-bandwidth links; on iOS you pick which **purely via `Info.plist` + entitlements** (no runtime switch). Configure exactly one.
+
+**Wi‑Fi (recommended)** — higher bandwidth. Triggers a one-time *"Join Wi‑Fi Network"* prompt and joins the glasses' AP (phone internet then rides cellular). Add to `Info.plist`:
+
+```xml
+<key>NSLocalNetworkUsageDescription</key>
+<string>Allows your phone to find and connect to your glasses over Wi-Fi.</string>
+<key>NSBonjourServices</key>
+<array>
+    <string>_bonjour._tcp</string>
+</array>
+```
+
+plus a `.entitlements` file wired to the target via `CODE_SIGN_ENTITLEMENTS` (Xcode → Signing & Capabilities → add **Access Wi‑Fi Information** + **Hotspot Configuration** does this automatically; a hand-created file is silently ignored until that build setting points at it in every Runner configuration):
+
+```xml
+<key>com.apple.developer.networking.HotspotConfiguration</key>
+<true/>
+<key>com.apple.developer.networking.wifi-info</key>
+<true/>
+```
+
+Do **not** add the ExternalAccessory keys below — while present, the SDK uses Bluetooth Classic and never brings up Wi‑Fi.
+
+**Bluetooth Classic** — no prompt, keeps the phone on its normal Wi‑Fi, works offline, but lower bandwidth. Add to `Info.plist`:
+
+```xml
+<key>UISupportedExternalAccessoryProtocols</key>
+<array>
+    <string>com.meta.ar.wearable</string>
+</array>
+
+<key>UIBackgroundModes</key>
+<array>
+    <string>bluetooth-peripheral</string>
+    <string>external-accessory</string>
+</array>
+```
+
+> **App Store note:** transport does not affect App Store eligibility — the DAT SDK links `ExternalAccessory.framework` regardless of transport (an MFi binary-scanner concern), and Meta limits public publishing to select partners until GA. Wi‑Fi's advantage is bandwidth, not publishability.
+
+#### Migrating or switching camera transport
+
+Switching transport is a **config-only change** — no plugin update or Dart code involved. Two scenarios:
+
+- **Upgrading an app configured before this transport choice was documented** — it already has `com.meta.ar.wearable` + `external-accessory` (Bluetooth Classic) and keeps working unchanged; migrating to Wi‑Fi is optional.
+- **One transport isn't working** — Wi‑Fi never prompts / won't join the AP, or Bluetooth Classic streaming is unreliable — switch to the other the same way.
+
+**To switch to Wi‑Fi:** remove `UISupportedExternalAccessoryProtocols` + `external-accessory`, add the Wi‑Fi `Info.plist` keys + entitlements above, then **verify the entitlements wiring** — a `.entitlements` file is silently ignored unless `CODE_SIGN_ENTITLEMENTS` points at it in every Runner build configuration (Xcode → Signing & Capabilities → add the two capabilities does this automatically; check by hand with `grep CODE_SIGN_ENTITLEMENTS ios/Runner.xcodeproj/project.pbxproj`). Delete the app from the test device before reinstalling to clear stale Bluetooth Classic accessory state, then rebuild.
+
+**To switch to Bluetooth Classic:** remove the Wi‑Fi keys + entitlements, add the ExternalAccessory keys above, rebuild.
 
 ### 3. Android configuration
 
@@ -394,7 +444,7 @@ await MetaWearablesDat.stopStreamSession(null);
 await MetaWearablesDat.disableBackgroundStreaming();
 ```
 
-**Additional iOS `Info.plist` entries** (required only if you call `enableBackgroundStreaming`): add `audio` and `bluetooth-central` alongside the existing `bluetooth-peripheral` and `external-accessory`:
+**Additional iOS `Info.plist` entries** (required only if you call `enableBackgroundStreaming`): add `audio` and `bluetooth-central` alongside `bluetooth-peripheral` (and `external-accessory` only if you use the Bluetooth Classic transport):
 
 ```xml
 <key>UIBackgroundModes</key>
@@ -402,7 +452,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
     <string>audio</string>
     <string>bluetooth-central</string>
     <string>bluetooth-peripheral</string>
-    <string>external-accessory</string>
+    <string>external-accessory</string> <!-- only if using the Bluetooth Classic transport -->
 </array>
 ```
 
@@ -525,6 +575,9 @@ Stream not starting?
 ├── On Android: MainActivity extends FlutterFragmentActivity?
 ├── On Android: GitHub token configured for Maven dependency?
 └── Try restarting glasses: power off → hold capture button → power on → release when LED turns red
+
+iOS: Wi-Fi never prompts, or one transport streams unreliably?
+└── Switch transports — see "Migrating or switching camera transport" (config-only, no code change)
 ```
 
 ## Links
