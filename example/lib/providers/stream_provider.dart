@@ -35,6 +35,32 @@ class StreamSessionProvider extends ChangeNotifier {
   int? _textureId;
   bool _backgroundStreamingEnabled = false;
 
+  // --- Transparent recovery from transient mid-stream errors -------------
+  // The DAT SDK auto-stops the stream when it hits certain errors ("The
+  // session automatically stops when an error occurs" — SDK docs). The most
+  // common trigger in practice is locking the phone while streaming: the app
+  // is suspended, the pipeline breaks, and the SDK emits `videoStreamingError`
+  // (and transitions the stream to `stopped`). Rather than dead-ending on a
+  // red banner the user can only clear by manually stopping + starting, we
+  // restart the session automatically a few times.
+  static const Set<String> _recoverableStreamErrors = {
+    'videoStreamingError',
+    'timeout',
+    'internalError',
+    'deviceNotConnected',
+    'deviceNotFound',
+  };
+  static const int _maxRecoveryAttempts = 3;
+  static const Duration _recoveryWatchdog = Duration(seconds: 10);
+
+  // True between a user-initiated start and stop — i.e. the user wants the
+  // stream up. Gates auto-recovery so we never fight a deliberate stop.
+  bool _streamingIntended = false;
+  bool _isRecovering = false;
+  int _recoveryAttempts = 0;
+  Timer? _recoveryBackoffTimer;
+  Timer? _recoveryWatchdogTimer;
+
   List<WearableDevice> _devices = <WearableDevice>[];
   bool _devicesLoading = false;
   String? _devicesError;
@@ -71,6 +97,12 @@ class StreamSessionProvider extends ChangeNotifier {
   VideoStreamSize? get videoStreamSize => _videoStreamSize;
   bool get supportsHvc1 => Platform.isIOS;
   bool get backgroundStreamingEnabled => _backgroundStreamingEnabled;
+
+  /// True while the provider is transparently restarting a stream that hit a
+  /// transient error (e.g. after the phone was locked and the app suspended).
+  /// The UI shows a "Reconnecting…" affordance instead of a hard error while
+  /// this is set.
+  bool get isRecovering => _isRecovering;
 
   /// Snapshot of paired devices from the last [refreshDevices] call.
   List<WearableDevice> get devices => _devices;
@@ -237,6 +269,8 @@ class StreamSessionProvider extends ChangeNotifier {
     _sessionErrorSubscription?.cancel();
     _videoStreamSizeSubscription?.cancel();
     _deviceStateSubscription?.cancel();
+    _recoveryBackoffTimer?.cancel();
+    _recoveryWatchdogTimer?.cancel();
     super.dispose();
   }
 
@@ -295,11 +329,92 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   void _setError(StreamSessionError error) {
+    // Transient mid-stream failures (notably `videoStreamingError`, which the
+    // SDK emits when the pipeline breaks — e.g. after the phone is locked and
+    // the app is suspended) auto-stop the stream. Rather than dead-ending on a
+    // red banner the user can only clear by manually restarting, transparently
+    // restart the session a few times before surfacing the error.
+    if (_streamingIntended &&
+        _recoverableStreamErrors.contains(error.code) &&
+        _recoveryAttempts < _maxRecoveryAttempts) {
+      _scheduleRecovery(error);
+      return;
+    }
+    _cancelRecovery();
     _lastError = error;
     notifyListeners();
   }
 
-  Future<void> startStreamSession() async {
+  void _scheduleRecovery(StreamSessionError error) {
+    _recoveryAttempts++;
+    _isRecovering = true;
+    // Suppress the error banner while we retry; the UI shows a lightweight
+    // "Reconnecting…" state driven by [isRecovering] instead.
+    notifyListeners();
+    debugPrint(
+      '[MetaWearablesDAT] transient stream error "${error.code}" — '
+      'auto-recovery attempt $_recoveryAttempts/$_maxRecoveryAttempts',
+    );
+
+    _recoveryBackoffTimer?.cancel();
+    _recoveryBackoffTimer = Timer(
+      Duration(milliseconds: 400 * _recoveryAttempts),
+      () => unawaited(_runRecovery(error)),
+    );
+
+    // Safety net: if the stream never gets back to `streaming` and no further
+    // error arrives (e.g. the device is genuinely gone), stop pretending to
+    // reconnect and surface the error.
+    _recoveryWatchdogTimer?.cancel();
+    _recoveryWatchdogTimer = Timer(_recoveryWatchdog, () {
+      if (!_isRecovering) return;
+      _cancelRecovery();
+      _lastError = error;
+      notifyListeners();
+    });
+  }
+
+  Future<void> _runRecovery(StreamSessionError error) async {
+    if (!_streamingIntended) {
+      _cancelRecovery();
+      notifyListeners();
+      return;
+    }
+    // Reuse the normal start path: the native side tears down the auto-stopped
+    // stream and mints a fresh texture, and [startStreamSession] re-subscribes
+    // the state/error streams. Success is confirmed asynchronously when the
+    // state stream reaches `streaming` (see the state subscription), which
+    // clears the recovery flags; a fresh async error re-enters [_setError] and
+    // drives the next attempt.
+    final started = await startStreamSession();
+    if (started || !_streamingIntended) return;
+
+    // Synchronous failure with no error event (e.g. the device session could
+    // not be started): retry or give up.
+    if (_recoveryAttempts >= _maxRecoveryAttempts) {
+      _cancelRecovery();
+      _lastError = error;
+      notifyListeners();
+    } else {
+      _scheduleRecovery(error);
+    }
+  }
+
+  void _cancelRecovery() {
+    _recoveryBackoffTimer?.cancel();
+    _recoveryBackoffTimer = null;
+    _recoveryWatchdogTimer?.cancel();
+    _recoveryWatchdogTimer = null;
+    _isRecovering = false;
+  }
+
+  /// Starts (or, during recovery, restarts) the stream session. Returns true
+  /// once a texture is obtained. A user-initiated start (i.e. not an internal
+  /// recovery restart, which runs while [_isRecovering]) refreshes the
+  /// recovery budget and marks intent to keep streaming.
+  Future<bool> startStreamSession() async {
+    if (!_isRecovering) _recoveryAttempts = 0;
+    _streamingIntended = true;
     try {
       // Set camera feed if video is selected (only for mock devices)
       if (_selectedVideo != null && mockDeviceProvider.deviceUUID != null) {
@@ -326,6 +441,11 @@ class StreamSessionProvider extends ChangeNotifier {
               if (state == StreamSessionState.stopped) {
                 _isStreaming = false;
                 _textureId = null;
+              } else if (state == StreamSessionState.streaming) {
+                // A (re)established stream confirms recovery succeeded: clear
+                // the in-flight recovery and refresh the retry budget.
+                _recoveryAttempts = 0;
+                _cancelRecovery();
               }
               notifyListeners();
               // Keep an open paired-devices sheet's "Streaming" badge in sync as
@@ -378,10 +498,17 @@ class StreamSessionProvider extends ChangeNotifier {
       _isStreaming = false;
       notifyListeners();
     }
+    return _isStreaming;
   }
 
   Future<void> stopStreamSession() async {
     unawaited(HapticFeedback.mediumImpact());
+
+    // An explicit stop cancels any in-flight auto-recovery and clears intent
+    // so a queued restart never fights the user's decision to stop.
+    _streamingIntended = false;
+    _recoveryAttempts = 0;
+    _cancelRecovery();
 
     try {
       await MetaWearablesDat.stopStreamSession(_selectedDeviceId);
