@@ -129,7 +129,7 @@ Add the following to your `Info.plist`:
 
 The DAT SDK streams video over one of two high-bandwidth links to the glasses, and on iOS **you select which one purely through `Info.plist` + entitlements — there is no runtime switch.** Configure exactly one.
 
-**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture). On the first stream the SDK joins the glasses' Wi‑Fi access point, so iOS shows a one-time *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. Add to `Info.plist`:
+**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture). On the first stream the SDK joins the glasses' Wi‑Fi access point, so iOS shows a one-time *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. **Trade-off:** that Wi‑Fi association makes `startStreamSession()` noticeably slower — expect roughly **10 seconds** more before the first frame arrives, vs. Bluetooth Classic's near-instant connect. Add to `Info.plist`:
 
 ```xml
 <key>NSLocalNetworkUsageDescription</key>
@@ -151,7 +151,7 @@ and add these to your app's `.entitlements` (in Xcode: **Signing & Capabilities 
 
 Do **not** add the ExternalAccessory keys below — while they are present the SDK fills its high-bandwidth lease over Bluetooth Classic and never brings up Wi‑Fi.
 
-**Bluetooth Classic.** No Wi‑Fi prompt, keeps the phone on its normal Wi‑Fi, and needs no Wi‑Fi infrastructure — but lower bandwidth. Add to `Info.plist`:
+**Bluetooth Classic.** Connects almost instantly (no Wi‑Fi association step), no Wi‑Fi prompt, keeps the phone on its normal Wi‑Fi, and needs no Wi‑Fi infrastructure — but lower bandwidth. Add to `Info.plist`:
 
 ```xml
 <key>UISupportedExternalAccessoryProtocols</key>

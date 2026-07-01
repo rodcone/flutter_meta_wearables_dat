@@ -15,8 +15,8 @@ flutter pub add app_links
 Always required: `NSBluetoothAlwaysUsageDescription`, `LSApplicationQueriesSchemes` (fb-viewapp), `UIBackgroundModes` (`bluetooth-peripheral`), `CFBundleURLTypes` (your URL scheme), `MWDAT` dict (AppLinkURLScheme, MetaAppID, ClientToken, TeamID). Min target: iOS 17.0.
 
 **Camera transport — pick one** (selected via Info.plist + entitlements, no runtime switch):
-- **Wi‑Fi (recommended):** `NSLocalNetworkUsageDescription` + `NSBonjourServices` (`_bonjour._tcp`) + the `com.apple.developer.networking.HotspotConfiguration` and `wifi-info` entitlements. Higher bandwidth. Omit the ExternalAccessory keys.
-- **Bluetooth Classic:** `UISupportedExternalAccessoryProtocols` (`com.meta.ar.wearable`) + `external-accessory` in `UIBackgroundModes`. No Wi‑Fi prompt, works offline.
+- **Wi‑Fi (recommended):** `NSLocalNetworkUsageDescription` + `NSBonjourServices` (`_bonjour._tcp`) + the `com.apple.developer.networking.HotspotConfiguration` and `wifi-info` entitlements. Higher bandwidth, but ~10s slower `startStreamSession()` (phone must associate with the glasses' AP first). Omit the ExternalAccessory keys.
+- **Bluetooth Classic:** `UISupportedExternalAccessoryProtocols` (`com.meta.ar.wearable`) + `external-accessory` in `UIBackgroundModes`. Connects almost instantly, no Wi‑Fi prompt, works offline.
 
 Transport does not affect App Store eligibility — the SDK links `ExternalAccessory.framework` either way, and Meta limits public publishing to select partners until GA.
 

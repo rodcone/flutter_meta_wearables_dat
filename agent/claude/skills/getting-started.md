@@ -66,8 +66,8 @@ Replace `myexampleapp` with your app's URL scheme. Use `0` for MetaAppID in Deve
 
 Pick one (selected purely via `Info.plist` + entitlements — no runtime switch):
 
-- **Wi‑Fi (recommended)** — higher bandwidth. Add `NSLocalNetworkUsageDescription` and `NSBonjourServices` (`_bonjour._tcp`) to `Info.plist`, plus the `com.apple.developer.networking.HotspotConfiguration` and `com.apple.developer.networking.wifi-info` entitlements (Xcode → Signing & Capabilities → **Access Wi‑Fi Information** + **Hotspot Configuration**). The first stream shows a one-time "Join Wi‑Fi Network" prompt. Do **not** add the ExternalAccessory keys — they force Bluetooth Classic.
-- **Bluetooth Classic** — no prompt, works offline, lower bandwidth. Add `UISupportedExternalAccessoryProtocols` (`com.meta.ar.wearable`) and `external-accessory` to `UIBackgroundModes`.
+- **Wi‑Fi (recommended)** — higher bandwidth, but `startStreamSession()` takes roughly **10 seconds longer** to first frame because the phone must associate with the glasses' Wi‑Fi AP first. Add `NSLocalNetworkUsageDescription` and `NSBonjourServices` (`_bonjour._tcp`) to `Info.plist`, plus the `com.apple.developer.networking.HotspotConfiguration` and `com.apple.developer.networking.wifi-info` entitlements (Xcode → Signing & Capabilities → **Access Wi‑Fi Information** + **Hotspot Configuration**). The first stream shows a one-time "Join Wi‑Fi Network" prompt. Do **not** add the ExternalAccessory keys — they force Bluetooth Classic.
+- **Bluetooth Classic** — connects almost instantly, no prompt, works offline, but lower bandwidth. Add `UISupportedExternalAccessoryProtocols` (`com.meta.ar.wearable`) and `external-accessory` to `UIBackgroundModes`.
 
 Transport does not affect App Store eligibility — the SDK links `ExternalAccessory.framework` either way, and Meta limits public publishing to select partners until GA.
 
