@@ -1,25 +1,93 @@
-![Pub Version](https://img.shields.io/pub/v/flutter_meta_wearables_dat)
-![Pub Likes](https://img.shields.io/pub/likes/flutter_meta_wearables_dat)
-![Pub Points](https://img.shields.io/pub/points/flutter_meta_wearables_dat)
-![Pub Downloads](https://img.shields.io/pub/dm/flutter_meta_wearables_dat)
+[![Pub Version](https://img.shields.io/pub/v/flutter_meta_wearables_dat)](https://pub.dev/packages/flutter_meta_wearables_dat)
+[![Pub Likes](https://img.shields.io/pub/likes/flutter_meta_wearables_dat)](https://pub.dev/packages/flutter_meta_wearables_dat)
+[![Pub Points](https://img.shields.io/pub/points/flutter_meta_wearables_dat)](https://pub.dev/packages/flutter_meta_wearables_dat)
+[![Pub Downloads](https://img.shields.io/pub/dm/flutter_meta_wearables_dat)](https://pub.dev/packages/flutter_meta_wearables_dat)
 [![style: very good analysis](https://img.shields.io/badge/style-very_good_analysis-B22C89.svg)](https://pub.dev/packages/very_good_analysis)
 
 # flutter_meta_wearables_dat
 
 <img width="500" height="95" alt="flutter_dat" src="https://github.com/user-attachments/assets/b3958072-1bb5-434d-8006-8f35ae054213" />
 
+Build Flutter camera experiences for Meta AI glasses. Register a device, request camera access, and render its live video stream on iOS and Android through one Dart API.
 
-A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolkit (DAT), enabling integration with Meta AI Glasses for iOS and Android.
+![Demo of the example app](https://github.com/user-attachments/assets/4947911e-5a37-4369-acb7-fdc005899821)
+
+```dart
+// After registration and camera permission have completed:
+final textureId = await MetaWearablesDat.startStreamSession(null);
+Texture(textureId: textureId); // Live feed from the active glasses
+```
+
+No app-side platform-channel or native video-rendering code, JPEG encoding, or Dart-side video decoding is required for live rendering.
+
+## Highlights
+
+- **Native-to-Flutter video rendering:** Directly render the native stream in a Flutter `Texture`.
+- **Complete camera workflow:** Registration, camera permission, streaming, photo capture, device selection, and device-state monitoring.
+- **Developer-ready frame access:** Consume raw RGBA, YUV, or HEVC payloads for OCR, on-device ML, computer vision, or recording.
+- **Background streaming:** Keep a session alive when the app is backgrounded or the phone is locked, on iOS and Android.
+- **Optional mock glasses:** Develop with a simulated pair driven by the phone's camera, without including mock-device dependencies in production.
+- **Reactive API:** Follow registration, availability, session, error, and thermal state with Dart `Stream`s.
+
+## Quick start
+
+### 1. Install
+
+```yaml
+dependencies:
+  flutter_meta_wearables_dat: ^0.7.1
+```
+
+### 2. Configure iOS or Android
+
+Complete the [platform setup](#setup), including a deep-link handler, and register your app in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter). On iOS, choose either the recommended Wi-Fi transport or Bluetooth Classic; the [transport guide](#choose-your-camera-transport-wifi-recommended-or-bluetooth-classic) explains the trade-offs.
+
+### 3. Register and stream
+
+Registration completes asynchronously through a Meta AI deep-link callback. Start it from your UI:
+
+```dart
+// Required before every other DAT call on Android; a no-op on iOS.
+await MetaWearablesDat.requestAndroidPermissions();
+
+// One-time registration opens Meta AI.
+await MetaWearablesDat.startRegistration();
+```
+
+Then, in your app's deep-link handler, forward the callback and continue only after it has been handled:
+
+```dart
+Future<int?> completeRegistration(Uri callbackUri) async {
+  final handled = await MetaWearablesDat.handleUrl(callbackUri.toString());
+  if (!handled) return null;
+
+  // Restart device monitoring after returning from Meta AI.
+  await MetaWearablesDat.restartActiveDeviceMonitoring();
+
+  final granted = await MetaWearablesDat.requestCameraPermission();
+  if (!granted) return null;
+
+  // `null` automatically selects the active pair of glasses.
+  return MetaWearablesDat.startStreamSession(null);
+}
+```
+
+Render the returned ID with `Texture(textureId: textureId)`, and stop the session with `await MetaWearablesDat.stopStreamSession(null)` when finished.
+
+For a complete implementation, see the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example), which ports Meta's native Camera Access sample to Flutter.
 
 > **Mock device support is in a separate package.** Real-device pairing, registration, streaming and photo capture all live in this core plugin. The simulated Ray-Ban Meta (driven by the phone's camera) lives in the optional add-on **[`flutter_meta_wearables_dat_mock_device`](flutter_meta_wearables_dat_mock_device/)** — pull it in only for development. Production apps that omit it ship without `MWDATMockDevice.xcframework` (iOS) or `mwdat-mockdevice` (Android), so they don't need to declare `NSCameraUsageDescription` or the `CAMERA` permission. See [Optional: mock device add-on](#optional-mock-device-add-on) for the one-line install.
 
 ## Table of contents
 - [flutter\_meta\_wearables\_dat](#flutter_meta_wearables_dat)
+  - [Highlights](#highlights)
+  - [Quick start](#quick-start)
   - [Table of contents](#table-of-contents)
-  - [Publishing disclaimer](#publishing-disclaimer)
+  - [Publishing and availability](#publishing-and-availability)
   - [Compatible devices](#compatible-devices)
   - [Setup](#setup)
     - [Glasses setup (Developer mode)](#glasses-setup-developer-mode)
+    - [Deep-link callback](#deep-link-callback)
     - [iOS Configuration](#ios-configuration)
       - [Choose your camera transport: Wi‑Fi (recommended) or Bluetooth Classic](#choose-your-camera-transport-wifi-recommended-or-bluetooth-classic)
       - [Migrating or switching camera transport](#migrating-or-switching-camera-transport)
@@ -44,19 +112,20 @@ A Flutter plugin that provides a bridge to Meta's Wearables Device Access Toolki
   - [Contributing](#contributing)
   - [License](#license)
 
-## Publishing disclaimer
+## Publishing and availability
 
-The Meta Wearables Device Access Toolkit is currently in **developer preview**. During this phase:
+Meta controls DAT access and public-publishing eligibility. Under its developer-preview terms:
 
 - You can use the SDK to **build, prototype, and test** your app.
 - You can **distribute to testers** within your organization or team (e.g. via the beta testing platform in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/)).
 - **Publishing to the general public is limited**: only select partners can publish their DAT integrations to public app stores. Most apps using DAT cannot be published publicly yet.
 
-Meta is running the preview to test, learn, and refine the toolkit; broader publishing (general availability) is planned for 2026. For full details, see [Introducing the Meta Wearables Device Access Toolkit](https://developers.meta.com/blog/introducing-meta-wearables-device-access-toolkit/) and the [Meta Wearables FAQ](https://developer.meta.com/wearables/faq).
+Before planning a public launch, confirm your current eligibility with Meta. See [Introducing the Meta Wearables Device Access Toolkit](https://developers.meta.com/blog/introducing-meta-wearables-device-access-toolkit/) and the [Meta Wearables FAQ](https://developer.meta.com/wearables/faq).
 
 ## Compatible devices
 
 - Ray-Ban Meta (Gen 1 & 2)
+- Ray-Ban Meta Optics
 - Meta Ray-Ban Display
 - Oakley Meta HSTN
 - Oakley Meta Vanguard
@@ -66,6 +135,31 @@ Meta is running the preview to test, learn, and refine the toolkit; broader publ
 ### Glasses setup (Developer mode)
 
 To set up your glasses for development, you must enable **Developer mode** in the Meta AI app. See [Enable developer mode in the Meta AI app](https://wearables.developer.meta.com/docs/getting-started-toolkit/#enable-developer-mode-in-the-meta-ai-app) for instructions.
+
+### Deep-link callback
+
+Registration and disconnection complete when Meta AI opens the URL scheme configured in your platform files. Route that URI to `MetaWearablesDat.handleUrl(uri.toString())`. For example, with [`app_links`](https://pub.dev/packages/app_links):
+
+```dart
+late final StreamSubscription<Uri> _deepLinkSubscription;
+
+@override
+void initState() {
+  super.initState();
+  _deepLinkSubscription = AppLinks().uriLinkStream.listen((uri) async {
+    await MetaWearablesDat.handleUrl(uri.toString());
+    await MetaWearablesDat.restartActiveDeviceMonitoring();
+  });
+}
+
+@override
+void dispose() {
+  _deepLinkSubscription.cancel();
+  super.dispose();
+}
+```
+
+Add a Dart-3.9-compatible release of `app_links` (for example, `app_links: ^6.4.1`) to your app and import both `package:app_links/app_links.dart` and `dart:async`. If you use another deep-link package or router, route its callback URI the same way.
 
 ### iOS Configuration
 
@@ -168,7 +262,7 @@ Do **not** add the ExternalAccessory keys below — while they are present the S
 
 > The example app is configured for **Wi‑Fi** — see [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements).
 
-> **App Store note.** Transport choice does **not** affect App Store eligibility. The DAT SDK links `ExternalAccessory.framework` regardless of transport (Apple's binary scanner flags this MFi dependency), and Meta currently limits public publishing to select partners (see [Publishing disclaimer](#publishing-disclaimer)) until GA. Wi‑Fi's advantage is bandwidth, not publishability.
+> **App Store note.** Transport choice does **not** affect App Store eligibility. The DAT SDK links `ExternalAccessory.framework` regardless of transport (Apple's binary scanner flags this MFi dependency); see [Publishing and availability](#publishing-and-availability) for current program eligibility. Wi‑Fi's advantage is bandwidth, not publishability.
 
 #### Migrating or switching camera transport
 
@@ -187,6 +281,8 @@ Switching transport — whether upgrading an older app or troubleshooting one th
 
 ### Android Configuration
 
+**Minimum SDK:** Android API 29 (Android 10).
+
 #### 1. AndroidManifest.xml
 
 Add the following to your app's `AndroidManifest.xml`:
@@ -202,6 +298,11 @@ Add the following to your app's `AndroidManifest.xml`:
     <meta-data
         android:name="com.meta.wearable.mwdat.APPLICATION_ID"
         android:value="0" />
+
+    <!-- For a registered app (not Developer Mode), add its client token. -->
+    <meta-data
+        android:name="com.meta.wearable.mwdat.CLIENT_TOKEN"
+        android:value="YOUR_CLIENT_TOKEN" />
 
     <!-- Optional: Disable analytics -->
     <meta-data
@@ -295,7 +396,7 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 
 ### 0. Android Permissions (Android only)
 - Call `MetaWearablesDat.requestAndroidPermissions()` before any other DAT calls
-- This requests Bluetooth and Internet runtime permissions required by the DAT SDK
+- This requests the Bluetooth runtime permission and initializes the DAT SDK. `INTERNET` must also be declared in the manifest, but Android grants it at install time.
 - **Important:** On Android, the DAT SDK is not initialized until these permissions are granted. This is critical for device discovery to work correctly.
 - No-op on iOS
 
@@ -305,19 +406,24 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - User confirms the connection in Meta AI app
 - Meta AI returns to your app via deep link
 - Handle the callback URL with `MetaWearablesDat.handleUrl(url)` to complete registration
+- Call `MetaWearablesDat.restartActiveDeviceMonitoring()` after registration so device discovery resumes on both platforms
 - Monitor registration state via `MetaWearablesDat.registrationStateStream()`
 - Monitor active device availability via `MetaWearablesDat.activeDeviceStream()`
-- List the paired glasses (name, model, and which pair is streaming) via `MetaWearablesDat.getDevices()` — useful when more than one pair is paired
+- List the paired glasses (name, model, and which pair is streaming) via `MetaWearablesDat.getDevices()` — useful when more than one pair is paired. The list stays empty until registration has completed *and* camera permission has been granted
+- To unregister later, call `MetaWearablesDat.disconnect()` — like registration, it opens the Meta AI app and completes through the same deep-link → `handleUrl` callback
 
 ### 2. Permissions (First-time camera access)
 - When your app first attempts to access the camera, request permission
 - Call `MetaWearablesDat.requestCameraPermission()` to show the Meta AI permission bottom sheet
 - User can allow always, allow once, or deny
+- A `false` return means the user denied the request; SDK-side failures (glasses unreachable, Meta AI app missing, …) throw a typed `CameraPermissionException` instead
+- Check the current status at any time with `MetaWearablesDat.getCameraPermissionStatus()`
 
 ### 3. Session (After registration and permissions)
 - Once registered and permissions are granted, start a streaming session
 - Call `MetaWearablesDat.startStreamSession(deviceId)` — pass a `WearableDevice.id` from `getDevices()` to stream from a specific pair, or `null` to auto-select the active one. Returns a `textureId`
 - Render the live video feed using Flutter's `Texture` widget with the returned ID
+- Size it correctly with `MetaWearablesDat.videoStreamSizeStream()` — it emits the stream's pixel dimensions on start and on resolution changes; wrap the `Texture` in an `AspectRatio` driven by `VideoStreamSize.aspectRatio` so frames aren't stretched
 - Monitor session state via `MetaWearablesDat.streamSessionStateStream()`
 - Monitor errors via `MetaWearablesDat.streamSessionErrorStream()`
 - (Optional) Pin which pair streams by passing its `WearableDevice.id`; switching to a *different* pair while one is streaming throws a `PlatformException` with code `STREAM_ACTIVE` — stop the current stream first
@@ -336,8 +442,13 @@ final textureId = await MetaWearablesDat.startStreamSession(
   videoCodec: VideoCodec.raw, // or VideoCodec.hvc1 (iOS only, supports background streaming)
 );
 
-// Render the live video feed
+// Render the live video feed — wrap the Texture in an AspectRatio driven by
+// videoStreamSizeStream() so frames aren't stretched.
 Texture(textureId: textureId);
+MetaWearablesDat.videoStreamSizeStream().listen((size) {
+  // => AspectRatio(aspectRatio: size.aspectRatio, child: Texture(...))
+  print('Video: ${size.width}x${size.height}');
+});
 
 // Monitor session state
 MetaWearablesDat.streamSessionStateStream().listen((state) {
@@ -375,7 +486,8 @@ for (final d in devices) {
 // Capture a photo during streaming
 final photo = await MetaWearablesDat.capturePhoto(
   null,
-  format: PhotoCaptureFormat.jpeg, // or PhotoCaptureFormat.heic
+  // iOS: choose jpeg or heic. Android: the device chooses the returned format.
+  format: PhotoCaptureFormat.jpeg,
 );
 
 // Stop streaming when done
@@ -383,6 +495,8 @@ await MetaWearablesDat.stopStreamSession(null);
 ```
 
 Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
+
+Store every `StreamSubscription` created for registration, device, session, error, thermal, or frame streams, and cancel it from your widget or provider's `dispose()` method.
 
 #### Video codecs
 
@@ -471,7 +585,9 @@ Subscribing to `videoFramesStream()` is zero-cost when there are no listeners �
 | `StreamQuality.medium` | 504 x 896  |
 | `StreamQuality.high`   | 720 x 1280 |
 
-Valid FPS values: 2, 7, 15, 24, 30.
+Valid FPS values: 2, 7, 15, 24, 30. Defaults: `StreamQuality.high` at 30 FPS with `VideoCodec.raw`.
+
+Bandwidth is adaptive: on a constrained link the SDK first steps the resolution down one tier, then reduces the frame rate (never below 15 FPS), and applies per-frame compression throughout — so a stream can report `high` yet look soft. Requesting a lower resolution or FPS often yields *better* visual quality on a constrained link.
 
 #### Accessing raw frame bytes
 
@@ -514,8 +630,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.7.0
-  flutter_meta_wearables_dat_mock_device: ^0.7.0
+  flutter_meta_wearables_dat: ^0.7.1
+  flutter_meta_wearables_dat_mock_device: ^0.7.1
 ```
 
 ```dart
@@ -538,7 +654,7 @@ await MetaWearablesDatMockDevice.setCameraFacing(uuid, CameraFacing.back);
 final textureId = await MetaWearablesDat.startStreamSession(uuid);
 ```
 
-Apps that pull in this package **must** declare `NSCameraUsageDescription` (iOS) and the `CAMERA` permission (Android) — the mock device uses the phone's camera as the simulated glasses feed. The `Permission`, `PermissionStatus`, and `CameraFacing` enums all live in this package.
+Apps that pull in this package **must** declare `NSCameraUsageDescription` (iOS) and the `CAMERA` permission (Android) — the mock device uses the phone's camera as the simulated glasses feed. The `Permission`, `PermissionStatus`, `CameraFacing`, and `GlassesModel` enums all live in this package.
 
 If you previously used the inline mock APIs (`MetaWearablesDat.pairMockRayBanMeta()` etc. in `flutter_meta_wearables_dat` 0.3.x), see the [0.4.0 migration table in the changelog](CHANGELOG.md).
 
@@ -580,11 +696,7 @@ Common issues:
 
 ## Example app
 
-The [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) is a clone of the Meta's sample Camera Access native app.
-
-Here's a demo showing how the DAT integration looks like:
-
-![demo](https://github.com/user-attachments/assets/4947911e-5a37-4369-acb7-fdc005899821)
+The [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) is a Flutter port of Meta's native Camera Access sample. It exercises the full lifecycle — registration, permissions, streaming, photo capture, background streaming, thermal monitoring, and the mock device add-on.
 
 ## Contributing
 
