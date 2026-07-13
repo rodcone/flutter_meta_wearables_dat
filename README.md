@@ -6,7 +6,7 @@
 
 # flutter_meta_wearables_dat
 
-<img width="500" height="95" alt="flutter_dat" src="https://github.com/user-attachments/assets/b3958072-1bb5-434d-8006-8f35ae054213" />
+<!-- <img width="500" height="95" alt="flutter_dat" src="https://github.com/user-attachments/assets/b3958072-1bb5-434d-8006-8f35ae054213" /> -->
 
 Build Flutter camera experiences for Meta AI glasses. Register a device, request camera access, and render its live video stream on iOS and Android through one Dart API.
 
