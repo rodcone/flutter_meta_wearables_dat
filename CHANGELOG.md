@@ -1,3 +1,6 @@
+## 0.7.2
+* Improve README.
+
 ## 0.7.1
 * Docs: document the iOS Wi‑Fi vs Bluetooth Classic camera transport choice, with migration/switching steps.
 

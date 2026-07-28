@@ -35,7 +35,7 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.7.1
+  flutter_meta_wearables_dat: ^0.7.2
 ```
 
 ### 2. Configure iOS or Android
@@ -82,6 +82,9 @@ For a complete implementation, see the [example app](https://github.com/rodcone/
 - [flutter\_meta\_wearables\_dat](#flutter_meta_wearables_dat)
   - [Highlights](#highlights)
   - [Quick start](#quick-start)
+    - [1. Install](#1-install)
+    - [2. Configure iOS or Android](#2-configure-ios-or-android)
+    - [3. Register and stream](#3-register-and-stream)
   - [Table of contents](#table-of-contents)
   - [Publishing and availability](#publishing-and-availability)
   - [Compatible devices](#compatible-devices)
@@ -630,8 +633,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.7.1
-  flutter_meta_wearables_dat_mock_device: ^0.7.1
+  flutter_meta_wearables_dat: ^0.7.2
+  flutter_meta_wearables_dat_mock_device: ^0.7.2
 ```
 
 ```dart

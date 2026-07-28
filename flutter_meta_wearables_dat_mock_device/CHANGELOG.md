@@ -1,3 +1,8 @@
+## 0.7.2
+
+* Align version with core package's 0.7.2 release. No API changes.
+
+
 ## 0.7.1
 
 * Align version with core package's 0.7.1 release. No API changes.
