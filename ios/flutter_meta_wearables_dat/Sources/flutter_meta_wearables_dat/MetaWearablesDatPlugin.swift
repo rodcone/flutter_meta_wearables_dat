@@ -1181,7 +1181,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // Resolves the Dart call exactly once and releases *both* listeners.
       // Every terminal path below goes through here, so neither listener
       // outlives the capture it was created for.
-      let respond: (Any?) -> Void = { value in
+      //
+      // `@MainActor` is load-bearing, not decoration. There are now three
+      // racing producers — the photo publisher, the error publisher, and the
+      // timeout — and the first two are `@Sendable` callbacks that fire on
+      // whatever thread the SDK chooses. An unsynchronised check-and-set on
+      // `didRespond` would let two of them both pass the guard and reply twice
+      // to the same Flutter call. Funnelling through the main actor serialises
+      // the guard, and has the bonus of invoking `result` on the platform
+      // thread, which is where Flutter requires it.
+      @MainActor func respond(_ value: Any?) {
         guard !didRespond else { return }
         didRespond = true
         let (photo, error) = (photoToken, errorToken)
@@ -1196,10 +1205,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
       photoToken = streamSession.photoDataPublisher.listen { photoData in
         let formatString: String = (photoData.format == .heic) ? "heic" : "jpeg"
-        respond([
+        let payload: [String: Any] = [
           "bytes": FlutterStandardTypedData(bytes: photoData.data),
           "format": formatString,
-        ])
+        ]
+        Task { @MainActor in respond(payload) }
       }
 
       // DAT 0.9.0 removed the never-delivered `CaptureError` and routes capture
@@ -1211,10 +1221,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // failure is request-scoped and belongs here, not on the error channel).
       errorToken = streamSession.errorPublisher.listen { error in
         guard error == .photoCaptureFailed else { return }
-        respond(FlutterError(
-          code: "CAPTURE_PHOTO_FAILED",
-          message: "Photo capture did not complete — check device storage.",
-          details: "photoCaptureFailed"))
+        Task { @MainActor in
+          respond(FlutterError(
+            code: "CAPTURE_PHOTO_FAILED",
+            message: "Photo capture did not complete — check device storage.",
+            details: "photoCaptureFailed"))
+        }
       }
 
       let accepted = streamSession.capturePhoto(format: captureFormat)

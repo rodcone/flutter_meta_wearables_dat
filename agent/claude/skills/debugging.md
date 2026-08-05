@@ -48,7 +48,8 @@ If `startRegistration()` opens Meta AI but the app never returns:
 | `thermalEmergency` | Device thermal emergency (**iOS only** — Android reports `deviceThermalEmergency`) | Stream stopped. Wait for cool down before retrying. |
 | `peakPowerShutdown` | Device exceeded peak power limit | Stream stopped. Reduce streaming intensity / wait. |
 | `batteryCritical` | Device battery critically low | Stream stopped. Charge the glasses. |
-| `deviceThermalCritical` / `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants (the session itself tore down, not just the stream) | Same actions as the stream-level variants; the plugin will recreate the session on the next `startStreamSession()`. |
+| `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants (the session itself went down, not just the stream) | Same actions as the stream-level variants; the plugin recreates the session on the next `startStreamSession()`. |
+| `deviceThermalCritical` | Device-session-level thermal warning — pauses like `thermalCritical`; the session stays up | Warn the user and keep rendering. Do not tear down. |
 | `datAppOnTheGlassesUpdateRequired` | The on-device DAT app needs updating before streaming can work | Call `MetaWearablesDat.openDATGlassesAppUpdate()` to bounce the user to Meta AI. |
 | `sessionEndedByDevice` | The device ended the session; the stream stops with it (**Android only**) | Tear the session down and let the user restart it. |
 | `capabilityDenied` | The device refused the requested capability (**Android only**) | Check permissions; re-request camera access. |
@@ -65,7 +66,9 @@ Photo-capture failure never reaches this stream — it rejects the `capturePhoto
 
 ### Frozen video after an error
 
-A `Texture` widget keeps showing its last frame forever if you only surface the error. For codes that leave the stream dead with no auto-resume — `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, the four `device*` variants, `sessionEndedByDevice` — **tear the session down**: clear your texture ID and streaming flag so the placeholder renders and Start is available again. Losing the active device mid-stream needs the same handling, and it arrives on `activeDeviceStream()` rather than as an error.
+A `Texture` widget keeps showing its last frame forever if you only surface the error. For codes that leave the stream dead with no auto-resume — `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical`, `sessionEndedByDevice` — **tear the session down**: clear your texture ID and streaming flag so the placeholder renders and Start is available again. Losing the active device mid-stream needs the same handling, and it arrives on `activeDeviceStream()` rather than as an error.
+
+Do **not** tear down on `thermalCritical` / `deviceThermalCritical`: those pause the stream and leave the session up, so the stream can resume on its own. Surface them as a warning and keep rendering.
 
 ## Android-specific issues
 

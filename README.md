@@ -397,16 +397,22 @@ Add and configure your app in the [Meta Wearables Developer Center](https://wear
 
 The DAT SDK reports its own crashes to Meta by default. Opting out is host-app configuration only — there is no plugin API for it.
 
-iOS, in `Info.plist` (inside your existing `MWDAT` dictionary):
+iOS: add a `CrashReporting` entry **inside the `MWDAT` dictionary you already declared above**, alongside `Analytics` — do not add a second `MWDAT` key.
 
 ```xml
 <key>MWDAT</key>
 <dict>
-  <key>CrashReporting</key>
-  <dict>
-    <key>OptOut</key>
-    <true/>
-  </dict>
+    <!-- ...AppLinkURLScheme, MetaAppID, ClientToken, TeamID as above... -->
+    <key>Analytics</key>
+    <dict>
+        <key>OptOut</key>
+        <true/>
+    </dict>
+    <key>CrashReporting</key>
+    <dict>
+        <key>OptOut</key>
+        <true/>
+    </dict>
 </dict>
 ```
 
