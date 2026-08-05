@@ -1,3 +1,11 @@
+## 0.8.0
+
+* Update to Meta Wearables DAT **0.9.0**.
+* **Minimum iOS deployment target is now 17.2** (was 17.0), matching the core package.
+* **Changed — action may be required.** iOS mock devices now run the same `Info.plist`-based link-availability check as real hardware. An app that only ever used the mock could previously omit the transport keys; from this release it fails exactly as a real device would. Declare `NSBluetoothAlwaysUsageDescription` at minimum, plus `NSLocalNetworkUsageDescription` and `NSBonjourServices` if you exercise the Wi-Fi transport. No Dart API change.
+* Upstream fix: the phone-camera mock feed no longer dies after a few seconds.
+* Android: `mwdat-mockdevice` now ships `-dontwarn` consumer ProGuard rules, so R8 no longer needs app-side suppressions for it.
+
 ## 0.7.2
 
 * Align version with core package's 0.7.2 release. No API changes.

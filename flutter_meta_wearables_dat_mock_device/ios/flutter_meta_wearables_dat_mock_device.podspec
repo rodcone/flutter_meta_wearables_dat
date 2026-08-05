@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_meta_wearables_dat_mock_device'
-  s.version          = '0.7.2'
+  s.version          = '0.8.0'
   s.summary          = 'Optional MockDeviceKit add-on for flutter_meta_wearables_dat.'
   s.description      = <<-DESC
 Optional MockDeviceKit add-on for flutter_meta_wearables_dat. Pull this in only
@@ -21,7 +21,7 @@ the binary and skip the matching Info.plist usage strings.
   # Transitive access to MWDATCore.xcframework (vendored by the core plugin)
   # — needed for MWDATCore.Permission / MWDATCore.PermissionStatus types.
   s.dependency 'flutter_meta_wearables_dat'
-  s.platform = :ios, '17.0'
+  s.platform = :ios, '17.2'
   s.static_framework = true
   s.vendored_frameworks = [
     'flutter_meta_wearables_dat_mock_device/Frameworks/MWDATMockDevice.xcframework'

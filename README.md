@@ -35,7 +35,7 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.7.2
+  flutter_meta_wearables_dat: ^0.8.0
 ```
 
 ### 2. Configure iOS or Android
@@ -166,7 +166,7 @@ Add a Dart-3.9-compatible release of `app_links` (for example, `app_links: ^6.4.
 
 ### iOS Configuration
 
-**Minimum deployment target:** iOS 17.0
+**Minimum deployment target:** iOS 17.2
 
 **iOS Simulator:** Apple Silicon Macs only. The vendored Meta DAT xcframeworks are shipped with arm64-only simulator slices to stay under pub.dev's 100 MiB package-size limit; x86_64 (Intel Mac) iOS Simulator builds are not supported.
 
@@ -392,6 +392,31 @@ register an `ActivityResultLauncher` and camera permission requests will fail.
 ### Meta Wearables Developer Center
 
 Add and configure your app in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter) to obtain your `MetaAppID` and complete the setup.
+
+### Opting out of DAT crash reporting
+
+The DAT SDK reports its own crashes to Meta by default. Opting out is host-app configuration only — there is no plugin API for it.
+
+iOS, in `Info.plist` (inside your existing `MWDAT` dictionary):
+
+```xml
+<key>MWDAT</key>
+<dict>
+  <key>CrashReporting</key>
+  <dict>
+    <key>OptOut</key>
+    <true/>
+  </dict>
+</dict>
+```
+
+Android, in `AndroidManifest.xml` inside `<application>`:
+
+```xml
+<meta-data
+    android:name="com.meta.wearable.mwdat.CRASH_REPORTING_OPT_OUT"
+    android:value="true" />
+```
 
 ## Integration Lifecycle
 
@@ -633,8 +658,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.7.2
-  flutter_meta_wearables_dat_mock_device: ^0.7.2
+  flutter_meta_wearables_dat: ^0.8.0
+  flutter_meta_wearables_dat_mock_device: ^0.8.0
 ```
 
 ```dart

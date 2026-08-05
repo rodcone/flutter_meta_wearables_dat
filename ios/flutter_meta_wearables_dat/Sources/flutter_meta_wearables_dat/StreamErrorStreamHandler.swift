@@ -8,7 +8,7 @@ import MWDATCore
 /// API — consumers don't need to care which layer produced the error.
 ///
 /// Set `session` when a `Stream` is created; clear it on teardown. Pre-stream
-/// failures (createSession / DeviceSession.start / addStream throws) are
+/// failures (createSession / DeviceSession.start / addCamera throws) are
 /// forwarded via `sendError(code:message:)`.
 class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
   /// The active stream to observe. Setting this property re-subscribes to the
@@ -56,7 +56,9 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
 
     listenerToken = session.errorPublisher.listen { error in
       Task { @MainActor in
-        let payload = Self.errorToMap(error)
+        // `errorToMap` returns nil for errors that are deliberately not part of
+        // this channel's contract (see `.photoCaptureFailed`).
+        guard let payload = Self.errorToMap(error) else { return }
         events(payload)
       }
     }
@@ -69,12 +71,23 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     }
   }
 
-  /// Converts a `StreamError` to a dictionary for the platform channel.
-  private static func errorToMap(_ error: StreamError) -> [String: Any] {
+  /// Converts a `StreamError` to a dictionary for the platform channel, or
+  /// `nil` when the error is intentionally not forwarded on this channel.
+  private static func errorToMap(_ error: StreamError) -> [String: Any]? {
     let code: String
     let message: String
 
     switch error {
+    case .photoCaptureFailed:
+      // Deliberately NOT forwarded. Photo capture failure is request-scoped: it
+      // belongs on the `capturePhoto` result (as `CAPTURE_PHOTO_FAILED` /
+      // `photoCaptureFailed`), which is where `capturePhoto` observes this same
+      // publisher directly. Android agrees — its `StreamError` has no photo
+      // case, so capture failures are Future-only there too, and this channel's
+      // codes are documented as identical across platforms. Handling the case
+      // explicitly (rather than letting `@unknown default` relabel it
+      // `unknown`) is what keeps it off the channel.
+      return nil
     case .internalError:
       code = "internalError"
       message = "An internal error occurred."
@@ -95,7 +108,9 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
       message = "Camera permission was denied."
     case .hingesClosed:
       code = "hingesClosed"
-      message = "The hinges on the glasses were closed."
+      // DAT 0.9.0 also raises this when the glasses are taken off (doff), not
+      // just when the arms are folded.
+      message = "The glasses were closed or taken off."
     case .thermalCritical:
       code = "thermalCritical"
       message = "Device is overheating. Streaming has been paused to protect the device."

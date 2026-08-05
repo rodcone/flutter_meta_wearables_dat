@@ -158,7 +158,7 @@ public protocol MockCameraKit : Sendable {
     /// Calling this clears any active camera feed file.
     ///
     /// - Parameter cameraFacing: Which phone camera to use.
-    func setCameraFeed(cameraFacing: MWDATMockDevice.CameraFacing) async
+    func setCameraFeed(cameraFacing: MWDATMockDevice.CameraFacing)
 
     /// Sets the captured image from an image file.
     /// - Parameter fileURL: URL of the file containing the image.
@@ -247,10 +247,13 @@ extension MockDeviceKitConfig : BitwiseCopyable {
 }
 
 /// Errors thrown by MockDeviceKit.
-public enum MockDeviceKitError : Error, Sendable, Equatable {
+public enum MockDeviceKitError : MWDATCore.DatError, Equatable {
 
     /// MockDeviceKit is not enabled. Call ``MockDeviceKitInterface/enable(config:)`` first.
     case notEnabled
+
+    /// A human-readable description of the error for logging and display.
+    public var description: String { get }
 
     /// Returns a Boolean value indicating whether two values are equal.
     ///
@@ -358,10 +361,8 @@ public protocol MockGlasses : MWDATMockDevice.MockDevice {
 /// Container for accessing mock device service kits.
 public protocol MockGlassesServices : Sendable {
 
-    /// The suite for mocking camera functionality.
     var camera: any MWDATMockDevice.MockCameraKit { get }
 
-    /// The suite for simulating captouch gestures (tap, hold, etc.).
     var captouch: any MWDATMockDevice.MockCaptouchKit { get }
 }
 
@@ -399,7 +400,7 @@ public protocol MockPermissions : Sendable {
 
     /// Set the camera source to stream live from the phone's camera.
     /// - Parameter cameraFacing: 0 for front camera, 1 for back camera.
-    @objc final public func setCameraFeed(cameraFacing: Int) async
+    @objc final public func setCameraFeed(cameraFacing: Int)
 
     /// Set captured image from an image file.
     /// - Parameter fileURL: URL of the file containing image

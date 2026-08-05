@@ -12,7 +12,7 @@ import io.flutter.plugin.common.EventChannel
  *    and mapped via [send] (`StreamError` overload).
  * 2. `DeviceSession.errors: SharedFlow<DeviceSessionError>` — collected in
  *    [MetaWearablesDatPlugin] and mapped via [send] (`DeviceSessionError` overload).
- * 3. Pre-stream failures (`Wearables.createSession` / `DeviceSession.addStream`
+ * 3. Pre-stream failures (`Wearables.createSession` / `DeviceSession.addCamera`
  *    `onFailure`) forwarded via [sendError].
  *
  * All three funnel through a single Flutter event channel so Dart consumers
@@ -78,13 +78,17 @@ internal class StreamSessionErrorStreamHandler : EventChannel.StreamHandler {
                         identifier.contains("HINGE") -> "hingesClosed"
                         identifier.contains("DISCONNECT") -> "deviceNotConnected"
                         identifier.contains("PERMISSION") -> "permissionDenied"
-                        // 0.7.0 split THERMAL into HOT (still recoverable)
-                        // and EMERGENCY (terminal). HOT maps to the same code
-                        // iOS emits for `.thermalCritical` so cross-platform
+                        // 0.7.0 split THERMAL into HOT (still recoverable) and
+                        // EMERGENCY (terminal). HOT maps to the same code iOS
+                        // emits for `.thermalCritical` so cross-platform
                         // consumers see one code per severity tier.
-                        identifier.contains("THERMAL_EMERGENCY") ||
-                                identifier.contains("EMERGENCY") ->
-                                "thermalEmergency"
+                        //
+                        // 0.9.0 removed `StreamError.THERMAL_EMERGENCY`, so a
+                        // thermal emergency now reaches Dart on Android only as
+                        // the session-level `deviceThermalEmergency`. The bare
+                        // EMERGENCY guard is kept so a future rename still lands
+                        // somewhere sane rather than in `videoStreamingError`.
+                        identifier.contains("EMERGENCY") -> "thermalEmergency"
                         identifier.contains("THERMAL") || identifier.contains("OVERHEAT") ->
                                 "thermalCritical"
                         identifier.contains("BATTERY") -> "batteryCritical"
@@ -119,6 +123,12 @@ internal class StreamSessionErrorStreamHandler : EventChannel.StreamHandler {
                         identifier.contains("IDLE") -> "sessionIdle"
                         identifier.contains("CAPABILITY_ALREADY") -> "capabilityAlreadyActive"
                         identifier.contains("CAPABILITY_NOT") -> "capabilityNotFound"
+                        identifier.contains("CAPABILITY_DENIED") -> "capabilityDenied"
+                        // These three used to collapse into `unexpectedError`.
+                        // Android-only: iOS's `DeviceSessionError` is @frozen
+                        // with no equivalent cases.
+                        identifier.contains("SESSION_ENDED") -> "sessionEndedByDevice"
+                        identifier.contains("DISCONNECT") -> "deviceNotConnected"
                         else -> "unexpectedError"
                     }
             return code to description

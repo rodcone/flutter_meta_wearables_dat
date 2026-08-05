@@ -1,3 +1,15 @@
+## 0.8.0
+**BREAKING CHANGES**
+* Update to Meta Wearables DAT **0.9.0** on both platforms.
+* **Minimum iOS deployment target is now 17.2** (was 17.0). The vendored xcframeworks are built `-target arm64-apple-ios17.2`, so apps below that will fail to link.
+* iOS: `capturePhoto()` failures now resolve in milliseconds instead of waiting out the 15 s timeout — DAT 0.9.0 reports them through `StreamError.photoCaptureFailed`, surfaced as `PlatformException(CAPTURE_PHOTO_FAILED, details: photoCaptureFailed)`. The timeout remains as a backstop.
+* `hingesClosed` now also fires when the glasses are **taken off**, not just when the arms are folded. The SDK does not auto-resume in either case: tear the session down (clear your texture ID and streaming flag) or the `Texture` widget freezes on its last frame.
+* Android: two `DeviceSessionError` cases that previously collapsed into `unexpectedError` now report properly as `sessionEndedByDevice` and `capabilityDenied`; `DEVICE_DISCONNECTED` maps to `deviceNotConnected`.
+* Android: stream-level `thermalEmergency` is gone (DAT 0.9.0 removed `StreamError.THERMAL_EMERGENCY`) — a thermal emergency now arrives as the session-level `deviceThermalEmergency`. `thermalEmergency` is iOS-only from this release.
+* Android: `Stream.start()` failures are no longer silently swallowed; they surface on `streamSessionErrorStream()`.
+* Photo-capture failures are documented as never appearing on `streamSessionErrorStream()` on either platform — they reject the `capturePhoto()` future.
+* Add a README note on opting out of DAT crash reporting (host-app config only, no plugin API).
+
 ## 0.7.2
 * Improve README.
 

@@ -36,9 +36,9 @@ PODS:
     - DKImagePickerController/PhotoGallery
     - Flutter
   - Flutter (1.0.0)
-  - flutter_meta_wearables_dat (0.7.2):
+  - flutter_meta_wearables_dat (0.8.0):
     - Flutter
-  - flutter_meta_wearables_dat_mock_device (0.7.2):
+  - flutter_meta_wearables_dat_mock_device (0.8.0):
     - Flutter
     - flutter_meta_wearables_dat
   - image_picker_ios (0.0.1):
@@ -88,13 +88,13 @@ SPEC CHECKSUMS:
   DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
   file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  flutter_meta_wearables_dat: a1c7ff1d90c6f22603a69951d3a6a0cce5dd481a
-  flutter_meta_wearables_dat_mock_device: 8e62ac553825d019e8478ceb50e1fa05f5ff412c
+  flutter_meta_wearables_dat: 1a26cbf3f96ade83444f5a1b08deb688cea751e9
+  flutter_meta_wearables_dat_mock_device: bb90f4374989a7b31c77870c8f3889a655aabaf6
   image_picker_ios: e0ece4aa2a75771a7de3fa735d26d90817041326
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
   SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
 
-PODFILE CHECKSUM: f374215f0fcce7886753508da55ef961ec8c75ba
+PODFILE CHECKSUM: d819e0b9f8905fba93b923460647dd0a0c7b11cd
 
 COCOAPODS: 1.16.2

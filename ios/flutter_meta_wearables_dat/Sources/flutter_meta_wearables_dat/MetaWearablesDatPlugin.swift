@@ -89,6 +89,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private let permissionDeviceResolveTimeout: TimeInterval = 8.0
 
   // Stream session state (single session at a time)
+  //
+  // DAT 0.9.0 consolidated stream capability ownership into `Camera`: the
+  // session hands out a `Camera`, which owns the `Stream`. We keep both — the
+  // `Camera` because it's the handle that detaches the capability, and its
+  // non-optional `stream` because that's what every listener and handler binds
+  // to. They are set and cleared together (see `teardownStreamOnly`).
+  private var camera: MWDATCamera.Camera?
   private var streamSession: MWDATCamera.Stream?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
   private var frameCounter: Int = 0
@@ -706,8 +713,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       throw lastDeviceSessionError ?? DeviceSessionError.unexpectedError(
         description: "Device session did not reach .started within \(Int(timeout))s")
     case .streamEnded:
+      // DAT 0.9.0: `stateStream()` delivers the terminal `.stopped` and then
+      // *finishes* (a stream created after stop finishes immediately), so an
+      // ended stream means the session died — surface the genuine error the
+      // error stream reported, like the `.stopped` and `.timedOut` branches.
       deviceSession = nil
-      throw DeviceSessionError.unexpectedError(description: "Device session state stream ended before reaching .started")
+      throw lastDeviceSessionError ?? DeviceSessionError.unexpectedError(
+        description: "Device session state stream ended before reaching .started")
     }
   }
 
@@ -743,7 +755,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   /// Tears down the active stream but leaves the DeviceSession alive, so the
-  /// next `startStreamSession` is a fast `addStream` on the existing session.
+  /// next `startStreamSession` is a fast `addCamera` on the existing session.
   @MainActor
   private func teardownStreamOnly() async {
     if let token = videoListenerToken {
@@ -752,11 +764,17 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
     streamStateHandler.session = nil
     streamErrorHandler.session = nil
-    if let session = streamSession {
-      // DAT 0.8.0: Stream.stop() is synchronous (no longer async).
-      session.stop()
-      streamSession = nil
+    // DAT 0.9.0: stop the *Camera*, not the Stream. The camera is what holds
+    // the capability slot on the DeviceSession — stopping only the stream would
+    // leave the camera attached and make the next `addCamera` fail with
+    // `capabilityAlreadyActive`, since we deliberately keep the session alive
+    // across `stopStreamSession`. `Camera.stop()` releases resources, detaches
+    // from the parent session, and cascades to its children (the stream).
+    if let camera {
+      camera.stop()
     }
+    camera = nil
+    streamSession = nil
     if let texId = textureId {
       textureRegistry?.unregisterTexture(texId)
       NSLog("[MWDAT] Unregistered texture \(texId)")
@@ -1083,7 +1101,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       lastFrameSendTime = nil
       NSLog("[MWDAT] Registered texture \(texId)")
 
-      // 3. Add a Stream capability.
+      // 3. Add a Camera capability. DAT 0.9.0 replaced `addStream` with
+      // `addCamera`; the returned `Camera` owns the stream.
       let fpsValue = UInt(max(1, Int(fps.rounded())))
       let streamConfig = StreamConfiguration(
         videoCodec: videoCodec,
@@ -1091,25 +1110,26 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         frameRate: fpsValue
       )
 
-      let stream: MWDATCamera.Stream?
+      let newCamera: MWDATCamera.Camera?
       do {
-        stream = try deviceSession.addStream(config: streamConfig)
+        newCamera = try deviceSession.addCamera(config: streamConfig)
       } catch let e as DeviceSessionError {
         streamErrorHandler.send(deviceSessionError: e)
         await teardownStreamOnly()
-        result(FlutterError(code: "ADD_STREAM_ERROR", message: "Could not add stream capability: \(e)", details: nil))
+        result(FlutterError(code: "ADD_CAMERA_ERROR", message: "Could not add camera capability: \(e)", details: nil))
         return
       } catch {
         await teardownStreamOnly()
-        result(FlutterError(code: "ADD_STREAM_ERROR", message: error.localizedDescription, details: nil))
+        result(FlutterError(code: "ADD_CAMERA_ERROR", message: error.localizedDescription, details: nil))
         return
       }
 
-      guard let session = stream else {
+      guard let addedCamera = newCamera else {
         await teardownStreamOnly()
-        result(FlutterError(code: "ADD_STREAM_ERROR", message: "addStream returned nil — device session not in started state", details: nil))
+        result(FlutterError(code: "ADD_CAMERA_ERROR", message: "addCamera returned nil — device session not in started state", details: nil))
         return
       }
+      let session = addedCamera.stream
 
       // 4. Wire listeners. Stream errors are forwarded to Dart by
       // `streamErrorHandler` once its `session` is set below.
@@ -1118,6 +1138,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         self.processAndSendFrame(videoFrame)
       }
 
+      camera = addedCamera
       streamSession = session
       streamStateHandler.session = session
       streamErrorHandler.session = session
@@ -1136,7 +1157,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       }
 
       // Tear down the stream only — keep the DeviceSession alive so the next
-      // startStreamSession is a fast `addStream` rather than a full reconnect.
+      // startStreamSession is a fast `addCamera` rather than a full reconnect.
       await teardownStreamOnly()
       result(true)
     }
@@ -1154,48 +1175,66 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       }
 
       var didRespond = false
-      var listenerToken: AnyListenerToken?
+      var photoToken: AnyListenerToken?
+      var errorToken: AnyListenerToken?
 
-      listenerToken = streamSession.photoDataPublisher.listen { photoData in
+      // Resolves the Dart call exactly once and releases *both* listeners.
+      // Every terminal path below goes through here, so neither listener
+      // outlives the capture it was created for.
+      let respond: (Any?) -> Void = { value in
         guard !didRespond else { return }
         didRespond = true
-        Task { await listenerToken?.cancel() }
+        let (photo, error) = (photoToken, errorToken)
+        photoToken = nil
+        errorToken = nil
+        Task {
+          await photo?.cancel()
+          await error?.cancel()
+        }
+        result(value)
+      }
 
+      photoToken = streamSession.photoDataPublisher.listen { photoData in
         let formatString: String = (photoData.format == .heic) ? "heic" : "jpeg"
-        let payload: [String: Any] = [
+        respond([
           "bytes": FlutterStandardTypedData(bytes: photoData.data),
           "format": formatString,
-        ]
-        result(payload)
+        ])
+      }
+
+      // DAT 0.9.0 removed the never-delivered `CaptureError` and routes capture
+      // failure through `StreamError.photoCaptureFailed` instead, so an accepted
+      // capture that fails now resolves in milliseconds rather than waiting out
+      // the timeout below. `Announcer.listen` hands out a fresh token per call,
+      // so this listener coexists with `streamErrorHandler`'s own subscription
+      // on the same publisher (which deliberately drops this case — capture
+      // failure is request-scoped and belongs here, not on the error channel).
+      errorToken = streamSession.errorPublisher.listen { error in
+        guard error == .photoCaptureFailed else { return }
+        respond(FlutterError(
+          code: "CAPTURE_PHOTO_FAILED",
+          message: "Photo capture did not complete — check device storage.",
+          details: "photoCaptureFailed"))
       }
 
       let accepted = streamSession.capturePhoto(format: captureFormat)
       if !accepted {
-        if !didRespond {
-          didRespond = true
-          Task { await listenerToken?.cancel() }
-          // Request rejected synchronously: no session, no high-bandwidth
-          // (BTC/WiFi) lease, or a capture already in progress.
-          result(FlutterError(
-            code: "CAPTURE_NOT_READY",
-            message: "Capture request was not accepted.",
-            details: "captureNotReady"))
-        }
+        // Request rejected synchronously: no session, no high-bandwidth
+        // (BTC/WiFi) lease, or a capture already in progress.
+        respond(FlutterError(
+          code: "CAPTURE_NOT_READY",
+          message: "Capture request was not accepted.",
+          details: "captureNotReady"))
         return
       }
 
-      // iOS's `capturePhoto(format:) -> Bool` exposes no failure/timeout
-      // delivery channel (CaptureError is never published here), so an accepted
-      // capture that never produces a photo would leave the Dart Future
-      // unresolved forever. Guard with a client-side timeout that resolves the
-      // call with a typed error matching the cross-platform capture contract.
+      // Backstop for the case the SDK reports neither a photo nor an error: an
+      // accepted capture that goes silent would otherwise leave the Dart Future
+      // unresolved forever.
       let timeoutSeconds = 15.0
       Task { @MainActor in
         try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
-        guard !didRespond else { return }
-        didRespond = true
-        await listenerToken?.cancel()
-        result(FlutterError(
+        respond(FlutterError(
           code: "CAPTURE_PHOTO_FAILED",
           message: "Photo capture timed out.",
           details: "photoCaptureTimeout"))

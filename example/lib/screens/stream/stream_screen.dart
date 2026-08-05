@@ -52,6 +52,10 @@ class _StreamScreenState extends State<StreamScreen> {
 
     final isDatUpdate = error.code == 'datAppOnTheGlassesUpdateRequired';
     final isTransient = error.code == 'noEligibleDevice';
+    // Since DAT 0.9.0 this also fires when the glasses are taken off, which is
+    // far more common than folding the arms mid-stream. It's actionable rather
+    // than a failure, so it gets its own wording and a longer read.
+    final isHingesClosed = error.isHingesClosed;
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -64,20 +68,27 @@ class _StreamScreenState extends State<StreamScreen> {
                     ? Icons.thermostat
                     : isDatUpdate
                     ? Icons.system_update
+                    : isHingesClosed
+                    ? Icons.visibility_off
                     : Icons.error_outline,
                 color: Colors.white,
                 size: 20,
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(error.message),
+                child: Text(
+                  isHingesClosed
+                      ? 'Streaming stopped — put your glasses back on, '
+                            'then press Start.'
+                      : error.message,
+                ),
               ),
             ],
           ),
           backgroundColor: Colors.red.shade900,
           duration: isTransient
               ? const Duration(seconds: 3)
-              : isDatUpdate
+              : isDatUpdate || isHingesClosed
               ? const Duration(seconds: 10)
               : const Duration(seconds: 6),
           action: isDatUpdate

@@ -7,18 +7,69 @@ import Foundation
 import MWDATCore
 import UIKit
 
-public enum CaptureError : MWDATCore.DatError, Equatable {
+/// Consolidated camera capability for a Meta Wearables device.
+///
+/// A ``Camera`` owns the camera hardware resource and exposes its child features. It is attached
+/// to a ``DeviceSession`` via ``DeviceSession/addCamera(config:)`` and is automatically stopped
+/// when the parent session stops (cascading stop); it can also be stopped individually via
+/// ``stop()``.
+///
+/// The child features are owned by the camera and share its lifecycle:
+/// - ``stream`` — video streaming (and in-stream photo capture).
+///
+/// Stream and Photo compete for the camera hardware and cannot capture simultaneously; the
+/// developer is responsible for stopping one before starting the other.
+///
+/// In Swift, create a ``Camera`` by first creating and starting a ``DeviceSession``, then calling
+/// ``DeviceSession/addCamera(config:)``. The returned camera is attached to that device session
+/// and stops automatically when the parent device session stops.
+final public class Camera : Sendable {
 
-    case photo_capture_timeout
+    /// The video streaming child feature, owned by this camera.
+    ///
+    /// Use it to receive real-time camera frames. Its lifecycle is bound to this camera: stopping
+    /// the camera stops the stream.
+    final public let stream: MWDATCamera.Stream
 
-    case photo_capture_failed
+    /// The current lifecycle state of this camera.
+    final public var state: MWDATCamera.CameraState { get }
 
-    /// A human-readable description of the error suitable for logging, debugging,
-    /// and display to developers. This should return the English version of the error.
-    public var description: String { get }
+    /// Publisher for camera lifecycle state changes.
+    final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.CameraState> { get }
 
-    /// A localized message describing what error occurred.
-    public var errorDescription: String? { get }
+    /// Stops this camera and its child features, releasing resources and detaching from the parent
+    /// session.
+    ///
+    /// After calling ``stop()``, the camera is invalidated and cannot be reused. Calling ``stop()``
+    /// on an already-stopped camera is a no-op.
+    final public func stop()
+
+    @objc deinit
+}
+
+/// Represents the current lifecycle state of a ``Camera`` capability.
+///
+/// Modeled on ``StreamState`` so the parent camera capability reports its lifecycle with the
+/// same vocabulary as its child features. A camera becomes ``started`` once it is attached to a
+/// started session, and transitions through ``stopping`` to ``stopped`` when it (or the owning
+/// session) is stopped. Child features are only usable while the camera is ``started``.
+@frozen public enum CameraState : Sendable {
+
+    /// The camera is in the process of starting up.
+    ///
+    /// Reserved for parity with ``StreamState`` and future asynchronous start paths. A camera is
+    /// currently created already-attached to a started session (see ``DeviceSession/addCamera(config:)``),
+    /// so it enters ``started`` directly and this case is not emitted today.
+    case starting
+
+    /// The camera is attached to a started session; its child features can be used.
+    case started
+
+    /// The camera is in the process of stopping.
+    case stopping
+
+    /// The camera is stopped and detached from its session.
+    case stopped
 
     /// Returns a Boolean value indicating whether two values are equal.
     ///
@@ -28,7 +79,7 @@ public enum CaptureError : MWDATCore.DatError, Equatable {
     /// - Parameters:
     ///   - lhs: A value to compare.
     ///   - rhs: Another value to compare.
-    public static func == (a: MWDATCamera.CaptureError, b: MWDATCamera.CaptureError) -> Bool
+    public static func == (a: MWDATCamera.CameraState, b: MWDATCamera.CameraState) -> Bool
 
     /// Hashes the essential components of this value by feeding them into the
     /// given hasher.
@@ -58,15 +109,29 @@ public enum CaptureError : MWDATCore.DatError, Equatable {
     public var hashValue: Int { get }
 }
 
-extension CaptureError : Hashable {
+extension CameraState : Equatable {
 }
 
-/// A device selector that automatically selects the best available device.
-/// Selects the first connected device from the devices list.
-@objc(MWDATAutoDeviceSelector) final public class ObjC_AutoDeviceSelector : NSObject, Sendable {
+extension CameraState : Hashable {
+}
 
-    /// Creates an auto device selector that monitors the shared Wearables instance for device changes.
-    override dynamic public init()
+extension CameraState : BitwiseCopyable {
+}
+
+/// Objective-C wrapper for the consolidated ``Camera`` capability.
+///
+/// Obtain one via `-[MWDATDeviceSession addCameraWithError:]` /
+/// `-[MWDATDeviceSession addCameraWithConfig:error:]`. The camera owns its child features; use
+/// ``stream`` for video streaming, and ``stop()`` to tear the camera down (cascading to its
+/// children and detaching from the session).
+@objc(MWDATCamera) final public class ObjC_Camera : NSObject, Sendable {
+
+    /// The video streaming child, owned by this camera.
+    @objc final public let stream: MWDATCamera.ObjC_Stream
+
+    /// Stops this camera and its child features, releasing resources and detaching from the parent
+    /// session. Calling ``stop()`` on an already-stopped camera is a no-op.
+    @objc final public func stop()
 
     @objc deinit
 }
@@ -158,17 +223,6 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
     /// Creates a UIImage from the photo data.
     /// - Returns: A UIImage, or nil if the data cannot be converted.
     @objc final public var image: UIImage? { get }
-
-    @objc deinit
-}
-
-/// A device selector that always selects a specific, predetermined device.
-/// Use this when you want to target operations to a particular device by its identifier.
-@objc(MWDATSpecificDeviceSelector) final public class ObjC_SpecificDeviceSelector : NSObject, Sendable {
-
-    /// Creates a device selector that targets a specific device.
-    /// - Parameter deviceIdentifier: The identifier of the device to always select.
-    @objc public init(deviceIdentifier: MWDATCore.DeviceIdentifier)
 
     @objc deinit
 }
@@ -338,6 +392,9 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
 
     /// The device battery has reached a critically low level.
     case batteryCritical
+
+    /// A photo capture did not complete — no image was returned in time (e.g. low device storage).
+    case photoCaptureFailed
 
     /// Creates a new instance with the specified raw value.
     ///
@@ -698,7 +755,7 @@ public struct PhotoData : Sendable {
 /// Handles video streaming, photo capture, and provides real-time state updates.
 ///
 /// In Swift, create a ``Stream`` by first creating and starting a ``DeviceSession``,
-/// then calling ``DeviceSession/addStream(config:)``. The returned stream is attached to that
+/// then calling ``DeviceSession/addCamera(config:)`` and using ``Camera/stream``. The stream is attached to that
 /// device session and stops automatically when the parent device session stops.
 final public class Stream : Sendable {
 
@@ -722,18 +779,18 @@ final public class Stream : Sendable {
 
     @objc deinit
 
-    /// Starts video streaming from the device.
+    /// Starts video streaming from the session's device.
     ///
-    /// Begins streaming video frames from the currently available device. If no device is currently
-    /// available, the session enters `.waitingForDevice` state and automatically connects when a
-    /// device becomes available. Video frames are delivered through ``videoFramePublisher``.
+    /// Begins streaming video frames from the device the parent ``DeviceSession`` was created for.
+    /// Video frames are delivered through ``videoFramePublisher``.
     ///
-    /// State transitions: `.stopped` -> `.waitingForDevice` (no device) or `.stopped` -> `.starting`
-    /// -> `.streaming` (with device).
+    /// State transitions: `.stopped` -> `.waitingForDevice` (transient) -> `.starting` ->
+    /// `.streaming`. If the device is unknown to the device manager or has no active connection
+    /// when `start()` runs, the session emits ``StreamError/deviceNotFound(_:)`` or
+    /// ``StreamError/deviceNotConnected(_:)`` and returns to `.stopped`.
     ///
-    /// The session monitors for device availability and automatically connects when a device becomes
-    /// available and publishes errors if the device is invalid. The session automatically stops when
-    /// an error occurs or when the device session ends externally (e.g., device powered off).
+    /// The session automatically stops when an error occurs or when the parent session ends
+    /// externally (e.g., device powered off).
     ///
     /// Errors published to ``errorPublisher``:
     /// - ``StreamError/deviceNotFound(_:)``
@@ -825,6 +882,10 @@ public enum StreamError : MWDATCore.DatError, Equatable {
 
     /// The device battery has reached a critically low level.
     case batteryCritical
+
+    /// A photo capture did not complete — no image was returned in time. This commonly indicates low
+    /// device storage or another capture already in progress; the stream itself continues.
+    case photoCaptureFailed
 
     /// A description of the error
     public var description: String { get }
@@ -1072,39 +1133,42 @@ public struct VideoFrameSize : Sendable {
 
 extension DeviceSession {
 
-    /// Creates and adds a ``Stream`` to this device session.
+    /// Creates and adds a consolidated ``Camera`` to this device session.
     ///
-    /// This is the supported Swift entry point for camera streaming.
+    /// The returned ``Camera`` owns the camera hardware resource and exposes its child features
+    /// (currently ``Camera/stream``). The camera is registered as a capability of this session and
+    /// is automatically stopped when the session stops.
     ///
-    /// The device session must be in ``DeviceSessionState/started`` state. The returned
-    /// stream session is automatically added as a capability and will be stopped when
-    /// this device session stops.
+    /// The device session must be in ``DeviceSessionState/started`` state; adding a camera to a
+    /// session that has not started yet returns `nil`.
     ///
-    /// - Parameter config: Configuration for the streaming session. Defaults to ``StreamConfiguration()``.
-    /// - Returns: A configured ``Stream`` added to this device session, or `nil`
-    ///   if the session is not in the started state.
-    /// - Throws: ``DeviceSessionError/capabilityAlreadyActive`` if a Stream is already attached.
-    final public func addStream(config: MWDATCamera.StreamConfiguration = StreamConfiguration()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.Stream?
+    /// - Parameter config: Configuration applied to the camera's child stream (video codec,
+    ///   resolution, frame rate). Defaults to ``StreamConfiguration()``.
+    /// - Returns: A ``Camera`` added to this device session, or `nil` if the session is not in the
+    ///   started state.
+    /// - Throws: ``DeviceSessionError/capabilityAlreadyActive`` if a camera is already attached.
+    final public func addCamera(config: MWDATCamera.StreamConfiguration = StreamConfiguration()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.Camera?
 }
 
 extension NSNotification.Name {
 
-    /// Posted when a Stream is created via `addStream(config:)`.
-    /// The `object` is the `Stream` instance.
+    /// Posted when a ``Stream`` is created — now via ``DeviceSession/addCamera(config:)`` (the object
+    /// is the camera's ``Camera/stream``). Stream observers (e.g. MWDATDebugServer) use this to
+    /// auto-discover streams.
     public static let mwdatStreamSessionCreated: Notification.Name
 }
 
 extension ObjC_DeviceSession {
 
-    /// Creates a stream capability with the default configuration.
+    /// Creates a consolidated camera capability with the default configuration.
     ///
     /// Returns `nil` without setting `error` when the device session is not started yet.
-    @objc(addStreamWithError:) final public func addStream(_ error: NSErrorPointer = nil) -> MWDATCamera.ObjC_Stream?
+    @objc(addCameraWithError:) final public func addCamera(_ error: NSErrorPointer = nil) -> MWDATCamera.ObjC_Camera?
 
-    /// Creates a stream capability with the provided configuration.
+    /// Creates a consolidated camera capability with the provided stream configuration.
     ///
     /// Returns `nil` without setting `error` when the device session is not started yet.
-    @objc(addStreamWithConfig:error:) final public func addStream(config: MWDATCamera.ObjC_StreamConfiguration, error: NSErrorPointer = nil) -> MWDATCamera.ObjC_Stream?
+    @objc(addCameraWithConfig:error:) final public func addCamera(config: MWDATCamera.ObjC_StreamConfiguration, error: NSErrorPointer = nil) -> MWDATCamera.ObjC_Camera?
 }
 
 /// Notification names for stream session events.

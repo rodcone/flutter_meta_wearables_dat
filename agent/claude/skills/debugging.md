@@ -45,19 +45,27 @@ If `startRegistration()` opens Meta AI but the app never returns:
 | Error code | Meaning | Action |
 |------------|---------|--------|
 | `thermalCritical` | Device thermal state critical | Streaming pauses automatically. Wait for device to cool down. |
-| `thermalEmergency` | Device thermal emergency | Stream stopped. Wait for cool down before retrying. |
+| `thermalEmergency` | Device thermal emergency (**iOS only** — Android reports `deviceThermalEmergency`) | Stream stopped. Wait for cool down before retrying. |
 | `peakPowerShutdown` | Device exceeded peak power limit | Stream stopped. Reduce streaming intensity / wait. |
 | `batteryCritical` | Device battery critically low | Stream stopped. Charge the glasses. |
 | `deviceThermalCritical` / `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants (the session itself tore down, not just the stream) | Same actions as the stream-level variants; the plugin will recreate the session on the next `startStreamSession()`. |
 | `datAppOnTheGlassesUpdateRequired` | The on-device DAT app needs updating before streaming can work | Call `MetaWearablesDat.openDATGlassesAppUpdate()` to bounce the user to Meta AI. |
+| `sessionEndedByDevice` | The device ended the session; the stream stops with it (**Android only**) | Tear the session down and let the user restart it. |
+| `capabilityDenied` | The device refused the requested capability (**Android only**) | Check permissions; re-request camera access. |
 | `dwaUnavailable` | The DAT Wearables App is unavailable on the glasses | Restart the glasses; check firmware. |
-| `hingesClosed` | User folded the glasses | Inform user to open the hinges. |
+| `hingesClosed` | Glasses closed **or taken off** (since DAT 0.9.0 doff raises this too) | Put them back on and start a new session. The SDK does not auto-resume. |
 | `permissionDenied` | Camera permission denied | Request permission again or guide user to settings. |
 | `deviceNotConnected` | Device disconnected | Check Bluetooth connection, restart glasses if needed. |
 | `deviceNotFound` | No matching device | Ensure glasses are paired and in range. |
 | `timeout` | Operation timed out | Retry the operation. |
 | `videoStreamingError` | Stream failed | Stop and restart the session. |
 | `internalError` | Internal SDK error | Check logs, restart the session. |
+
+Photo-capture failure never reaches this stream — it rejects the `capturePhoto()` future with `CAPTURE_PHOTO_FAILED` instead, `details` carrying the granular reason (`photoCaptureFailed` / `photoCaptureTimeout` on iOS; `deviceDisconnected` / `notStreaming` / `captureInProgress` / `captureFailed` on Android).
+
+### Frozen video after an error
+
+A `Texture` widget keeps showing its last frame forever if you only surface the error. For codes that leave the stream dead with no auto-resume — `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, the four `device*` variants, `sessionEndedByDevice` — **tear the session down**: clear your texture ID and streaming flag so the placeholder renders and Start is available again. Losing the active device mid-stream needs the same handling, and it arrives on `activeDeviceStream()` rather than as an error.
 
 ## Android-specific issues
 
@@ -67,7 +75,7 @@ If `startRegistration()` opens Meta AI but the app never returns:
 
 ## iOS-specific issues
 
-- **Minimum iOS 17.0:** The DAT xcframeworks require iOS 17.0+. Set `IPHONEOS_DEPLOYMENT_TARGET = 17.0` in Xcode.
+- **Minimum iOS 17.2:** The DAT xcframeworks require iOS 17.2+. Set `IPHONEOS_DEPLOYMENT_TARGET = 17.2` in Xcode.
 - **Missing Info.plist keys:** Missing Bluetooth or external accessory entries will cause silent failures.
 
 ## Glasses restart procedure

@@ -1,6 +1,6 @@
 # flutter_meta_wearables_dat — Copilot Instructions
 
-Flutter plugin for Meta's Wearables Device Access Toolkit (DAT). Streams video from Meta AI Glasses (Ray-Ban Meta) on iOS (17.0+) and Android (API 29+).
+Flutter plugin for Meta's Wearables Device Access Toolkit (DAT). Streams video from Meta AI Glasses (Ray-Ban Meta) on iOS (17.2+) and Android (API 29+).
 
 ## API
 
@@ -21,7 +21,8 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 - `activeDeviceStream()` — bool, device availability
 - `getDevices()` → `List<WearableDevice>` (id, name, type, linkState, compatibility, supportsDisplay, isActive, isStreamingDevice). Pass an `id` to `startStreamSession` to pin that pair; requesting a *different* device while one is streaming throws `PlatformException` `STREAM_ACTIVE`. Android throws `NOT_INITIALIZED` if called before Bluetooth permission.
 - `streamSessionStateStream()` — stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
-- `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, thermalEmergency, peakPowerShutdown, batteryCritical, hingesClosed, permissionDenied, deviceNotConnected, datAppOnTheGlassesUpdateRequired (recover via `openDATGlassesAppUpdate()`), dwaUnavailable, plus device-session variants (deviceThermalCritical etc.).
+- `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, thermalEmergency (iOS only; Android reports deviceThermalEmergency), peakPowerShutdown, batteryCritical, hingesClosed (glasses closed **or taken off**), permissionDenied, deviceNotConnected, datAppOnTheGlassesUpdateRequired (recover via `openDATGlassesAppUpdate()`), dwaUnavailable, plus device-session variants (deviceThermalCritical etc.) and the Android-only sessionEndedByDevice / capabilityDenied. Capture failures are not on this stream — they reject the `capturePhoto()` future.
+- Errors with no auto-resume (hingesClosed, permissionDenied, thermalEmergency, peakPowerShutdown, batteryCritical, device\* variants, sessionEndedByDevice) need a teardown, not a retry — clear textureId + streaming flag or the Texture widget freezes on its last frame.
 - `deviceStateStream()` — `Stream<DeviceState>` of live `ThermalLevel` (unknown, none, light, moderate, severe, critical, emergency, shutdown). Use to warn the user *before* a thermal error stops the stream.
 - `openDATGlassesAppUpdate()` — opens the Meta AI app to the DAT-app-update screen. Pair with the `datAppOnTheGlassesUpdateRequired` error code to drive a "tap to update" UI.
 - `videoStreamSizeStream()` — VideoStreamSize (width/height/aspectRatio) emitted on stream start and resolution changes
@@ -36,7 +37,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 
 Mock support lives in the optional add-on `flutter_meta_wearables_dat_mock_device` (since 0.4.0). Production builds that omit it skip `MWDATMockDevice` linkage and don't need `NSCameraUsageDescription` / `CAMERA`.
 
-- Add `flutter_meta_wearables_dat_mock_device: ^0.7.0` to dev/staging `pubspec.yaml`.
+- Add `flutter_meta_wearables_dat_mock_device: ^0.8.0` to dev/staging `pubspec.yaml`.
 - Import: `import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';`
 - Optional bypass for registration/permission flows: `MetaWearablesDatMockDevice.configure(initiallyRegistered: true, initialPermissionsGranted: true)`
 - Lifecycle: `MetaWearablesDatMockDevice.pairGlasses({model})` → UUID (`model` defaults to `GlassesModel.rayBanMeta`; other values: `oakleyMetaHSTN`, `oakleyMetaVanguard`, `rayBanMetaOptics`, `metaGlasses`), then `.powerOn(uuid)` + `.don(uuid)`, optionally `.setCameraFacing(uuid, CameraFacing.back)`
