@@ -91,8 +91,8 @@ Deep link handling via `app_links` package for DAT registration callbacks.
 
 ## Updating DAT Versions
 
-See `doc/MAINTAINERS.md` for detailed steps. Currently on **DAT 0.8.0** on both platforms. Summary:
-- **iOS**: Download xcframeworks from github.com/facebook/meta-wearables-dat-ios releases → replace in `ios/flutter_meta_wearables_dat/Frameworks/` (core: `MWDATCore` + `MWDATCamera`) and `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks/` (mock: `MWDATMockDevice`) → `pod update` in example/ios (or delete the workspace's `swiftpm/` dirs under SPM mode). Skip `MWDATDisplay` and `MWDATMockDeviceTestClient` xcframeworks — not vendored. Both CocoaPods and Swift Package Manager are supported; CI exercises both via the `ios-build` matrix.
+See `doc/MAINTAINERS.md` for detailed steps. Currently on **DAT 0.8.0** on both platforms. **Always update both plugins together** — core alone is not enough.
+- **iOS**: Download xcframeworks from github.com/facebook/meta-wearables-dat-ios releases → replace **all three**: `MWDATCore` + `MWDATCamera` in `ios/flutter_meta_wearables_dat/Frameworks/` **and** `MWDATMockDevice` in `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks/` → run `./scripts/thin-xcframeworks.sh` → `pod update` in example/ios (or delete the workspace's `swiftpm/` dirs under SPM mode). Skip `MWDATDisplay` and `MWDATMockDeviceTestClient` xcframeworks — not vendored. Both CocoaPods and Swift Package Manager are supported; CI exercises both via the `ios-build` matrix.
 - **Android**: Update `ext.mwdat_version` in both `android/build.gradle` files (core + mock add-on, must match) → sync Gradle. The `versions-in-sync` CI job enforces this.
 
 ## Linting

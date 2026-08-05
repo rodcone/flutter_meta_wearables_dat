@@ -7,6 +7,8 @@ This repo ships **two federated plugins** that both consume the Meta Wearables D
 
 Update **both** packages together when bumping the DAT version, otherwise the host app will mix incompatible binaries from the two SDKs. Follow the platform-specific steps below.
 
+> **Do not skip the mock add-on.** A DAT bump means replacing **all three** iOS xcframeworks (`MWDATCore`, `MWDATCamera`, **and** `MWDATMockDevice`) and bumping `ext.mwdat_version` in **both** Android `build.gradle` files. Leaving `MWDATMockDevice` / `mwdat-mockdevice` on an older DAT release will break the example app and any consumer that depends on `flutter_meta_wearables_dat_mock_device`.
+
 ## iOS
 
 The iOS implementation uses vendored frameworks. Follow these steps to update the DAT version.
@@ -17,14 +19,14 @@ The Meta Wearables DAT is distributed as pre-compiled binaries.
 
 - Go to the [official repository](https://github.com/facebook/meta-wearables-dat-ios) → **Releases** → **Tags**
 - Download the desired version (no need to clone the entire repo)
-- Extract and locate the `.xcframework` folders:
-  - `MWDATCamera.xcframework`
-  - `MWDATCore.xcframework`
-  - `MWDATMockDevice.xcframework`
+- Extract and locate the `.xcframework` folders — you need **all three**:
+  - `MWDATCamera.xcframework` → core plugin
+  - `MWDATCore.xcframework` → core plugin
+  - `MWDATMockDevice.xcframework` → mock add-on (`flutter_meta_wearables_dat_mock_device`)
 
 ### 2. Replace Local Files
 
-Update the binaries across **both** plugins:
+Update the binaries across **both** plugins (core alone is not enough):
 
 1. **Core plugin** — replace `MWDATCore.xcframework` and `MWDATCamera.xcframework` in `ios/flutter_meta_wearables_dat/Frameworks/`.
 2. **Mock add-on** — replace `MWDATMockDevice.xcframework` in `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks/`.
@@ -161,14 +163,15 @@ Before tagging, confirm:
    - `ios/flutter_meta_wearables_dat.podspec` (`s.version`)
    - `flutter_meta_wearables_dat_mock_device/pubspec.yaml`
    - `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device.podspec` (`s.version`)
-2. **Both `CHANGELOG.md` files have a `## <new-version>` entry.** The publish workflow's `github-release` job extracts these for the GitHub release notes — missing entries produce an empty release body.
-3. **Both packages are clean locally:**
+2. **If this release bumps the DAT SDK:** all three iOS xcframeworks are updated (`MWDATCore` + `MWDATCamera` in the core plugin **and** `MWDATMockDevice` in the mock add-on), `./scripts/thin-xcframeworks.sh` has been run, and both Android `ext.mwdat_version` values match.
+3. **Both `CHANGELOG.md` files have a `## <new-version>` entry.** The publish workflow's `github-release` job extracts these for the GitHub release notes — missing entries produce an empty release body.
+4. **Both packages are clean locally:**
    ```bash
    dart analyze && (cd flutter_meta_wearables_dat_mock_device && dart analyze)
    dart pub publish --dry-run && (cd flutter_meta_wearables_dat_mock_device && dart pub publish --dry-run)
    ```
-4. **The example app still builds** — `cd example && flutter build ios --release --no-codesign` and `flutter build apk --release`.
-5. **You're tagging from `main` with no uncommitted changes.** Tags are not branch-scoped on push; whatever commit you tag is what gets published.
+5. **The example app still builds** — `cd example && flutter build ios --release --no-codesign` and `flutter build apk --release`.
+6. **You're tagging from `main` with no uncommitted changes.** Tags are not branch-scoped on push; whatever commit you tag is what gets published.
 
 ### Steps
 
