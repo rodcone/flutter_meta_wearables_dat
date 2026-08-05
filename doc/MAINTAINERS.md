@@ -69,6 +69,8 @@ SwiftPM caches binary-target checksums in `Package.resolved`; clearing the works
 
 Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Swift and Dart) to adopt new features and fix any issues introduced by the update.
 
+Meta ships its own AI skills alongside the SDK at [`plugins/mwdat-ios/skills/`](https://github.com/facebook/meta-wearables-dat-ios/tree/main/plugins/mwdat-ios), updated with each release. They're often the fastest, most concrete migration reference — usually ahead of the prose docs. They document the *native* Swift API, so treat them as a migration guide for `MetaWearablesDatPlugin.swift`, not as content to copy into our Dart-facing [`agent/`](../agent/) skills.
+
 ### 5. Test Build
 
 Verify both iOS resolvers from a clean state:
@@ -125,9 +127,13 @@ Keep the two values in sync — mixing versions across the two plugins risks ABI
 2. Sync Gradle: Run `./gradlew build --refresh-dependencies` or use Android Studio's "Sync Project with Gradle Files"
 3. Verify the new dependencies are resolved correctly
 
+If Gradle fails with `401 Unauthorized` resolving `com.meta.wearable:mwdat-*`, your GitHub token (`GITHUB_TOKEN` or `github_token` in `local.properties`) is expired — regenerate one with `read:packages` scope.
+
 ### 4. Implement API Changes
 
 Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Kotlin and Dart) to adopt new features and fix any issues introduced by the update.
+
+Meta ships its own AI skills alongside the SDK at [`plugins/mwdat-android/skills/`](https://github.com/facebook/meta-wearables-dat-android/tree/main/plugins/mwdat-android/skills), updated with each release. `camera-streaming` and `session-lifecycle` in particular are often the fastest, most concrete migration reference — usually ahead of the prose docs. They document the *native* Kotlin API, so treat them as a migration guide for `MetaWearablesDatPlugin.kt`, not as content to copy into our Dart-facing [`agent/`](../agent/) skills. Diffing them across releases is also a useful signal for behaviour changes our consumer skills should mention (constraints, state machines, error taxonomy).
 
 Key Android-specific implementation files:
 - `MetaWearablesDatPlugin.kt` — main plugin with method/event channel handling
