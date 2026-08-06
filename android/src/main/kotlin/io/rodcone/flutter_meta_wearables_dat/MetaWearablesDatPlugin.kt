@@ -1250,9 +1250,14 @@ class MetaWearablesDatPlugin :
                                                 state ==
                                                         com.meta.wearable.dat.camera.types
                                                                 .StreamState.CLOSED
-                                if (!isStopped) {
+                                // Arm only on STREAMING: intermediate states
+                                // would arm on a stream that never actually ran.
+                                if (state ==
+                                                com.meta.wearable.dat.camera.types
+                                                        .StreamState.STREAMING
+                                ) {
                                     hasRun = true
-                                } else if (hasRun) {
+                                } else if (isStopped && hasRun) {
                                     // Run outside this collector's own job —
                                     // teardownStreamOnly cancels it.
                                     scope.launch { teardownStreamOnly() }

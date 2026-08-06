@@ -771,6 +771,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if isTearingDownStream { return }
     isTearingDownStream = true
     defer { isTearingDownStream = false }
+    NSLog("[MWDAT] teardownStreamOnly — detaching camera (streamHasRun=\(streamHasRun))")
 
     // Cancel the self-termination watcher first: `camera.stop()` below drives the
     // stream to `.stopped`, which would otherwise re-enter here.
@@ -1175,11 +1176,20 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       streamStateListenerToken = session.statePublisher.listen { [weak self] state in
         Task { @MainActor in
           guard let self else { return }
+          // Arm only on `.streaming`. Intermediate states (`.waitingForDevice`,
+          // `.starting`) would arm on a stream that never actually ran, and
+          // because these hops are queued per-event their relative order isn't
+          // guaranteed — so a replayed `.stopped` could otherwise land *after*
+          // one of them and tear down a stream mid-creation. `.streaming` can
+          // never be a fresh stream's initial value, which closes that race.
+          // A stream that dies before streaming needs no watcher: the
+          // stale-stream branch in `startStreamSession` detaches it.
           guard state == .stopped else {
-            self.streamHasRun = true
+            if state == .streaming { self.streamHasRun = true }
             return
           }
           guard self.streamHasRun else { return }
+          NSLog("[MWDAT] stream self-terminated after streaming — detaching camera")
           await self.teardownStreamOnly()
         }
       }
