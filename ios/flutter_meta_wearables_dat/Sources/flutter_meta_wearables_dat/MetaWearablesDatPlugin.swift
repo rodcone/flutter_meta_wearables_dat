@@ -98,6 +98,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var camera: MWDATCamera.Camera?
   private var streamSession: MWDATCamera.Stream?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
+  // Watches for the stream terminating on its own so the Camera can be detached
+  // even when the app never calls `stopStreamSession`. See `teardownStreamOnly`.
+  private var streamStateListenerToken: (any MWDATCore.AnyListenerToken)?
+  // Guards `teardownStreamOnly` against re-entry: stopping the camera drives the
+  // stream to `.stopped`, which calls straight back in through that listener.
+  private var isTearingDownStream = false
   private var frameCounter: Int = 0
   private var currentTargetFPS: Double = 30.0
   private var lastFrameSendTime: Date?
@@ -758,6 +764,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// next `startStreamSession` is a fast `addCamera` on the existing session.
   @MainActor
   private func teardownStreamOnly() async {
+    if isTearingDownStream { return }
+    isTearingDownStream = true
+    defer { isTearingDownStream = false }
+
+    // Cancel the self-termination watcher first: `camera.stop()` below drives the
+    // stream to `.stopped`, which would otherwise re-enter here.
+    if let token = streamStateListenerToken {
+      await token.cancel()
+      streamStateListenerToken = nil
+    }
     if let token = videoListenerToken {
       await token.cancel()
       videoListenerToken = nil
@@ -1136,6 +1152,19 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         self.processAndSendFrame(videoFrame)
+      }
+
+      // Teardown cascades parent -> child but NOT child -> parent, so a stream
+      // that stops on its own — a stream-level error such as `hingesClosed`
+      // while the DeviceSession stays connected — leaves the Camera attached and
+      // holding the hardware. Detach it here instead of waiting for the app to
+      // call `stopStreamSession`: an app that merely surfaces the error would
+      // otherwise hold the camera until its next start attempt.
+      streamStateListenerToken = session.statePublisher.listen { [weak self] state in
+        guard state == .stopped else { return }
+        Task { @MainActor in
+          await self?.teardownStreamOnly()
+        }
       }
 
       camera = addedCamera

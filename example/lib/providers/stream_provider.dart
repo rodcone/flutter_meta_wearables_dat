@@ -435,6 +435,19 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   Future<void> _setError(StreamSessionError error) async {
+    // A terminal error has already told the user what to do. The SDK keeps
+    // emitting teardown noise while that stop converges, and letting it through
+    // would swap the actionable message ("put your glasses back on") for a
+    // generic one — while the placeholder still shows the original instruction.
+    // Meta's own CameraAccess sample suppresses the same window.
+    if (_pendingUserAction != null &&
+        !_terminalStreamErrors.contains(error.code)) {
+      debugPrint(
+        '[MetaWearablesDAT] suppressing "${error.code}" during teardown',
+      );
+      return;
+    }
+
     // Transient mid-stream failures (notably `videoStreamingError`, which the
     // SDK emits when the pipeline breaks — e.g. after the phone is locked and
     // the app is suspended) auto-stop the stream. Rather than dead-ending on a

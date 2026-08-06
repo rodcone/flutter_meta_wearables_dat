@@ -183,6 +183,13 @@ class MetaWearablesDatPlugin :
     @Volatile private var startInProgress = false
     private var videoJob: Job? = null
     private var streamErrorJob: Job? = null
+    // Watches for the stream terminating on its own so the Camera can be
+    // detached even when the app never calls stopStreamSession. See
+    // teardownStreamOnly.
+    private var streamStateJob: Job? = null
+    // Guards teardownStreamOnly against re-entry: stopping the camera drives the
+    // stream to STOPPED, which calls straight back in through that collector.
+    private var isTearingDownStream = false
     private var deviceAvailabilityJob: Job? = null
     // Texture API — renders I420 frames to a SurfaceTexture
     // instead of encoding to JPEG and copying bytes across the platform channel.
@@ -1219,6 +1226,30 @@ class MetaWearablesDatPlugin :
                             }
                         }
 
+                // Teardown cascades parent -> child but NOT child -> parent, so a
+                // stream that stops on its own (a stream-level error such as
+                // HINGE_CLOSED while the DeviceSession stays connected) leaves the
+                // Camera attached and holding the hardware. Detach it here rather
+                // than waiting for the app to call stopStreamSession: an app that
+                // merely surfaces the error would otherwise hold the camera until
+                // its next start attempt.
+                streamStateJob =
+                        scope.launch {
+                            newStream.state.collect { state ->
+                                if (state ==
+                                                com.meta.wearable.dat.camera.types
+                                                        .StreamState.STOPPED ||
+                                                state ==
+                                                        com.meta.wearable.dat.camera.types
+                                                                .StreamState.CLOSED
+                                ) {
+                                    // Run outside this collector's own job —
+                                    // teardownStreamOnly cancels it.
+                                    scope.launch { teardownStreamOnly() }
+                                }
+                            }
+                        }
+
                 // `start()` returns a DatResult we used to discard, silently
                 // swallowing start failures. The texture is already registered
                 // and the jobs are wired at this point, so report the failure on
@@ -1442,10 +1473,24 @@ class MetaWearablesDatPlugin :
      * `addCamera` instead of paying the full session-start cost.
      */
     private fun teardownStreamOnly() {
+        if (isTearingDownStream) return
+        isTearingDownStream = true
+        try {
+            teardownStreamOnlyLocked()
+        } finally {
+            isTearingDownStream = false
+        }
+    }
+
+    private fun teardownStreamOnlyLocked() {
         videoJob?.cancel()
         videoJob = null
         streamErrorJob?.cancel()
         streamErrorJob = null
+        // Cancel the self-termination watcher before stopping the camera below,
+        // which would otherwise drive the stream to STOPPED and re-enter here.
+        streamStateJob?.cancel()
+        streamStateJob = null
         streamStateStreamHandler?.stream = null
         // DAT 0.9.0: stop the *Camera*, not the Stream. The session stores the
         // capability under `Camera::class`, so stopping only the stream would
