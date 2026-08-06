@@ -1233,16 +1233,26 @@ class MetaWearablesDatPlugin :
                 // than waiting for the app to call stopStreamSession: an app that
                 // merely surfaces the error would otherwise hold the camera until
                 // its next start attempt.
+                //
+                // `state` is a StateFlow, so it always replays its current value
+                // to a new collector — and a freshly added camera's stream is
+                // STOPPED until start() below takes effect. Without the hasRun
+                // latch this tears down the stream we are in the middle of
+                // creating, so only act once the stream has been seen running.
                 streamStateJob =
                         scope.launch {
+                            var hasRun = false
                             newStream.state.collect { state ->
-                                if (state ==
+                                val isStopped =
+                                        state ==
                                                 com.meta.wearable.dat.camera.types
                                                         .StreamState.STOPPED ||
                                                 state ==
                                                         com.meta.wearable.dat.camera.types
                                                                 .StreamState.CLOSED
-                                ) {
+                                if (!isStopped) {
+                                    hasRun = true
+                                } else if (hasRun) {
                                     // Run outside this collector's own job —
                                     // teardownStreamOnly cancels it.
                                     scope.launch { teardownStreamOnly() }

@@ -104,6 +104,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Guards `teardownStreamOnly` against re-entry: stopping the camera drives the
   // stream to `.stopped`, which calls straight back in through that listener.
   private var isTearingDownStream = false
+  // Whether the current stream has been observed in a non-`.stopped` state. The
+  // state publisher replays `.stopped` on subscribe (a new stream hasn't started
+  // yet), so without this the watcher would tear down the stream at creation.
+  private var streamHasRun = false
   private var frameCounter: Int = 0
   private var currentTargetFPS: Double = 30.0
   private var lastFrameSendTime: Date?
@@ -774,6 +778,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       await token.cancel()
       streamStateListenerToken = nil
     }
+    streamHasRun = false
     if let token = videoListenerToken {
       await token.cancel()
       videoListenerToken = nil
@@ -1160,10 +1165,22 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // holding the hardware. Detach it here instead of waiting for the app to
       // call `stopStreamSession`: an app that merely surfaces the error would
       // otherwise hold the camera until its next start attempt.
+      //
+      // `statePublisher` replays the stream's *current* state on subscribe, and a
+      // freshly added camera's stream is `.stopped` until `start()` below takes
+      // effect — so a naive `state == .stopped` check tears down the stream we
+      // are in the middle of creating. Only act once the stream has actually
+      // been observed running.
+      streamHasRun = false
       streamStateListenerToken = session.statePublisher.listen { [weak self] state in
-        guard state == .stopped else { return }
         Task { @MainActor in
-          await self?.teardownStreamOnly()
+          guard let self else { return }
+          guard state == .stopped else {
+            self.streamHasRun = true
+            return
+          }
+          guard self.streamHasRun else { return }
+          await self.teardownStreamOnly()
         }
       }
 
