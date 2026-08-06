@@ -50,6 +50,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // the SDK leaves in a non-terminal state forever would otherwise hang the
   // awaiting Dart future indefinitely.
   private let deviceSessionStartTimeout: TimeInterval = 20.0
+  // Upper bound on how long `teardownStreamOnly` waits for a stopped stream to
+  // actually reach `.stopped` before releasing its references. See the comment
+  // there: letting go early cancels the SDK's stop cascade mid-flight.
+  private let streamStopTimeout: TimeInterval = 3.0
   // After a pin change the shared selector is rebuilt and resolves its active
   // device asynchronously; `createSession` against an unresolved selector
   // returns `noEligibleDevice`. Bound how long we wait for the pinned device
@@ -772,24 +776,35 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
     streamStateHandler.session = nil
     streamErrorHandler.session = nil
-    // Stop BOTH, stream first — they do different jobs and neither substitutes
-    // for the other:
+    // `Camera.stop()` synchronously calls `Stream.stop()` and detaches the
+    // capability from the DeviceSession.
     //
-    //   • `stream.stop()` shuts down the capture pipeline on the glasses. This
-    //     is what 0.8.0 called, and what makes the device play its
-    //     stream-ended tone. Dropping it in favour of `camera.stop()` alone
-    //     left the camera engaged on the device until the whole DeviceSession
-    //     went away (i.e. app exit), so a following start "resumed" the old
-    //     capture instead of starting a fresh one.
-    //   • `camera.stop()` detaches the capability from the session. Required
-    //     since 0.9.0: the session stores the capability under `Camera`, so
-    //     stopping only the stream leaves the camera attached and the next
-    //     `addCamera` fails with `capabilityAlreadyActive` — and we
-    //     deliberately keep the DeviceSession alive across stop/start.
+    // The subtle part is what happens next. `Stream.stop()` only *posts* a
+    // state-transition request; the work that actually tells the glasses to end
+    // the stream — and removes the DWA capability — runs afterwards on a Task,
+    // and the SDK's state machine holds the `Stream` only **weakly**. Once
+    // `Camera.stop()` has detached from the session, our two ivars are the last
+    // strong owners of the whole graph, so releasing them in this same turn
+    // deallocates the `Stream` before that Task runs: the weak load yields nil,
+    // the transition is cancelled, and nothing ever reaches the device. The
+    // glasses are left holding a live capability — no stream-ended tone, and a
+    // later start is rejected during `starting` with `videoStreamingError`.
     //
-    // Both are documented as safe to call on an already-stopped object.
-    streamSession?.stop()
+    // DAT 0.8.0 was immune by accident: the capability registered on the session
+    // *was* the `Stream` and there was no removal API, so the DeviceSession
+    // retained it for its whole life and our nil was never the last release.
+    // Under 0.9.0 it is — hence the bounded wait below before letting go.
+    let stoppingStream = streamSession
     camera?.stop()
+    if let stoppingStream {
+      let deadline = Date().addingTimeInterval(streamStopTimeout)
+      while stoppingStream.state != .stopped, Date() < deadline {
+        try? await Task.sleep(nanoseconds: 50_000_000)
+      }
+      if stoppingStream.state != .stopped {
+        NSLog("[MWDAT] stream did not reach .stopped within \(streamStopTimeout)s (state: \(stoppingStream.state))")
+      }
+    }
     camera = nil
     streamSession = nil
     if let texId = textureId {
