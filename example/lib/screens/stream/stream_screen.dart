@@ -123,8 +123,7 @@ class _StreamScreenState extends State<StreamScreen> {
             // Full screen video stream, reconnecting overlay, or placeholder
             Positioned.fill(
               child:
-                  streamProvider.isStreaming &&
-                      streamProvider.textureId != null
+                  streamProvider.isStreaming && streamProvider.textureId != null
                   ? _TextureStreamWidget(
                       textureId: streamProvider.textureId!,
                       videoStreamSize: streamProvider.videoStreamSize,

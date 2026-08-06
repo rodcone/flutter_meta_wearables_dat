@@ -169,14 +169,11 @@ class StreamSessionProvider extends ChangeNotifier {
       'hingesClosed' => 'Put your glasses back on to start streaming again.',
       'permissionDenied' =>
         'Camera access was denied. Grant it again to keep streaming.',
-      'thermalEmergency' ||
-      'deviceThermalEmergency' =>
+      'thermalEmergency' || 'deviceThermalEmergency' =>
         'Your glasses are too hot. Let them cool down before streaming again.',
-      'batteryCritical' ||
-      'deviceBatteryCritical' =>
+      'batteryCritical' || 'deviceBatteryCritical' =>
         'Your glasses are out of battery. Charge them to stream again.',
-      'peakPowerShutdown' ||
-      'devicePeakPowerShutdown' =>
+      'peakPowerShutdown' || 'devicePeakPowerShutdown' =>
         'Your glasses shut the stream down to protect themselves. '
             'Give them a moment.',
       _ => 'Streaming stopped. Reconnect your glasses to try again.',

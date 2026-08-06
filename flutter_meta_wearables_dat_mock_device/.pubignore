@@ -9,6 +9,11 @@
 .vscode/
 .claude/
 
+# This package's own build output. `.pubignore` REPLACES `.gitignore` for pub,
+# so `build/` being git-ignored does not keep it out of the archive — and pub
+# reports no warning about it.
+/build/
+
 # Example app build artifacts that occasionally slip through
 example/build/
 example/ios/Pods/

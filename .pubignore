@@ -36,6 +36,15 @@
 .vscode/
 .claude/
 
+# This package's own build output. `.pubignore` REPLACES `.gitignore` for pub,
+# so `build/` being git-ignored does not keep it out of the archive — and pub
+# reports no warning about it. Leaving these out shipped a 73 MB archive
+# containing `build/test_cache` (two ~44 MB dill files). The nested mock build
+# needs its own line: the comment above explains why the mock directory as a
+# whole is deliberately not excluded here.
+/build/
+/flutter_meta_wearables_dat_mock_device/build/
+
 # Example app build artifacts that occasionally slip through
 example/build/
 example/ios/Pods/

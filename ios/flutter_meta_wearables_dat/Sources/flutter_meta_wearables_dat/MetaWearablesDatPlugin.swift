@@ -794,7 +794,19 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // *was* the `Stream` and there was no removal API, so the DeviceSession
     // retained it for its whole life and our nil was never the last release.
     // Under 0.9.0 it is — hence the bounded wait below before letting go.
+    //
+    // Everything below is scoped to the resources this call started with. The
+    // wait suspends for up to `streamStopTimeout`, and `Camera.stop()` has
+    // already detached the capability synchronously by then — so a concurrent
+    // `startStreamSession` can legitimately succeed during the wait and install
+    // a *new* camera, stream and texture. That's fine and worth allowing (it's
+    // a fast restart), but this teardown must not then clear the newcomer's
+    // state: doing so would unregister a live texture and orphan a running
+    // stream with no reference left to stop it.
+    let stoppingCamera = camera
     let stoppingStream = streamSession
+    let stoppingTextureId = textureId
+
     camera?.stop()
     if let stoppingStream {
       let deadline = Date().addingTimeInterval(streamStopTimeout)
@@ -805,14 +817,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         NSLog("[MWDAT] stream did not reach .stopped within \(streamStopTimeout)s (state: \(stoppingStream.state))")
       }
     }
-    camera = nil
-    streamSession = nil
-    if let texId = textureId {
+
+    if camera === stoppingCamera { camera = nil }
+    if streamSession === stoppingStream { streamSession = nil }
+
+    // Always unregister the texture we captured — it belongs to the stream that
+    // just stopped — but only clear the *current* texture bookkeeping if nobody
+    // replaced it while we waited.
+    if let texId = stoppingTextureId {
       textureRegistry?.unregisterTexture(texId)
       NSLog("[MWDAT] Unregistered texture \(texId)")
-      textureId = nil
-      pixelBufferTexture = nil
+      if textureId == stoppingTextureId {
+        textureId = nil
+        pixelBufferTexture = nil
+      }
     }
+
+    // Frame-pipeline state is shared, so only reset it when no new stream has
+    // taken over; the newcomer has already initialised it for itself.
+    guard textureId == nil else { return }
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
