@@ -2,12 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Lets the DAT SDK provision a Wi-Fi link to the glasses' soft-AP
-	     (NEHotspotConfiguration) for the high-bandwidth streaming/photo path. -->
+	<!-- The example app uses the Bluetooth Classic camera transport, which needs no
+	     entitlements at all — see the transport comment in Info.plist.
+
+	     To switch to Wi-Fi, un-comment both keys below and follow the rest of the steps
+	     in that Info.plist comment. These are provisioning-profile entitlements: they
+	     need a paid Apple Developer account, and the profile has to be regenerated
+	     after enabling them.
+
 	<key>com.apple.developer.networking.HotspotConfiguration</key>
 	<true/>
-	<!-- Lets the SDK read the current SSID to confirm/manage that Wi-Fi link. -->
 	<key>com.apple.developer.networking.wifi-info</key>
 	<true/>
+	-->
 </dict>
 </plist>

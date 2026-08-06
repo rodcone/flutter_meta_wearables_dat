@@ -153,16 +153,22 @@ class _StreamScreenState extends State<StreamScreen> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                               ),
+                              // While blocked, Start is disabled — say why,
+                              // otherwise a greyed-out button reads as a bug.
                               child: Text(
-                                'Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.',
+                                streamProvider.pendingUserActionHint ??
+                                    'Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: 15,
-                                  color: Colors.white,
+                                  color:
+                                      streamProvider.pendingUserAction != null
+                                      ? Colors.amber.shade200
+                                      : Colors.white,
                                 ),
                               ),
                             ),

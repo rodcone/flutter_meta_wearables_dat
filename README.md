@@ -263,7 +263,7 @@ Do **not** add the ExternalAccessory keys below — while they are present the S
 </array>
 ```
 
-> The example app is configured for **Wi‑Fi** — see [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements).
+> The example app is configured for **Bluetooth Classic** — it needs no entitlements and no paid Apple Developer account, so it's the fastest thing to get running. Both recipes are one comment-block apart in [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements) if you want to try Wi‑Fi. Wi‑Fi is still the recommendation for production apps that need the bandwidth.
 
 > **App Store note.** Transport choice does **not** affect App Store eligibility. The DAT SDK links `ExternalAccessory.framework` regardless of transport (Apple's binary scanner flags this MFi dependency); see [Publishing and availability](#publishing-and-availability) for current program eligibility. Wi‑Fi's advantage is bandwidth, not publishability.
 

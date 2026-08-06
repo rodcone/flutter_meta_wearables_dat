@@ -90,6 +90,21 @@ class StreamSessionProvider extends ChangeNotifier {
   // stream up. Gates auto-recovery so we never fight a deliberate stop.
   bool _streamingIntended = false;
   bool _isRecovering = false;
+
+  // --- "Fix something first" latch ----------------------------------------
+  // Terminal errors need a physical action before a restart can succeed: put
+  // the glasses back on, let them cool, charge them. Leaving Start enabled
+  // means the user taps it and just gets the same error back.
+  //
+  // The SDK exposes no wear/don state (`hingesClosed` only arrives *after* the
+  // fact), so there's no clean signal for "ready again" and this is the app's
+  // own latch. It clears on any of three paths so it can never strand the
+  // button: the device signalling availability again, an explicit Stop, or
+  // [_userActionGrace] elapsing — the last one is the backstop for doff, where
+  // the link often stays up and no device event ever fires.
+  StreamSessionError? _pendingUserAction;
+  Timer? _pendingUserActionTimer;
+  static const Duration _userActionGrace = Duration(seconds: 15);
   // Guards [_teardownSession] against re-entry: it awaits a platform call, and
   // a second terminal error arriving during that await would otherwise start a
   // concurrent teardown.
@@ -141,6 +156,33 @@ class StreamSessionProvider extends ChangeNotifier {
   /// this is set.
   bool get isRecovering => _isRecovering;
 
+  /// Set when the stream ended for a reason the user has to fix physically
+  /// (glasses taken off or folded, overheated, flat battery). Start is disabled
+  /// while this is non-null; the UI should show [pendingUserActionHint].
+  StreamSessionError? get pendingUserAction => _pendingUserAction;
+
+  /// Short instruction matching [pendingUserAction], or null when not blocked.
+  String? get pendingUserActionHint {
+    final error = _pendingUserAction;
+    if (error == null) return null;
+    return switch (error.code) {
+      'hingesClosed' => 'Put your glasses back on to start streaming again.',
+      'permissionDenied' =>
+        'Camera access was denied. Grant it again to keep streaming.',
+      'thermalEmergency' ||
+      'deviceThermalEmergency' =>
+        'Your glasses are too hot. Let them cool down before streaming again.',
+      'batteryCritical' ||
+      'deviceBatteryCritical' =>
+        'Your glasses are out of battery. Charge them to stream again.',
+      'peakPowerShutdown' ||
+      'devicePeakPowerShutdown' =>
+        'Your glasses shut the stream down to protect themselves. '
+            'Give them a moment.',
+      _ => 'Streaming stopped. Reconnect your glasses to try again.',
+    };
+  }
+
   /// Snapshot of paired devices from the last [refreshDevices] call.
   List<WearableDevice> get devices => _devices;
 
@@ -167,6 +209,10 @@ class StreamSessionProvider extends ChangeNotifier {
   /// even while a previously pinned pair is gone (the native selector re-pins
   /// on the next [startStreamSession], which is what makes that pair active).
   bool get canStartSelected {
+    // A terminal error left the glasses in a state no restart can fix until the
+    // user acts. Device connectivity below can't see that — doff usually keeps
+    // the link up — so the latch has to gate this first.
+    if (_pendingUserAction != null) return false;
     final id = _selectedDeviceId;
     if (id == null) return _hasActiveDevice;
     final match = _devices.where((d) => d.id == id);
@@ -213,12 +259,16 @@ class StreamSessionProvider extends ChangeNotifier {
   void _initializeActiveDeviceMonitoring() {
     _activeDeviceSubscription = MetaWearablesDat.activeDeviceStream().listen(
       (hasActiveDevice) {
+        final reappeared = hasActiveDevice && !_hasActiveDevice;
         _hasActiveDevice = hasActiveDevice;
         // Reset thermal readout when device goes away so the UI doesn't show
         // stale data; the next active device will repopulate it.
         if (!hasActiveDevice) {
           _thermalLevel = null;
         }
+        // The device coming back is the one trustworthy "user fixed it" signal
+        // we get — it fires on power-on and on re-entering range.
+        if (reappeared) _clearPendingUserAction();
         // Losing the active device mid-stream (glasses powered off, walked out
         // of range) is the one freeze the error-code path can't catch: both
         // native sides detach error and state forwarding *before* stopping the
@@ -326,6 +376,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _deviceStateSubscription?.cancel();
     _recoveryBackoffTimer?.cancel();
     _recoveryWatchdogTimer?.cancel();
+    _pendingUserActionTimer?.cancel();
     super.dispose();
   }
 
@@ -404,8 +455,14 @@ class StreamSessionProvider extends ChangeNotifier {
     // `thermalCritical`, which pauses rather than ends the stream (the UI
     // renders the `paused` state), and pre-stream failures like
     // `noEligibleDevice`, which arrive with nothing to tear down.
-    if (_terminalStreamErrors.contains(error.code) ||
-        (isRecoverable && _isStreaming)) {
+    if (_terminalStreamErrors.contains(error.code)) {
+      // Needs a physical fix — latch Start off until the user has done it.
+      await _endSessionWithError(error, needsUserAction: true);
+      return;
+    }
+    if (isRecoverable && _isStreaming) {
+      // Retry budget spent. The stream is dead, but nothing is physically
+      // wrong, so tear down without blocking an immediate manual restart.
       await _endSessionWithError(error);
       return;
     }
@@ -420,11 +477,34 @@ class StreamSessionProvider extends ChangeNotifier {
   /// Exactly one [notifyListeners] fires, at the end: [clearError] runs the
   /// moment the screen is notified, so an intermediate notify would consume the
   /// error before the teardown finished.
-  Future<void> _endSessionWithError(StreamSessionError error) async {
+  Future<void> _endSessionWithError(
+    StreamSessionError error, {
+    bool needsUserAction = false,
+  }) async {
     _cancelRecovery();
     _streamingIntended = false;
     await _teardownSession(preserveError: true);
+    if (needsUserAction) _latchUserAction(error);
     _lastError = error;
+    notifyListeners();
+  }
+
+  /// Blocks Start until the user has fixed whatever ended the stream. See the
+  /// field declaration for why this is a latch rather than a live signal.
+  void _latchUserAction(StreamSessionError error) {
+    _pendingUserAction = error;
+    _pendingUserActionTimer?.cancel();
+    // Backstop: on doff the link often stays up, so no device event ever
+    // arrives to clear this. Re-enable Start rather than strand the user — if
+    // they still aren't ready, the next start fails and re-latches.
+    _pendingUserActionTimer = Timer(_userActionGrace, _clearPendingUserAction);
+  }
+
+  void _clearPendingUserAction() {
+    _pendingUserActionTimer?.cancel();
+    _pendingUserActionTimer = null;
+    if (_pendingUserAction == null) return;
+    _pendingUserAction = null;
     notifyListeners();
   }
 
@@ -602,6 +682,8 @@ class StreamSessionProvider extends ChangeNotifier {
     _streamingIntended = false;
     _recoveryAttempts = 0;
     _cancelRecovery();
+    // A deliberate stop supersedes whatever the latch was waiting for.
+    _clearPendingUserAction();
 
     await _teardownSession();
     notifyListeners();
