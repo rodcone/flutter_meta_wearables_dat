@@ -768,7 +768,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if isTearingDownStream { return }
     isTearingDownStream = true
     defer { isTearingDownStream = false }
-    NSLog("[MWDAT] teardownStreamOnly — stopping stream + camera")
+    NSLog("[MWDAT] teardownStreamOnly — stopping camera, awaiting stop cascade")
 
     if let token = videoListenerToken {
       await token.cancel()
