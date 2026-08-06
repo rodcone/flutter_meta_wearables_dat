@@ -183,12 +183,8 @@ class MetaWearablesDatPlugin :
     @Volatile private var startInProgress = false
     private var videoJob: Job? = null
     private var streamErrorJob: Job? = null
-    // Watches for the stream terminating on its own so the Camera can be
-    // detached even when the app never calls stopStreamSession. See
-    // teardownStreamOnly.
-    private var streamStateJob: Job? = null
-    // Guards teardownStreamOnly against re-entry: stopping the camera drives the
-    // stream to STOPPED, which calls straight back in through that collector.
+    // Guards teardownStreamOnly against re-entry — it is reachable from the
+    // method channel, device-loss monitoring and the start-failure paths.
     private var isTearingDownStream = false
     private var deviceAvailabilityJob: Job? = null
     // Texture API — renders I420 frames to a SurfaceTexture
@@ -1228,43 +1224,6 @@ class MetaWearablesDatPlugin :
 
                 // Teardown cascades parent -> child but NOT child -> parent, so a
                 // stream that stops on its own (a stream-level error such as
-                // HINGE_CLOSED while the DeviceSession stays connected) leaves the
-                // Camera attached and holding the hardware. Detach it here rather
-                // than waiting for the app to call stopStreamSession: an app that
-                // merely surfaces the error would otherwise hold the camera until
-                // its next start attempt.
-                //
-                // `state` is a StateFlow, so it always replays its current value
-                // to a new collector — and a freshly added camera's stream is
-                // STOPPED until start() below takes effect. Without the hasRun
-                // latch this tears down the stream we are in the middle of
-                // creating, so only act once the stream has been seen running.
-                streamStateJob =
-                        scope.launch {
-                            var hasRun = false
-                            newStream.state.collect { state ->
-                                val isStopped =
-                                        state ==
-                                                com.meta.wearable.dat.camera.types
-                                                        .StreamState.STOPPED ||
-                                                state ==
-                                                        com.meta.wearable.dat.camera.types
-                                                                .StreamState.CLOSED
-                                // Arm only on STREAMING: intermediate states
-                                // would arm on a stream that never actually ran.
-                                if (state ==
-                                                com.meta.wearable.dat.camera.types
-                                                        .StreamState.STREAMING
-                                ) {
-                                    hasRun = true
-                                } else if (isStopped && hasRun) {
-                                    // Run outside this collector's own job —
-                                    // teardownStreamOnly cancels it.
-                                    scope.launch { teardownStreamOnly() }
-                                }
-                            }
-                        }
-
                 // `start()` returns a DatResult we used to discard, silently
                 // swallowing start failures. The texture is already registered
                 // and the jobs are wired at this point, so report the failure on
@@ -1502,17 +1461,25 @@ class MetaWearablesDatPlugin :
         videoJob = null
         streamErrorJob?.cancel()
         streamErrorJob = null
-        // Cancel the self-termination watcher before stopping the camera below,
-        // which would otherwise drive the stream to STOPPED and re-enter here.
-        streamStateJob?.cancel()
-        streamStateJob = null
         streamStateStreamHandler?.stream = null
-        // DAT 0.9.0: stop the *Camera*, not the Stream. The session stores the
-        // capability under `Camera::class`, so stopping only the stream would
-        // leave the camera attached and make the next `addCamera` fail with
-        // CAPABILITY_ALREADY_ADDED — we deliberately keep the session alive
-        // across stop/start. `Camera.stop()` detaches and cascades to the
-        // stream, which makes `session.removeCamera()` redundant here.
+        // Stop BOTH, stream first — they do different jobs and neither
+        // substitutes for the other:
+        //
+        //   * stream.stop() shuts down the capture pipeline on the glasses.
+        //     This is what 0.8.0 called; dropping it in favour of camera.stop()
+        //     alone left the camera engaged on the device until the whole
+        //     DeviceSession went away, so a following start resumed the old
+        //     capture instead of starting a fresh one.
+        //   * camera.stop() detaches the capability. Required since 0.9.0: the
+        //     session stores it under Camera::class, so stopping only the
+        //     stream leaves the camera attached and the next addCamera fails
+        //     with CAPABILITY_ALREADY_ADDED — and we deliberately keep the
+        //     DeviceSession alive across stop/start.
+        try {
+            stream?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping stream: ${e.message}")
+        }
         try {
             camera?.stop()
         } catch (e: Exception) {

@@ -98,16 +98,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var camera: MWDATCamera.Camera?
   private var streamSession: MWDATCamera.Stream?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
-  // Watches for the stream terminating on its own so the Camera can be detached
-  // even when the app never calls `stopStreamSession`. See `teardownStreamOnly`.
-  private var streamStateListenerToken: (any MWDATCore.AnyListenerToken)?
-  // Guards `teardownStreamOnly` against re-entry: stopping the camera drives the
-  // stream to `.stopped`, which calls straight back in through that listener.
+  // Guards `teardownStreamOnly` against re-entry — it is reachable from the
+  // method channel, the device-session observer and the start-failure paths.
   private var isTearingDownStream = false
-  // Whether the current stream has been observed in a non-`.stopped` state. The
-  // state publisher replays `.stopped` on subscribe (a new stream hasn't started
-  // yet), so without this the watcher would tear down the stream at creation.
-  private var streamHasRun = false
   private var frameCounter: Int = 0
   private var currentTargetFPS: Double = 30.0
   private var lastFrameSendTime: Date?
@@ -771,30 +764,32 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if isTearingDownStream { return }
     isTearingDownStream = true
     defer { isTearingDownStream = false }
-    NSLog("[MWDAT] teardownStreamOnly — detaching camera (streamHasRun=\(streamHasRun))")
+    NSLog("[MWDAT] teardownStreamOnly — stopping stream + camera")
 
-    // Cancel the self-termination watcher first: `camera.stop()` below drives the
-    // stream to `.stopped`, which would otherwise re-enter here.
-    if let token = streamStateListenerToken {
-      await token.cancel()
-      streamStateListenerToken = nil
-    }
-    streamHasRun = false
     if let token = videoListenerToken {
       await token.cancel()
       videoListenerToken = nil
     }
     streamStateHandler.session = nil
     streamErrorHandler.session = nil
-    // DAT 0.9.0: stop the *Camera*, not the Stream. The camera is what holds
-    // the capability slot on the DeviceSession — stopping only the stream would
-    // leave the camera attached and make the next `addCamera` fail with
-    // `capabilityAlreadyActive`, since we deliberately keep the session alive
-    // across `stopStreamSession`. `Camera.stop()` releases resources, detaches
-    // from the parent session, and cascades to its children (the stream).
-    if let camera {
-      camera.stop()
-    }
+    // Stop BOTH, stream first — they do different jobs and neither substitutes
+    // for the other:
+    //
+    //   • `stream.stop()` shuts down the capture pipeline on the glasses. This
+    //     is what 0.8.0 called, and what makes the device play its
+    //     stream-ended tone. Dropping it in favour of `camera.stop()` alone
+    //     left the camera engaged on the device until the whole DeviceSession
+    //     went away (i.e. app exit), so a following start "resumed" the old
+    //     capture instead of starting a fresh one.
+    //   • `camera.stop()` detaches the capability from the session. Required
+    //     since 0.9.0: the session stores the capability under `Camera`, so
+    //     stopping only the stream leaves the camera attached and the next
+    //     `addCamera` fails with `capabilityAlreadyActive` — and we
+    //     deliberately keep the DeviceSession alive across stop/start.
+    //
+    // Both are documented as safe to call on an already-stopped object.
+    streamSession?.stop()
+    camera?.stop()
     camera = nil
     streamSession = nil
     if let texId = textureId {
@@ -1158,40 +1153,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         self.processAndSendFrame(videoFrame)
-      }
-
-      // Teardown cascades parent -> child but NOT child -> parent, so a stream
-      // that stops on its own — a stream-level error such as `hingesClosed`
-      // while the DeviceSession stays connected — leaves the Camera attached and
-      // holding the hardware. Detach it here instead of waiting for the app to
-      // call `stopStreamSession`: an app that merely surfaces the error would
-      // otherwise hold the camera until its next start attempt.
-      //
-      // `statePublisher` replays the stream's *current* state on subscribe, and a
-      // freshly added camera's stream is `.stopped` until `start()` below takes
-      // effect — so a naive `state == .stopped` check tears down the stream we
-      // are in the middle of creating. Only act once the stream has actually
-      // been observed running.
-      streamHasRun = false
-      streamStateListenerToken = session.statePublisher.listen { [weak self] state in
-        Task { @MainActor in
-          guard let self else { return }
-          // Arm only on `.streaming`. Intermediate states (`.waitingForDevice`,
-          // `.starting`) would arm on a stream that never actually ran, and
-          // because these hops are queued per-event their relative order isn't
-          // guaranteed — so a replayed `.stopped` could otherwise land *after*
-          // one of them and tear down a stream mid-creation. `.streaming` can
-          // never be a fresh stream's initial value, which closes that race.
-          // A stream that dies before streaming needs no watcher: the
-          // stale-stream branch in `startStreamSession` detaches it.
-          guard state == .stopped else {
-            if state == .streaming { self.streamHasRun = true }
-            return
-          }
-          guard self.streamHasRun else { return }
-          NSLog("[MWDAT] stream self-terminated after streaming — detaching camera")
-          await self.teardownStreamOnly()
-        }
       }
 
       camera = addedCamera
