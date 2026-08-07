@@ -18,8 +18,11 @@ migrate_working_dir/
 *.iws
 .idea/
 
-# Claude Code local state (machine-local settings + agent worktrees)
-.claude/
+# Claude Code local state (machine-local settings + agent worktrees).
+# `.claude/skills/` is the exception: maintainer tooling that ships with the repo.
+# (Not to be confused with `agent/claude/`, which is installed into *consumer* projects.)
+.claude/*
+!.claude/skills/
 
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line

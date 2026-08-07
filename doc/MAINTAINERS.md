@@ -9,20 +9,48 @@ Update **both** packages together when bumping the DAT version, otherwise the ho
 
 > **Do not skip the mock add-on.** A DAT bump means replacing **all three** iOS xcframeworks (`MWDATCore`, `MWDATCamera`, **and** `MWDATMockDevice`) and bumping `ext.mwdat_version` in **both** Android `build.gradle` files. Leaving `MWDATMockDevice` / `mwdat-mockdevice` on an older DAT release will break the example app and any consumer that depends on `flutter_meta_wearables_dat_mock_device`.
 
+> **Doing this with Claude Code?** The `/dat-update <version>` skill
+> ([`.claude/skills/dat-update/`](../.claude/skills/dat-update/SKILL.md)) runs this whole guide end
+> to end — changelog analysis, binaries, API-surface diffing, implementation, verification, PR and
+> review — stopping before merge and publish. This document remains the source of truth for the
+> mechanics; the skill follows it.
+
 ## iOS
 
 The iOS implementation uses vendored frameworks. Follow these steps to update the DAT version.
 
-### 1. Download Latest Binaries
+### 1. Get the Latest Binaries
 
-The Meta Wearables DAT is distributed as pre-compiled binaries.
+The Meta Wearables DAT is distributed as pre-compiled binaries. You need **all three**:
 
-- Go to the [official repository](https://github.com/facebook/meta-wearables-dat-ios) → **Releases** → **Tags**
-- Download the desired version (no need to clone the entire repo)
-- Extract and locate the `.xcframework` folders — you need **all three**:
-  - `MWDATCamera.xcframework` → core plugin
-  - `MWDATCore.xcframework` → core plugin
-  - `MWDATMockDevice.xcframework` → mock add-on (`flutter_meta_wearables_dat_mock_device`)
+- `MWDATCore.xcframework` → core plugin
+- `MWDATCamera.xcframework` → core plugin
+- `MWDATMockDevice.xcframework` → mock add-on (`flutter_meta_wearables_dat_mock_device`)
+
+Skip `MWDATDisplay` and `MWDATMockDeviceTestClient` — not vendored.
+
+**Fastest path — extract from the release tag.** The xcframeworks live in the *tag* trees of
+[`facebook/meta-wearables-dat-ios`](https://github.com/facebook/meta-wearables-dat-ios) (its `main`
+branch has only sources and samples). If you have the repo cloned at
+`doc/ios/meta-wearables-dat-ios` (gitignored), steps 1 and 2 collapse into:
+
+```bash
+IOS=doc/ios/meta-wearables-dat-ios
+MOCK=flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks
+(cd $IOS && git fetch --tags)
+
+rm -rf ios/flutter_meta_wearables_dat/Frameworks/MWDAT{Core,Camera}.xcframework
+rm -rf $MOCK/MWDATMockDevice.xcframework
+
+(cd $IOS && git archive <version> MWDATCore.xcframework MWDATCamera.xcframework) \
+  | tar -x -C ios/flutter_meta_wearables_dat/Frameworks/
+(cd $IOS && git archive <version> MWDATMockDevice.xcframework) | tar -x -C $MOCK
+```
+
+Verified byte-identical to the published archives. Continue at step 2b.
+
+**Manual path** — if you don't have the clone: go to the repo → **Tags** → pick the version →
+download, and copy the three `.xcframework` folders in by hand.
 
 ### 2. Replace Local Files
 
