@@ -291,6 +291,11 @@ class _StreamScreenState extends State<StreamScreen> {
                           ),
                           MetaButton.icon(
                             icon: const Icon(Icons.camera_alt),
+                            // Shooting and transferring the photo off the
+                            // glasses takes a few seconds before the share
+                            // sheet can open — without this the tap looks
+                            // like it did nothing.
+                            loading: streamProvider.isCapturingPhoto,
                             onPressed: () async {
                               unawaited(HapticFeedback.mediumImpact());
 

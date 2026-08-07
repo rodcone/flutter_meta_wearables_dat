@@ -34,6 +34,7 @@ class StreamSessionProvider extends ChangeNotifier {
   bool _isLoadingImage = false;
   int? _textureId;
   bool _backgroundStreamingEnabled = false;
+  bool _isCapturingPhoto = false;
 
   // --- Transparent recovery from transient mid-stream errors -------------
   // The DAT SDK auto-stops the stream when it hits certain errors ("The
@@ -149,6 +150,11 @@ class StreamSessionProvider extends ChangeNotifier {
   VideoStreamSize? get videoStreamSize => _videoStreamSize;
   bool get supportsHvc1 => Platform.isIOS;
   bool get backgroundStreamingEnabled => _backgroundStreamingEnabled;
+
+  /// True while a photo capture is in flight. The glasses take a few seconds to
+  /// shoot and transfer the image, so the capture button shows a spinner rather
+  /// than looking like the tap did nothing.
+  bool get isCapturingPhoto => _isCapturingPhoto;
 
   /// True while the provider is transparently restarting a stream that hit a
   /// transient error (e.g. after the phone was locked and the app suspended).
@@ -763,6 +769,13 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   Future<CapturedPhoto?> capturePhoto() async {
+    // The round trip to the glasses takes a few seconds, and the SDK rejects a
+    // second capture while one is in flight (`CAPTURE_NOT_READY`) — so guard
+    // re-entry here rather than letting an impatient double-tap surface an
+    // error the user can do nothing about.
+    if (_isCapturingPhoto) return null;
+    _isCapturingPhoto = true;
+    notifyListeners();
     try {
       final photo = await MetaWearablesDat.capturePhoto(
         _selectedDeviceId,
@@ -782,6 +795,9 @@ class StreamSessionProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('[MetaWearablesDAT] Error capturing photo: $e');
       return null;
+    } finally {
+      _isCapturingPhoto = false;
+      notifyListeners();
     }
   }
 }
