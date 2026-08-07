@@ -4,6 +4,8 @@
 [![Pub Downloads](https://img.shields.io/pub/dm/flutter_meta_wearables_dat)](https://pub.dev/packages/flutter_meta_wearables_dat)
 [![style: very good analysis](https://img.shields.io/badge/style-very_good_analysis-B22C89.svg)](https://pub.dev/packages/very_good_analysis)
 
+[![Docs](https://img.shields.io/badge/API_Reference-0.9-blue?logo=meta)](https://wearables.developer.meta.com/docs/reference/ios_swift/dat/0.9)
+
 # flutter_meta_wearables_dat
 
 <!-- <img width="500" height="95" alt="flutter_dat" src="https://github.com/user-attachments/assets/b3958072-1bb5-434d-8006-8f35ae054213" /> -->
