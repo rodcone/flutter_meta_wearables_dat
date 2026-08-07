@@ -769,7 +769,9 @@ class MetaWearablesDat {
   }) {
     if (kDebugMode) {
       debugPrint(
-        '[MetaWearablesDAT] Capturing photo with deviceId: $deviceId, format: $format',
+        '[MetaWearablesDAT] Capturing photo with deviceId: '
+        '${deviceId ?? 'null (automatic — targets the active session)'}, '
+        'format: $format',
       );
     }
     return MetaWearablesDatPlatform.instance.capturePhoto(

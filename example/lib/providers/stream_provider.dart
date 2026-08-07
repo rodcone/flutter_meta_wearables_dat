@@ -156,6 +156,16 @@ class StreamSessionProvider extends ChangeNotifier {
   /// than looking like the tap did nothing.
   bool get isCapturingPhoto => _isCapturingPhoto;
 
+  /// The pair the current session is actually streaming from, or null when
+  /// nothing is streaming. In Automatic mode [_selectedDeviceId] is null by
+  /// design — this resolves what the auto-selector actually picked.
+  WearableDevice? get streamingDevice {
+    for (final device in _devices) {
+      if (device.isStreamingDevice) return device;
+    }
+    return null;
+  }
+
   /// True while the provider is transparently restarting a stream that hit a
   /// transient error (e.g. after the phone was locked and the app suspended).
   /// The UI shows a "Reconnecting…" affordance instead of a hard error while
@@ -777,9 +787,12 @@ class StreamSessionProvider extends ChangeNotifier {
     _isCapturingPhoto = true;
     notifyListeners();
     try {
-      final photo = await MetaWearablesDat.capturePhoto(
-        _selectedDeviceId,
-      );
+      // In Automatic mode `_selectedDeviceId` is null by design, which made the
+      // plugin's debug line read `deviceId: null`. Capture always targets the
+      // active session regardless, but passing the pair the auto-selector
+      // actually picked makes the logs say which glasses took the photo.
+      final target = _selectedDeviceId ?? streamingDevice?.id;
+      final photo = await MetaWearablesDat.capturePhoto(target);
       return photo;
     } on PlatformException catch (e) {
       debugPrint('[MetaWearablesDAT] Error capturing photo: $e');
