@@ -1,7 +1,7 @@
 group = "io.rodcone.flutter_meta_wearables_dat_mock_device"
 version = "1.0-SNAPSHOT"
 
-ext.mwdat_version = "0.8.0"
+ext.mwdat_version = "0.9.0"
 
 buildscript {
     ext.kotlin_version = "2.1.0"

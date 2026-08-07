@@ -35,7 +35,7 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.7.2
+  flutter_meta_wearables_dat: ^0.8.0
 ```
 
 ### 2. Configure iOS or Android
@@ -166,7 +166,7 @@ Add a Dart-3.9-compatible release of `app_links` (for example, `app_links: ^6.4.
 
 ### iOS Configuration
 
-**Minimum deployment target:** iOS 17.0
+**Minimum deployment target:** iOS 17.2
 
 **iOS Simulator:** Apple Silicon Macs only. The vendored Meta DAT xcframeworks are shipped with arm64-only simulator slices to stay under pub.dev's 100 MiB package-size limit; x86_64 (Intel Mac) iOS Simulator builds are not supported.
 
@@ -263,7 +263,7 @@ Do **not** add the ExternalAccessory keys below — while they are present the S
 </array>
 ```
 
-> The example app is configured for **Wi‑Fi** — see [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements).
+> The example app is configured for **Bluetooth Classic** — it needs no entitlements and no paid Apple Developer account, so it's the fastest thing to get running. Both recipes are one comment-block apart in [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements) if you want to try Wi‑Fi. Wi‑Fi is still the recommendation for production apps that need the bandwidth.
 
 > **App Store note.** Transport choice does **not** affect App Store eligibility. The DAT SDK links `ExternalAccessory.framework` regardless of transport (Apple's binary scanner flags this MFi dependency); see [Publishing and availability](#publishing-and-availability) for current program eligibility. Wi‑Fi's advantage is bandwidth, not publishability.
 
@@ -392,6 +392,37 @@ register an `ActivityResultLauncher` and camera permission requests will fail.
 ### Meta Wearables Developer Center
 
 Add and configure your app in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter) to obtain your `MetaAppID` and complete the setup.
+
+### Opting out of DAT crash reporting
+
+The DAT SDK reports its own crashes to Meta by default. Opting out is host-app configuration only — there is no plugin API for it.
+
+iOS: add a `CrashReporting` entry **inside the `MWDAT` dictionary you already declared above**, alongside `Analytics` — do not add a second `MWDAT` key.
+
+```xml
+<key>MWDAT</key>
+<dict>
+    <!-- ...AppLinkURLScheme, MetaAppID, ClientToken, TeamID as above... -->
+    <key>Analytics</key>
+    <dict>
+        <key>OptOut</key>
+        <true/>
+    </dict>
+    <key>CrashReporting</key>
+    <dict>
+        <key>OptOut</key>
+        <true/>
+    </dict>
+</dict>
+```
+
+Android, in `AndroidManifest.xml` inside `<application>`:
+
+```xml
+<meta-data
+    android:name="com.meta.wearable.mwdat.CRASH_REPORTING_OPT_OUT"
+    android:value="true" />
+```
 
 ## Integration Lifecycle
 
@@ -633,8 +664,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.7.2
-  flutter_meta_wearables_dat_mock_device: ^0.7.2
+  flutter_meta_wearables_dat: ^0.8.0
+  flutter_meta_wearables_dat_mock_device: ^0.8.0
 ```
 
 ```dart

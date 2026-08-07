@@ -9,7 +9,7 @@ flutter pub add app_links  # For deep link handling
 
 ## iOS configuration
 
-**Minimum deployment target:** iOS 17.0
+**Minimum deployment target:** iOS 17.2
 
 Add to `ios/Runner/Info.plist`:
 

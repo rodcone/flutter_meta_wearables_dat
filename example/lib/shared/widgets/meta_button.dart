@@ -8,6 +8,10 @@ class MetaButton extends StatelessWidget {
   final VoidCallback onPressed;
   final Color? color;
   final bool enabled;
+
+  /// Swaps the icon for a spinner and swallows taps. Only the icon variant
+  /// renders this, so it is exposed on that constructor alone.
+  final bool loading;
   final _MetaButtonVariant _variant;
 
   // Primary text button — full-height (55), used for main actions.
@@ -18,6 +22,7 @@ class MetaButton extends StatelessWidget {
     this.color,
     this.enabled = true,
   }) : icon = null,
+       loading = false,
        _variant = _MetaButtonVariant.primaryText;
 
   // Secondary text button — reduced height, suited for dense tool rows.
@@ -28,6 +33,7 @@ class MetaButton extends StatelessWidget {
     this.color,
     this.enabled = true,
   }) : icon = null,
+       loading = false,
        _variant = _MetaButtonVariant.secondaryText;
 
   // Icon button (circle-shaped)
@@ -37,6 +43,7 @@ class MetaButton extends StatelessWidget {
     required this.onPressed,
     this.color,
     this.enabled = true,
+    this.loading = false,
   }) : text = null,
        _variant = _MetaButtonVariant.icon;
 
@@ -114,9 +121,20 @@ class MetaButton extends StatelessWidget {
           padding: const EdgeInsets.all(16),
         ),
         onPressed: () {
-          if (enabled) onPressed();
+          if (enabled && !loading) onPressed();
         },
-        child: icon,
+        // Sized to match the default 24pt icon so the button doesn't resize
+        // when it flips to the spinner.
+        child: loading
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : icon,
       ),
     );
   }

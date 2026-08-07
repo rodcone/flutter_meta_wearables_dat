@@ -34,6 +34,7 @@ class StreamSessionProvider extends ChangeNotifier {
   bool _isLoadingImage = false;
   int? _textureId;
   bool _backgroundStreamingEnabled = false;
+  bool _isCapturingPhoto = false;
 
   // --- Transparent recovery from transient mid-stream errors -------------
   // The DAT SDK auto-stops the stream when it hits certain errors ("The
@@ -53,10 +54,62 @@ class StreamSessionProvider extends ChangeNotifier {
   static const int _maxRecoveryAttempts = 3;
   static const Duration _recoveryWatchdog = Duration(seconds: 10);
 
+  // --- Terminal errors: the stream is dead and will not come back ---------
+  // The SDK does not auto-resume after these, so retrying is pointless — the
+  // user has to act (put the glasses back on, let them cool down, charge them).
+  // Left untouched, every one of these freezes the `Texture` widget on its last
+  // frame, because `_isStreaming`/`_textureId` stay set while no frame ever
+  // arrives again. Tearing the session down instead swaps the texture for the
+  // placeholder and re-enables Start.
+  //
+  // The device-session variants matter as much as the stream-level ones: since
+  // DAT 0.9.0 removed `StreamError.THERMAL_EMERGENCY`, a thermal emergency on
+  // Android arrives *only* as `deviceThermalEmergency`. And on iOS the plugin
+  // detaches the state handler before stopping the stream, so there is no
+  // terminal `stopped` event to fall back on.
+  //
+  // Deliberately excluded: `thermalCritical` / `deviceThermalCritical`. Those
+  // pause the stream rather than ending it, and the UI already renders the
+  // `paused` state.
+  static const Set<String> _terminalStreamErrors = {
+    // stream-level
+    'hingesClosed',
+    'permissionDenied',
+    'peakPowerShutdown',
+    'batteryCritical',
+    // iOS-only: on Android this arrives as `deviceThermalEmergency`
+    'thermalEmergency',
+    // device-session-level
+    'deviceThermalEmergency',
+    'deviceBatteryCritical',
+    'devicePeakPowerShutdown',
+    // Android-only: the stream auto-stops when the session ends externally
+    'sessionEndedByDevice',
+  };
+
   // True between a user-initiated start and stop — i.e. the user wants the
   // stream up. Gates auto-recovery so we never fight a deliberate stop.
   bool _streamingIntended = false;
   bool _isRecovering = false;
+
+  // --- "Fix something first" latch ----------------------------------------
+  // Terminal errors need a physical action before a restart can succeed: put
+  // the glasses back on, let them cool, charge them. Leaving Start enabled
+  // means the user taps it and just gets the same error back.
+  //
+  // The SDK exposes no wear/don state (`hingesClosed` only arrives *after* the
+  // fact), so there's no clean signal for "ready again" and this is the app's
+  // own latch. It clears on any of three paths so it can never strand the
+  // button: the device signalling availability again, an explicit Stop, or
+  // [_userActionGrace] elapsing — the last one is the backstop for doff, where
+  // the link often stays up and no device event ever fires.
+  StreamSessionError? _pendingUserAction;
+  Timer? _pendingUserActionTimer;
+  static const Duration _userActionGrace = Duration(seconds: 15);
+  // Guards [_teardownSession] against re-entry: it awaits a platform call, and
+  // a second terminal error arriving during that await would otherwise start a
+  // concurrent teardown.
+  bool _isTearingDown = false;
   int _recoveryAttempts = 0;
   Timer? _recoveryBackoffTimer;
   Timer? _recoveryWatchdogTimer;
@@ -98,11 +151,50 @@ class StreamSessionProvider extends ChangeNotifier {
   bool get supportsHvc1 => Platform.isIOS;
   bool get backgroundStreamingEnabled => _backgroundStreamingEnabled;
 
+  /// True while a photo capture is in flight. The glasses take a few seconds to
+  /// shoot and transfer the image, so the capture button shows a spinner rather
+  /// than looking like the tap did nothing.
+  bool get isCapturingPhoto => _isCapturingPhoto;
+
+  /// The pair the current session is actually streaming from, or null when
+  /// nothing is streaming. In Automatic mode [_selectedDeviceId] is null by
+  /// design — this resolves what the auto-selector actually picked.
+  WearableDevice? get streamingDevice {
+    for (final device in _devices) {
+      if (device.isStreamingDevice) return device;
+    }
+    return null;
+  }
+
   /// True while the provider is transparently restarting a stream that hit a
   /// transient error (e.g. after the phone was locked and the app suspended).
   /// The UI shows a "Reconnecting…" affordance instead of a hard error while
   /// this is set.
   bool get isRecovering => _isRecovering;
+
+  /// Set when the stream ended for a reason the user has to fix physically
+  /// (glasses taken off or folded, overheated, flat battery). Start is disabled
+  /// while this is non-null; the UI should show [pendingUserActionHint].
+  StreamSessionError? get pendingUserAction => _pendingUserAction;
+
+  /// Short instruction matching [pendingUserAction], or null when not blocked.
+  String? get pendingUserActionHint {
+    final error = _pendingUserAction;
+    if (error == null) return null;
+    return switch (error.code) {
+      'hingesClosed' => 'Put your glasses back on to start streaming again.',
+      'permissionDenied' =>
+        'Camera access was denied. Grant it again to keep streaming.',
+      'thermalEmergency' || 'deviceThermalEmergency' =>
+        'Your glasses are too hot. Let them cool down before streaming again.',
+      'batteryCritical' || 'deviceBatteryCritical' =>
+        'Your glasses are out of battery. Charge them to stream again.',
+      'peakPowerShutdown' || 'devicePeakPowerShutdown' =>
+        'Your glasses shut the stream down to protect themselves. '
+            'Give them a moment.',
+      _ => 'Streaming stopped. Reconnect your glasses to try again.',
+    };
+  }
 
   /// Snapshot of paired devices from the last [refreshDevices] call.
   List<WearableDevice> get devices => _devices;
@@ -130,6 +222,10 @@ class StreamSessionProvider extends ChangeNotifier {
   /// even while a previously pinned pair is gone (the native selector re-pins
   /// on the next [startStreamSession], which is what makes that pair active).
   bool get canStartSelected {
+    // A terminal error left the glasses in a state no restart can fix until the
+    // user acts. Device connectivity below can't see that — doff usually keeps
+    // the link up — so the latch has to gate this first.
+    if (_pendingUserAction != null) return false;
     final id = _selectedDeviceId;
     if (id == null) return _hasActiveDevice;
     final match = _devices.where((d) => d.id == id);
@@ -176,11 +272,33 @@ class StreamSessionProvider extends ChangeNotifier {
   void _initializeActiveDeviceMonitoring() {
     _activeDeviceSubscription = MetaWearablesDat.activeDeviceStream().listen(
       (hasActiveDevice) {
+        final reappeared = hasActiveDevice && !_hasActiveDevice;
         _hasActiveDevice = hasActiveDevice;
         // Reset thermal readout when device goes away so the UI doesn't show
         // stale data; the next active device will repopulate it.
         if (!hasActiveDevice) {
           _thermalLevel = null;
+        }
+        // The device coming back is the one trustworthy "user fixed it" signal
+        // we get — it fires on power-on and on re-entering range.
+        if (reappeared) _clearPendingUserAction();
+        // Losing the active device mid-stream (glasses powered off, walked out
+        // of range) is the one freeze the error-code path can't catch: both
+        // native sides detach error and state forwarding *before* stopping the
+        // stream, so neither an error nor a terminal `stopped` ever reaches
+        // Dart. This listener is the only signal left, so drive the same
+        // teardown from here with a synthesised error.
+        if (!hasActiveDevice && _isStreaming) {
+          unawaited(
+            _endSessionWithError(
+              const StreamSessionError(
+                code: 'deviceNotConnected',
+                message: 'The glasses disconnected — streaming stopped.',
+              ),
+            ),
+          );
+          unawaited(refreshDevices());
+          return;
         }
         notifyListeners();
         // Refresh on both attach and detach so an open paired-devices sheet
@@ -271,6 +389,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _deviceStateSubscription?.cancel();
     _recoveryBackoffTimer?.cancel();
     _recoveryWatchdogTimer?.cancel();
+    _pendingUserActionTimer?.cancel();
     super.dispose();
   }
 
@@ -328,20 +447,90 @@ class StreamSessionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _setError(StreamSessionError error) {
+  Future<void> _setError(StreamSessionError error) async {
+    // A terminal error has already told the user what to do. The SDK keeps
+    // emitting teardown noise while that stop converges, and letting it through
+    // would swap the actionable message ("put your glasses back on") for a
+    // generic one — while the placeholder still shows the original instruction.
+    // Meta's own CameraAccess sample suppresses the same window.
+    if (_pendingUserAction != null &&
+        !_terminalStreamErrors.contains(error.code)) {
+      debugPrint(
+        '[MetaWearablesDAT] suppressing "${error.code}" during teardown',
+      );
+      return;
+    }
+
     // Transient mid-stream failures (notably `videoStreamingError`, which the
     // SDK emits when the pipeline breaks — e.g. after the phone is locked and
     // the app is suspended) auto-stop the stream. Rather than dead-ending on a
     // red banner the user can only clear by manually restarting, transparently
     // restart the session a few times before surfacing the error.
+    final isRecoverable = _recoverableStreamErrors.contains(error.code);
     if (_streamingIntended &&
-        _recoverableStreamErrors.contains(error.code) &&
+        isRecoverable &&
         _recoveryAttempts < _maxRecoveryAttempts) {
       _scheduleRecovery(error);
       return;
     }
+    // Two ways the stream is dead for good: a terminal error, or a recoverable
+    // one whose retry budget is spent. Both leave a frozen texture if we only
+    // raise a banner, so tear the session down as well.
+    //
+    // Everything else keeps the old banner-only behaviour — notably
+    // `thermalCritical`, which pauses rather than ends the stream (the UI
+    // renders the `paused` state), and pre-stream failures like
+    // `noEligibleDevice`, which arrive with nothing to tear down.
+    if (_terminalStreamErrors.contains(error.code)) {
+      // Needs a physical fix — latch Start off until the user has done it.
+      await _endSessionWithError(error, needsUserAction: true);
+      return;
+    }
+    if (isRecoverable && _isStreaming) {
+      // Retry budget spent. The stream is dead, but nothing is physically
+      // wrong, so tear down without blocking an immediate manual restart.
+      await _endSessionWithError(error);
+      return;
+    }
     _cancelRecovery();
     _lastError = error;
+    notifyListeners();
+  }
+
+  /// Surfaces [error] and tears the session down in one shot, so the UI never
+  /// observes "streaming" and a terminal error at the same time.
+  ///
+  /// Exactly one [notifyListeners] fires, at the end: [clearError] runs the
+  /// moment the screen is notified, so an intermediate notify would consume the
+  /// error before the teardown finished.
+  Future<void> _endSessionWithError(
+    StreamSessionError error, {
+    bool needsUserAction = false,
+  }) async {
+    _cancelRecovery();
+    _streamingIntended = false;
+    await _teardownSession(preserveError: true);
+    if (needsUserAction) _latchUserAction(error);
+    _lastError = error;
+    notifyListeners();
+  }
+
+  /// Blocks Start until the user has fixed whatever ended the stream. See the
+  /// field declaration for why this is a latch rather than a live signal.
+  void _latchUserAction(StreamSessionError error) {
+    _pendingUserAction = error;
+    _pendingUserActionTimer?.cancel();
+    // Backstop: on doff the link often stays up, so no device event ever
+    // arrives to clear this. Re-enable Start rather than strand the user — if
+    // they still aren't ready, the next start fails and re-latches.
+    _pendingUserActionTimer = Timer(_userActionGrace, _clearPendingUserAction);
+  }
+
+  void _clearPendingUserAction() {
+    _pendingUserActionTimer?.cancel();
+    _pendingUserActionTimer = null;
+    if (_pendingUserAction == null) return;
+    _pendingUserAction = null;
     notifyListeners();
   }
 
@@ -368,9 +557,9 @@ class StreamSessionProvider extends ChangeNotifier {
     _recoveryWatchdogTimer?.cancel();
     _recoveryWatchdogTimer = Timer(_recoveryWatchdog, () {
       if (!_isRecovering) return;
-      _cancelRecovery();
-      _lastError = error;
-      notifyListeners();
+      // Same reasoning as the give-up branch in [_setError]: a stream that never
+      // came back leaves a frozen texture unless the session is torn down.
+      unawaited(_endSessionWithError(error));
     });
   }
 
@@ -485,12 +674,22 @@ class StreamSessionProvider extends ChangeNotifier {
 
       // Start the stream session - deviceUUID is optional (uses AutoDeviceSelector if null).
       // Returns a texture ID for zero-copy rendering via the Flutter Texture widget.
-      _textureId = await MetaWearablesDat.startStreamSession(
+      final textureId = await MetaWearablesDat.startStreamSession(
         _selectedDeviceId,
         fps: _fps,
         streamQuality: _streamQuality,
         videoCodec: _videoCodec,
       );
+
+      // A terminal error (or an explicit stop) can land while the start above is
+      // still in flight. Without this check we'd re-mark the session as
+      // streaming right after it was torn down, resurrecting the frozen texture.
+      if (!_streamingIntended) {
+        unawaited(MetaWearablesDat.stopStreamSession(_selectedDeviceId));
+        return false;
+      }
+
+      _textureId = textureId;
       _isStreaming = true;
       notifyListeners();
     } catch (e) {
@@ -509,9 +708,30 @@ class StreamSessionProvider extends ChangeNotifier {
     _streamingIntended = false;
     _recoveryAttempts = 0;
     _cancelRecovery();
+    // A deliberate stop supersedes whatever the latch was waiting for.
+    _clearPendingUserAction();
 
+    await _teardownSession();
+    notifyListeners();
+  }
+
+  /// Drops every trace of the current session: subscriptions, texture, stream
+  /// state. Set [preserveError] to keep [lastError] intact for a caller that is
+  /// about to publish its own error.
+  ///
+  /// **Clears local state before calling the platform, not after.** Both native
+  /// sides throw `SESSION_NOT_FOUND` when no stream is attached, and both tear
+  /// the stream down on their own when the device session stops or the active
+  /// device disappears. Those are exactly the cases this method is called in, so
+  /// doing the platform call first would let the throw skip all the clearing and
+  /// leave the frozen texture on screen — the bug this exists to prevent.
+  ///
+  /// Never notifies: callers own that, so a caller can pair the cleared state
+  /// with an error in a single notification.
+  Future<void> _teardownSession({bool preserveError = false}) async {
+    if (_isTearingDown) return;
+    _isTearingDown = true;
     try {
-      await MetaWearablesDat.stopStreamSession(_selectedDeviceId);
       unawaited(_sessionStateSubscription?.cancel());
       _sessionStateSubscription = null;
       unawaited(_sessionErrorSubscription?.cancel());
@@ -519,13 +739,20 @@ class StreamSessionProvider extends ChangeNotifier {
       unawaited(_videoStreamSizeSubscription?.cancel());
       _videoStreamSizeSubscription = null;
       _sessionState = null;
-      _lastError = null;
       _textureId = null;
       _videoStreamSize = null;
       _isStreaming = false;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('[MetaWearablesDAT] Error stopping stream session: $e');
+      if (!preserveError) _lastError = null;
+
+      try {
+        await MetaWearablesDat.stopStreamSession(_selectedDeviceId);
+      } catch (e) {
+        // `SESSION_NOT_FOUND` is the expected outcome whenever the native side
+        // already tore the stream down.
+        debugPrint('[MetaWearablesDAT] Error stopping stream session: $e');
+      }
+    } finally {
+      _isTearingDown = false;
     }
   }
 
@@ -552,14 +779,38 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   Future<CapturedPhoto?> capturePhoto() async {
+    // The round trip to the glasses takes a few seconds, and the SDK rejects a
+    // second capture while one is in flight (`CAPTURE_NOT_READY`) — so guard
+    // re-entry here rather than letting an impatient double-tap surface an
+    // error the user can do nothing about.
+    if (_isCapturingPhoto) return null;
+    _isCapturingPhoto = true;
+    notifyListeners();
     try {
-      final photo = await MetaWearablesDat.capturePhoto(
-        _selectedDeviceId,
-      );
+      // In Automatic mode `_selectedDeviceId` is null by design, which made the
+      // plugin's debug line read `deviceId: null`. Capture always targets the
+      // active session regardless, but passing the pair the auto-selector
+      // actually picked makes the logs say which glasses took the photo.
+      final target = _selectedDeviceId ?? streamingDevice?.id;
+      final photo = await MetaWearablesDat.capturePhoto(target);
       return photo;
+    } on PlatformException catch (e) {
+      debugPrint('[MetaWearablesDAT] Error capturing photo: $e');
+      // Capture failures arrive only here, never on the error stream, so
+      // surface them explicitly — otherwise a failed capture looks like
+      // nothing happened at all.
+      _lastError = StreamSessionError(
+        code: e.code,
+        message: e.message ?? 'Photo capture failed.',
+      );
+      notifyListeners();
+      return null;
     } catch (e) {
       debugPrint('[MetaWearablesDAT] Error capturing photo: $e');
       return null;
+    } finally {
+      _isCapturingPhoto = false;
+      notifyListeners();
     }
   }
 }

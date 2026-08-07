@@ -1,5 +1,5 @@
-# Define platform for your project (plugin requires iOS 17.0)
-platform :ios, '17.0'
+# Define platform for your project (plugin requires iOS 17.2)
+platform :ios, '17.2'
 
 # CocoaPods CDN (fast). If HTTP/2 CDN errors return, temporarily use:
 # source 'https://github.com/CocoaPods/Specs.git'

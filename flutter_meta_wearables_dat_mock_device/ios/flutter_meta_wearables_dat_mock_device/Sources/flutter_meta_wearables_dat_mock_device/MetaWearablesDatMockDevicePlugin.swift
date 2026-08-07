@@ -325,7 +325,9 @@ public class MetaWearablesDatMockDevicePlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "PERMISSION_DENIED", message: "Camera permission is required for the mock device feed.", details: nil))
         return
       }
-      await cameraKit.setCameraFeed(cameraFacing: facing)
+      // DAT 0.9.0 made this overload synchronous (the fileURL variant already
+      // was), so no `await`.
+      cameraKit.setCameraFeed(cameraFacing: facing)
       result(true)
     }
   }

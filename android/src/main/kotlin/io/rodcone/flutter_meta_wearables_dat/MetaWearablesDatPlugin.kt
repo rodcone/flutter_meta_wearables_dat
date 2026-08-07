@@ -8,8 +8,9 @@ import android.util.Log
 import android.view.Surface
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.meta.wearable.dat.camera.Camera
 import com.meta.wearable.dat.camera.Stream
-import com.meta.wearable.dat.camera.addStream
+import com.meta.wearable.dat.camera.addCamera
 import com.meta.wearable.dat.camera.types.CaptureError
 import com.meta.wearable.dat.camera.types.PhotoData
 import com.meta.wearable.dat.camera.types.StreamConfiguration
@@ -161,6 +162,12 @@ class MetaWearablesDatPlugin :
     // reused across stream start/stop toggles; it's only torn down when the
     // device disappears or the plugin is disposed.
     private var session: DeviceSession? = null
+    // DAT 0.9.0 consolidated stream capability ownership into `Camera`: the
+    // session hands out a `Camera`, which owns the `Stream`. Both are kept —
+    // the `Camera` because it's the handle that detaches the capability, the
+    // `Stream` because that's what the jobs and handlers bind to. They are set
+    // and cleared together (see `teardownStreamOnly`).
+    private var camera: Camera? = null
     private var stream: Stream? = null
     private var sessionKey: String? = null
 
@@ -176,6 +183,9 @@ class MetaWearablesDatPlugin :
     @Volatile private var startInProgress = false
     private var videoJob: Job? = null
     private var streamErrorJob: Job? = null
+    // Guards teardownStreamOnly against re-entry — it is reachable from the
+    // method channel, device-loss monitoring and the start-failure paths.
+    private var isTearingDownStream = false
     private var deviceAvailabilityJob: Job? = null
     // Texture API — renders I420 frames to a SurfaceTexture
     // instead of encoding to JPEG and copying bytes across the platform channel.
@@ -1140,10 +1150,12 @@ class MetaWearablesDatPlugin :
                     return@launch
                 }
 
-                var addedStream: Stream? = null
+                // DAT 0.9.0 replaced `addStream` with `addCamera`; the returned
+                // `Camera` owns the stream.
+                var addedCamera: Camera? = null
                 activeSession
-                        .addStream(StreamConfiguration(videoQuality = streamQuality, fps.toInt()))
-                        .onSuccess { addedStream = it }
+                        .addCamera(StreamConfiguration(videoQuality = streamQuality, fps.toInt()))
+                        .onSuccess { addedCamera = it }
                         .onFailure { error, _ ->
                             val code =
                                     when {
@@ -1152,16 +1164,18 @@ class MetaWearablesDatPlugin :
                                         else -> "unexpectedError"
                                     }
                             streamSessionErrorStreamHandler?.sendError(code, error.description)
-                            Log.e(TAG, "addStream failed: ${error.description}")
+                            Log.e(TAG, "addCamera failed: ${error.description}")
                         }
 
-                val newStream = addedStream
-                if (newStream == null) {
+                val newCamera = addedCamera
+                if (newCamera == null) {
                     teardownStreamOnly()
-                    result.error("STREAM_ERROR", "Failed to add stream to session.", null)
+                    result.error("STREAM_ERROR", "Failed to add camera to session.", null)
                     return@launch
                 }
+                val newStream = newCamera.stream
 
+                camera = newCamera
                 stream = newStream
                 streamStateStreamHandler?.stream = newStream
 
@@ -1208,7 +1222,30 @@ class MetaWearablesDatPlugin :
                             }
                         }
 
-                newStream.start()
+                // Teardown cascades parent -> child but NOT child -> parent, so a
+                // `start()` returns a DatResult that used to be discarded,
+                // silently swallowing start failures. A failure here means the
+                // texture will never receive a frame, so tear it down and fail
+                // the call — returning success would hand back a dead texture,
+                // and an app without an error-stream subscription would see a
+                // successful Future and a permanently frozen view. The typed
+                // error still goes out on the channel for subscribers.
+                //
+                // iOS cannot do this: its `Stream.start()` returns Void, so a
+                // synchronous start failure is undetectable there and the
+                // texture is always returned.
+                var startFailure: String? = null
+                newStream.start().onFailure { error, _ ->
+                    Log.e(TAG, "Stream start failed: ${error.description}")
+                    streamSessionErrorStreamHandler?.send(error)
+                    startFailure = error.description
+                }
+                val failure = startFailure
+                if (failure != null) {
+                    teardownStreamOnly()
+                    result.error("STREAM_ERROR", failure, null)
+                    return@launch
+                }
                 result.success(textureId)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start stream session", e)
@@ -1418,21 +1455,50 @@ class MetaWearablesDatPlugin :
     }
 
     /**
-     * Tear down only the active stream, keeping the underlying [Session]
+     * Tear down only the active stream, keeping the underlying [DeviceSession]
      * alive so a subsequent `startStreamSession` re-uses it via
-     * `addStream` instead of paying the full session-start cost.
+     * `addCamera` instead of paying the full session-start cost.
      */
     private fun teardownStreamOnly() {
+        if (isTearingDownStream) return
+        isTearingDownStream = true
+        try {
+            teardownStreamOnlyLocked()
+        } finally {
+            isTearingDownStream = false
+        }
+    }
+
+    private fun teardownStreamOnlyLocked() {
         videoJob?.cancel()
         videoJob = null
         streamErrorJob?.cancel()
         streamErrorJob = null
         streamStateStreamHandler?.stream = null
+        // Stop BOTH, stream first — they do different jobs and neither
+        // substitutes for the other:
+        //
+        //   * stream.stop() shuts down the capture pipeline on the glasses.
+        //     This is what 0.8.0 called; dropping it in favour of camera.stop()
+        //     alone left the camera engaged on the device until the whole
+        //     DeviceSession went away, so a following start resumed the old
+        //     capture instead of starting a fresh one.
+        //   * camera.stop() detaches the capability. Required since 0.9.0: the
+        //     session stores it under Camera::class, so stopping only the
+        //     stream leaves the camera attached and the next addCamera fails
+        //     with CAPABILITY_ALREADY_ADDED — and we deliberately keep the
+        //     DeviceSession alive across stop/start.
         try {
             stream?.stop()
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping stream: ${e.message}")
         }
+        try {
+            camera?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping camera: ${e.message}")
+        }
+        camera = null
         stream = null
         sessionKey = null
         textureSurface?.release()

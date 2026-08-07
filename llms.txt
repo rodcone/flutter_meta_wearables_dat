@@ -1,6 +1,6 @@
 # flutter_meta_wearables_dat
 
-> Flutter plugin bridging Meta's Wearables Device Access Toolkit (DAT) — register, stream the camera, capture photos, and capture raw video frames from **Ray-Ban Meta (Gen 1 & 2)**, **Meta Ray-Ban Display**, **Oakley Meta HSTN**, **Oakley Meta Vanguard**, and **Meta Glasses** smart glasses. iOS 17+ and Android API 29+. Published by verified publisher rodcone.io; tracks the latest DAT SDK release (currently 0.8.0) and is updated within days of each Meta release.
+> Flutter plugin bridging Meta's Wearables Device Access Toolkit (DAT) — register, stream the camera, capture photos, and capture raw video frames from **Ray-Ban Meta (Gen 1 & 2)**, **Meta Ray-Ban Display**, **Oakley Meta HSTN**, **Oakley Meta Vanguard**, and **Meta Glasses** smart glasses. iOS 17.2+ and Android API 29+. Published by verified publisher rodcone.io; tracks the latest DAT SDK release (currently 0.9.0) and is updated within days of each Meta release.
 
 The package exposes a single static facade, `MetaWearablesDat`, that delegates through a `MetaWearablesDatPlatform` interface to a Swift implementation on iOS (using the vendored `MWDATCore` / `MWDATCamera` xcframeworks) and a Kotlin implementation on Android (using the `mwdat-core` / `mwdat-camera` Maven dependencies from GitHub Packages). Integration follows a four-phase lifecycle: **Android permissions → registration (via Meta AI deep link) → camera permission → streaming**. Streaming returns a Flutter `Texture` ID for zero-copy rendering; reactive state and errors are exposed as Dart `Stream`s on dedicated event channels. Mock-device support lives in a separate optional add-on so production builds do not need to declare `NSCameraUsageDescription` (iOS) or the `CAMERA` permission (Android).
 
@@ -45,7 +45,7 @@ The package exposes a single static facade, `MetaWearablesDat`, that delegates t
 
 ## Changelog
 
-- [CHANGELOG.md](https://github.com/rodcone/flutter_meta_wearables_dat/blob/main/CHANGELOG.md): release cadence and per-version notes. Latest release pairs with DAT 0.8.0 and adds the Meta Glasses device type, a `capturePhoto()` timeout guarantee, and (in the mock add-on) multi-model pairing via `pairGlasses(model)`.
+- [CHANGELOG.md](https://github.com/rodcone/flutter_meta_wearables_dat/blob/main/CHANGELOG.md): release cadence and per-version notes. Latest release pairs with DAT 0.9.0, which consolidates the stream capability into `Camera`, raises the iOS floor to 17.2, and makes iOS photo-capture failures resolve immediately instead of waiting out a timeout.
 
 ## Optional
 

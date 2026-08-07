@@ -7,6 +7,8 @@ This repo ships **two federated plugins** that both consume the Meta Wearables D
 
 Update **both** packages together when bumping the DAT version, otherwise the host app will mix incompatible binaries from the two SDKs. Follow the platform-specific steps below.
 
+> **Do not skip the mock add-on.** A DAT bump means replacing **all three** iOS xcframeworks (`MWDATCore`, `MWDATCamera`, **and** `MWDATMockDevice`) and bumping `ext.mwdat_version` in **both** Android `build.gradle` files. Leaving `MWDATMockDevice` / `mwdat-mockdevice` on an older DAT release will break the example app and any consumer that depends on `flutter_meta_wearables_dat_mock_device`.
+
 ## iOS
 
 The iOS implementation uses vendored frameworks. Follow these steps to update the DAT version.
@@ -17,14 +19,14 @@ The Meta Wearables DAT is distributed as pre-compiled binaries.
 
 - Go to the [official repository](https://github.com/facebook/meta-wearables-dat-ios) → **Releases** → **Tags**
 - Download the desired version (no need to clone the entire repo)
-- Extract and locate the `.xcframework` folders:
-  - `MWDATCamera.xcframework`
-  - `MWDATCore.xcframework`
-  - `MWDATMockDevice.xcframework`
+- Extract and locate the `.xcframework` folders — you need **all three**:
+  - `MWDATCamera.xcframework` → core plugin
+  - `MWDATCore.xcframework` → core plugin
+  - `MWDATMockDevice.xcframework` → mock add-on (`flutter_meta_wearables_dat_mock_device`)
 
 ### 2. Replace Local Files
 
-Update the binaries across **both** plugins:
+Update the binaries across **both** plugins (core alone is not enough):
 
 1. **Core plugin** — replace `MWDATCore.xcframework` and `MWDATCamera.xcframework` in `ios/flutter_meta_wearables_dat/Frameworks/`.
 2. **Mock add-on** — replace `MWDATMockDevice.xcframework` in `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks/`.
@@ -67,6 +69,8 @@ SwiftPM caches binary-target checksums in `Package.resolved`; clearing the works
 
 Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Swift and Dart) to adopt new features and fix any issues introduced by the update.
 
+Meta ships its own AI skills alongside the SDK at [`plugins/mwdat-ios/skills/`](https://github.com/facebook/meta-wearables-dat-ios/tree/main/plugins/mwdat-ios), updated with each release. They're often the fastest, most concrete migration reference — usually ahead of the prose docs. They document the *native* Swift API, so treat them as a migration guide for `MetaWearablesDatPlugin.swift`, not as content to copy into our Dart-facing [`agent/`](../agent/) skills.
+
 ### 5. Test Build
 
 Verify both iOS resolvers from a clean state:
@@ -108,10 +112,10 @@ Update the version in **both** `build.gradle` files (each plugin owns its own `e
 
 ```groovy
 // android/build.gradle (core)
-ext.mwdat_version = "0.8.0"  // mwdat-core, mwdat-camera
+ext.mwdat_version = "0.9.0"  // mwdat-core, mwdat-camera
 
 // flutter_meta_wearables_dat_mock_device/android/build.gradle
-ext.mwdat_version = "0.8.0"  // mwdat-mockdevice
+ext.mwdat_version = "0.9.0"  // mwdat-mockdevice
 ```
 
 Keep the two values in sync — mixing versions across the two plugins risks ABI breakage at runtime.
@@ -123,9 +127,15 @@ Keep the two values in sync — mixing versions across the two plugins risks ABI
 2. Sync Gradle: Run `./gradlew build --refresh-dependencies` or use Android Studio's "Sync Project with Gradle Files"
 3. Verify the new dependencies are resolved correctly
 
+If Gradle fails with `401 Unauthorized` resolving `com.meta.wearable:mwdat-*`, your GitHub token (`GITHUB_TOKEN` or `github_token` in `local.properties`) is expired — regenerate one with `read:packages` scope.
+
+**The same applies in CI.** The `android-build` job in [`ci.yml`](../.github/workflows/ci.yml) builds the example APK, which is the only job that compiles either plugin's Kotlin. It reads the token from `MWDAT_PACKAGES_TOKEN` (a repo secret — a PAT with `read:packages`) and falls back to the workflow's built-in `GITHUB_TOKEN`. The built-in token is scoped to this repository and is not reliably accepted for `facebook/meta-wearables-dat-android`, so **if `android-build` starts failing with `401 Unauthorized`, add or refresh the `MWDAT_PACKAGES_TOKEN` secret** (Settings → Secrets and variables → Actions). The job is skipped on fork PRs, where no secrets are available.
+
 ### 4. Implement API Changes
 
 Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Kotlin and Dart) to adopt new features and fix any issues introduced by the update.
+
+Meta ships its own AI skills alongside the SDK at [`plugins/mwdat-android/skills/`](https://github.com/facebook/meta-wearables-dat-android/tree/main/plugins/mwdat-android/skills), updated with each release. `camera-streaming` and `session-lifecycle` in particular are often the fastest, most concrete migration reference — usually ahead of the prose docs. They document the *native* Kotlin API, so treat them as a migration guide for `MetaWearablesDatPlugin.kt`, not as content to copy into our Dart-facing [`agent/`](../agent/) skills. Diffing them across releases is also a useful signal for behaviour changes our consumer skills should mention (constraints, state machines, error taxonomy).
 
 Key Android-specific implementation files:
 - `MetaWearablesDatPlugin.kt` — main plugin with method/event channel handling
@@ -161,14 +171,15 @@ Before tagging, confirm:
    - `ios/flutter_meta_wearables_dat.podspec` (`s.version`)
    - `flutter_meta_wearables_dat_mock_device/pubspec.yaml`
    - `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device.podspec` (`s.version`)
-2. **Both `CHANGELOG.md` files have a `## <new-version>` entry.** The publish workflow's `github-release` job extracts these for the GitHub release notes — missing entries produce an empty release body.
-3. **Both packages are clean locally:**
+2. **If this release bumps the DAT SDK:** all three iOS xcframeworks are updated (`MWDATCore` + `MWDATCamera` in the core plugin **and** `MWDATMockDevice` in the mock add-on), `./scripts/thin-xcframeworks.sh` has been run, and both Android `ext.mwdat_version` values match.
+3. **Both `CHANGELOG.md` files have a `## <new-version>` entry.** The publish workflow's `github-release` job extracts these for the GitHub release notes — missing entries produce an empty release body.
+4. **Both packages are clean locally:**
    ```bash
    dart analyze && (cd flutter_meta_wearables_dat_mock_device && dart analyze)
    dart pub publish --dry-run && (cd flutter_meta_wearables_dat_mock_device && dart pub publish --dry-run)
    ```
-4. **The example app still builds** — `cd example && flutter build ios --release --no-codesign` and `flutter build apk --release`.
-5. **You're tagging from `main` with no uncommitted changes.** Tags are not branch-scoped on push; whatever commit you tag is what gets published.
+5. **The example app still builds** — `cd example && flutter build ios --release --no-codesign` and `flutter build apk --release`.
+6. **You're tagging from `main` with no uncommitted changes.** Tags are not branch-scoped on push; whatever commit you tag is what gets published.
 
 ### Steps
 

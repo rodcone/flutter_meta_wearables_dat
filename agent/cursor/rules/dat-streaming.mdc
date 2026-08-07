@@ -22,7 +22,8 @@ final textureId = await MetaWearablesDat.startStreamSession(
 
 ## Subscribe to state/errors BEFORE starting
 - `streamSessionStateStream()` — stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
-- `streamSessionErrorStream()` — error codes: `thermalCritical`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `hingesClosed`, `permissionDenied`, `datAppOnTheGlassesUpdateRequired` (call `openDATGlassesAppUpdate()` to recover), `dwaUnavailable`, plus device-session variants (`deviceThermalCritical` etc.).
+- `streamSessionErrorStream()` — error codes: `thermalCritical`, `thermalEmergency` (iOS only; Android reports `deviceThermalEmergency`), `peakPowerShutdown`, `batteryCritical`, `hingesClosed` (glasses closed **or taken off**), `permissionDenied`, `datAppOnTheGlassesUpdateRequired` (call `openDATGlassesAppUpdate()` to recover), `dwaUnavailable`, plus device-session variants (`deviceThermalCritical` etc.) and the Android-only `sessionEndedByDevice` / `capabilityDenied`. Capture failures are *not* here — they reject the `capturePhoto()` future.
+- Codes with no auto-resume (`hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical`, `sessionEndedByDevice`) require a teardown, not a retry: clear textureId + streaming flag or the `Texture` freezes on its last frame. `thermalCritical` / `deviceThermalCritical` are excluded — they pause the stream and leave the session up, so keep rendering and just warn.
 
 ## Device thermal monitoring (optional)
 - `deviceStateStream()` — `Stream<DeviceState>` of live `ThermalLevel` (unknown, none, light, moderate, severe, critical, emergency, shutdown). Use to warn the user *before* a thermal error stops the stream.

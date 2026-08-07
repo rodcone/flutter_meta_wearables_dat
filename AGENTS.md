@@ -1,6 +1,6 @@
 # flutter_meta_wearables_dat
 
-Flutter plugin providing a bridge to Meta's Wearables Device Access Toolkit (DAT) for integration with Meta AI Glasses (Ray-Ban Meta). Supports iOS (17.0+) and Android (API 29+).
+Flutter plugin providing a bridge to Meta's Wearables Device Access Toolkit (DAT) for integration with Meta AI Glasses (Ray-Ban Meta). Supports iOS (17.2+) and Android (API 29+).
 
 - **pub.dev**: https://pub.dev/packages/flutter_meta_wearables_dat
 - **GitHub**: https://github.com/rodcone/flutter_meta_wearables_dat
@@ -74,14 +74,23 @@ Communication:
 | `timeout` | Operation timed out |
 | `videoStreamingError` | Video stream failed |
 | `permissionDenied` | Camera permission denied |
-| `hingesClosed` | User folded the glasses |
+| `hingesClosed` | Glasses folded shut **or taken off**. The SDK does not auto-resume — the user puts them back on, then you start a new session |
 | `thermalCritical` | Device thermal state is critical — streaming pauses |
-| `thermalEmergency` | Device thermal state is emergency — streaming stopped |
+| `thermalEmergency` | Device thermal state is emergency — streaming stopped. **iOS only**; on Android this arrives as `deviceThermalEmergency` |
 | `peakPowerShutdown` | Device exceeded peak power limit — streaming stopped |
 | `batteryCritical` | Device battery critically low — streaming stopped |
-| `deviceThermalCritical` / `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants of the above (session is torn down, not just the stream) |
+| `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants of the above — the session itself goes down, not just the stream |
+| `deviceThermalCritical` | Device-session-level thermal warning. Like `thermalCritical`, it **pauses**; the session stays up |
+| `sessionEndedByDevice` | The device ended the session; the stream stops with it. **Android only** |
+| `capabilityDenied` | The device refused the requested capability. **Android only** |
 | `datAppOnTheGlassesUpdateRequired` | The on-device DAT app needs updating. Call `MetaWearablesDat.openDATGlassesAppUpdate()` to prompt the user. |
 | `dwaUnavailable` | The DAT Wearables App is unavailable on the glasses |
+
+Photo-capture failure never appears here — it rejects the `capturePhoto()` future instead (`CAPTURE_PHOTO_FAILED`, with `details` carrying the granular reason).
+
+Codes that leave the stream dead with no auto-resume need a **teardown**, not a retry: clear your texture ID and streaming flag, or the `Texture` widget freezes on its last frame. Those are `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical` and `sessionEndedByDevice`.
+
+`thermalCritical` and `deviceThermalCritical` are **not** in that list — they pause rather than end the stream, and the session stays up. Treat them as a warning (surface it, keep rendering) and use `deviceStateStream()` to react before the device reaches the emergency tier.
 
 ## API reference
 
@@ -160,7 +169,7 @@ flutter pub add flutter_meta_wearables_dat
 
 ### 2. iOS configuration
 
-**Minimum deployment target:** iOS 17.0
+**Minimum deployment target:** iOS 17.2
 
 Add to `Info.plist`:
 
@@ -519,8 +528,8 @@ Develop and test without physical Meta glasses. Mock support lives in the option
 ```yaml
 # pubspec.yaml — add only in dev/staging configs
 dependencies:
-  flutter_meta_wearables_dat: ^0.7.0
-  flutter_meta_wearables_dat_mock_device: ^0.7.0
+  flutter_meta_wearables_dat: ^0.8.0
+  flutter_meta_wearables_dat_mock_device: ^0.8.0
 ```
 
 ```dart

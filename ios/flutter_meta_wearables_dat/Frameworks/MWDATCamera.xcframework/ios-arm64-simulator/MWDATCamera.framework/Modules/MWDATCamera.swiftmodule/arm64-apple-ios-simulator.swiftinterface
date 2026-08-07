@@ -1,7 +1,7 @@
 // swift-interface-format-version: 1.0
-// swift-compiler-version: Facebook Swift version 6.3.2-dev (LLVM 89596864ad4cf55, Swift 5a76897d25af804)
-// swift-module-flags: -target arm64-apple-ios15.2-simulator -enable-objc-interop -enable-library-evolution -swift-version 6 -Osize -enable-experimental-feature PikaUnsafeImplementationOnlyImportDiagnostics -enable-experimental-feature PikaNonResilientImplementationOnlyWarnings -module-name MWDATCamera -package-name MetaWearablesDAT
-// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.3.2
+// swift-compiler-version: Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)
+// swift-module-flags: -target arm64-apple-ios17.2-simulator -enable-objc-interop -enable-library-evolution -swift-version 6 -Osize -module-name MWDATCamera -package-name MetaWearablesDAT
+// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.3.3
 import AVFoundation
 import CoreMedia
 import Foundation
@@ -11,41 +11,45 @@ import UIKit
 import _Concurrency
 import _StringProcessing
 import _SwiftConcurrencyShims
-public enum CaptureError : MWDATCore.DatError, Swift.Equatable {
-  case photo_capture_timeout
-  case photo_capture_failed
-  public var description: Swift.String {
+@_hasMissingDesignatedInitializers final public class Camera : Swift.Sendable {
+  final public let stream: MWDATCamera.Stream
+  final public var state: MWDATCamera.CameraState {
     get
   }
-  public var errorDescription: Swift.String? {
+  final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.CameraState> {
     get
   }
-  public static func == (a: MWDATCamera.CaptureError, b: MWDATCamera.CaptureError) -> Swift.Bool
+  final public func stop()
+  @objc deinit
+}
+@frozen public enum CameraState : Swift.Sendable {
+  case starting
+  case started
+  case stopping
+  case stopped
+  public static func == (a: MWDATCamera.CameraState, b: MWDATCamera.CameraState) -> Swift.Bool
   public func hash(into hasher: inout Swift.Hasher)
   public var hashValue: Swift.Int {
     get
   }
 }
 extension MWDATCore.DeviceSession {
-  final public func addStream(config: MWDATCamera.StreamConfiguration = StreamConfiguration()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.Stream?
+  final public func addCamera(config: MWDATCamera.StreamConfiguration = StreamConfiguration()) throws(MWDATCore.DeviceSessionError) -> MWDATCamera.Camera?
 }
 extension Foundation.NSNotification.Name {
   public static let mwdatStreamSessionCreated: Foundation.Notification.Name
 }
+@_hasMissingDesignatedInitializers @objc(MWDATCamera) final public class ObjC_Camera : ObjectiveC.NSObject, Swift.Sendable {
+  @objc final public let stream: MWDATCamera.ObjC_Stream
+  @objc final public func stop()
+  @objc deinit
+}
 extension MWDATCore.ObjC_DeviceSession {
-  @objc(addStreamWithError:) final public func addStream(_ error: Foundation.NSErrorPointer = nil) -> MWDATCamera.ObjC_Stream?
-  @objc(addStreamWithConfig:error:) final public func addStream(config: MWDATCamera.ObjC_StreamConfiguration, error: Foundation.NSErrorPointer = nil) -> MWDATCamera.ObjC_Stream?
+  @objc(addCameraWithError:) final public func addCamera(_ error: Foundation.NSErrorPointer = nil) -> MWDATCamera.ObjC_Camera?
+  @objc(addCameraWithConfig:error:) final public func addCamera(config: MWDATCamera.ObjC_StreamConfiguration, error: Foundation.NSErrorPointer = nil) -> MWDATCamera.ObjC_Camera?
 }
 @_hasMissingDesignatedInitializers @objc(MWDATCameraListenerToken) final public class ObjC_CameraListenerToken : ObjectiveC.NSObject, Swift.Sendable {
   @objc final public func cancel()
-  @objc deinit
-}
-@objc(MWDATSpecificDeviceSelector) final public class ObjC_SpecificDeviceSelector : ObjectiveC.NSObject, Swift.Sendable {
-  @objc public init(deviceIdentifier: MWDATCore.DeviceIdentifier)
-  @objc deinit
-}
-@_inheritsConvenienceInitializers @objc(MWDATAutoDeviceSelector) final public class ObjC_AutoDeviceSelector : ObjectiveC.NSObject, Swift.Sendable {
-  @objc override dynamic public init()
   @objc deinit
 }
 @_hasMissingDesignatedInitializers @objc(MWDATStream) final public class ObjC_Stream : ObjectiveC.NSObject, Swift.Sendable {
@@ -110,6 +114,7 @@ extension MWDATCore.ObjC_DeviceSession {
   case thermalEmergency
   case peakPowerShutdown
   case batteryCritical
+  case photoCaptureFailed
   public init?(rawValue: Swift.Int)
   public typealias RawValue = Swift.Int
   public var rawValue: Swift.Int {
@@ -241,6 +246,7 @@ public enum StreamError : MWDATCore.DatError, Swift.Equatable {
   case thermalEmergency
   case peakPowerShutdown
   case batteryCritical
+  case photoCaptureFailed
   public var description: Swift.String {
     get
   }
@@ -299,7 +305,9 @@ public struct VideoFrame : Swift.Sendable {
   }
   public func makeUIImage() -> sending UIKit.UIImage?
 }
-extension MWDATCamera.CaptureError : Swift.Hashable {}
+extension MWDATCamera.CameraState : Swift.Equatable {}
+extension MWDATCamera.CameraState : Swift.Hashable {}
+extension MWDATCamera.CameraState : Swift.BitwiseCopyable {}
 extension MWDATCamera.ObjC_StreamState : Swift.Equatable {}
 extension MWDATCamera.ObjC_StreamState : Swift.Hashable {}
 extension MWDATCamera.ObjC_StreamState : Swift.RawRepresentable {}

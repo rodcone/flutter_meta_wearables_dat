@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "flutter_meta_wearables_dat",
-    platforms: [.iOS("17.0")],
+    platforms: [.iOS("17.2")],
     products: [
         .library(name: "flutter-meta-wearables-dat", targets: ["flutter_meta_wearables_dat"]),
         .library(name: "MWDATCore", targets: ["MWDATCore"])

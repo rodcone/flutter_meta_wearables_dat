@@ -113,9 +113,15 @@ class StreamSessionError {
   /// `internalError`, `deviceNotFound`, `deviceNotConnected`, `timeout`,
   /// `videoStreamingError`, `permissionDenied`, `hingesClosed`,
   /// `thermalCritical`, `thermalEmergency`, `peakPowerShutdown`,
-  /// `batteryCritical`. `deviceNotFound` is **iOS only** — the Android SDK's
-  /// `StreamError` has no equivalent case, so a not-found device surfaces as
-  /// `videoStreamingError` there.
+  /// `batteryCritical`. Two are **iOS only**:
+  /// - `deviceNotFound` — the Android SDK's `StreamError` has no equivalent
+  ///   case, so a not-found device surfaces as `videoStreamingError` there.
+  /// - `thermalEmergency` — DAT 0.9.0 removed the Android SDK's
+  ///   `StreamError.THERMAL_EMERGENCY`, so on Android a thermal emergency
+  ///   arrives as the device-session code `deviceThermalEmergency` instead.
+  ///
+  /// Photo-capture failure is deliberately **not** on this channel on either
+  /// platform — it resolves [MetaWearablesDat.capturePhoto] instead.
   ///
   /// **Device-session codes** (originate from the SDK's `DeviceSessionError`,
   /// surfaced on the same channel so consumers don't need a second
@@ -124,7 +130,10 @@ class StreamSessionError {
   /// `capabilityNotFound`, `unexpectedError`, `deviceThermalCritical`,
   /// `deviceThermalEmergency`, `devicePeakPowerShutdown`,
   /// `deviceBatteryCritical`, `datAppOnTheGlassesUpdateRequired`,
-  /// `dwaUnavailable`.
+  /// `dwaUnavailable`. Two more are **Android only** — iOS's
+  /// `DeviceSessionError` is `@frozen` with no equivalent cases:
+  /// `sessionEndedByDevice` (the device ended the session; the stream stops
+  /// with it) and `capabilityDenied`.
   ///
   /// When this is `datAppOnTheGlassesUpdateRequired`, call
   /// [MetaWearablesDat.openDATGlassesAppUpdate] to prompt the user to update
@@ -139,7 +148,12 @@ class StreamSessionError {
   /// Returns true if the device's thermal state has reached a critical level.
   bool get isThermalCritical => code == 'thermalCritical';
 
-  /// Returns true if the device hinges were closed.
+  /// Returns true if the glasses were folded shut **or taken off**.
+  ///
+  /// Since DAT 0.9.0 taking the glasses off (doff) raises this too, so treat it
+  /// as "the glasses are no longer being worn" rather than specifically as a
+  /// hinge event. The SDK does not auto-resume — the user has to put them back
+  /// on and the app has to start a new session.
   bool get isHingesClosed => code == 'hingesClosed';
 
   /// Returns true if camera permission was denied.
@@ -738,20 +752,26 @@ class MetaWearablesDat {
   /// - `CAPTURE_PHOTO_FAILED` — the capture failed or timed out. `details`
   ///   carries a granular reason string.
   ///
-  /// The granular `details` reasons differ per platform because the two SDKs'
-  /// `CaptureError` types differ:
+  /// The granular `details` reasons differ per platform because the two SDKs
+  /// report capture failure differently:
   /// - Android: `deviceDisconnected`, `notStreaming`, `captureInProgress`,
   ///   `captureFailed` (from the SDK's typed `CaptureError`).
-  /// - iOS: `photoCaptureTimeout` — the SDK's `capturePhoto` returns only a
-  ///   bool and never delivers a typed `CaptureError`, so the plugin enforces a
-  ///   client-side timeout to guarantee this `Future` always resolves.
+  /// - iOS: `photoCaptureFailed` — reported by the SDK, usually within
+  ///   milliseconds, and typically means the glasses are out of storage.
+  ///   `photoCaptureTimeout` is the backstop for a capture that is accepted and
+  ///   then goes silent, so this `Future` always resolves.
+  ///
+  /// Capture failures surface only here, never on [streamSessionErrorStream] —
+  /// on both platforms.
   static Future<CapturedPhoto> capturePhoto(
     String? deviceId, {
     PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
   }) {
     if (kDebugMode) {
       debugPrint(
-        '[MetaWearablesDAT] Capturing photo with deviceId: $deviceId, format: $format',
+        '[MetaWearablesDAT] Capturing photo with deviceId: '
+        '${deviceId ?? 'null (automatic — targets the active session)'}, '
+        'format: $format',
       );
     }
     return MetaWearablesDatPlatform.instance.capturePhoto(

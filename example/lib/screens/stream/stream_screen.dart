@@ -52,6 +52,10 @@ class _StreamScreenState extends State<StreamScreen> {
 
     final isDatUpdate = error.code == 'datAppOnTheGlassesUpdateRequired';
     final isTransient = error.code == 'noEligibleDevice';
+    // Since DAT 0.9.0 this also fires when the glasses are taken off, which is
+    // far more common than folding the arms mid-stream. It's actionable rather
+    // than a failure, so it gets its own wording and a longer read.
+    final isHingesClosed = error.isHingesClosed;
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -64,20 +68,27 @@ class _StreamScreenState extends State<StreamScreen> {
                     ? Icons.thermostat
                     : isDatUpdate
                     ? Icons.system_update
+                    : isHingesClosed
+                    ? Icons.visibility_off
                     : Icons.error_outline,
                 color: Colors.white,
                 size: 20,
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(error.message),
+                child: Text(
+                  isHingesClosed
+                      ? 'Streaming stopped — put your glasses back on, '
+                            'then press Start.'
+                      : error.message,
+                ),
               ),
             ],
           ),
           backgroundColor: Colors.red.shade900,
           duration: isTransient
               ? const Duration(seconds: 3)
-              : isDatUpdate
+              : isDatUpdate || isHingesClosed
               ? const Duration(seconds: 10)
               : const Duration(seconds: 6),
           action: isDatUpdate
@@ -112,8 +123,7 @@ class _StreamScreenState extends State<StreamScreen> {
             // Full screen video stream, reconnecting overlay, or placeholder
             Positioned.fill(
               child:
-                  streamProvider.isStreaming &&
-                      streamProvider.textureId != null
+                  streamProvider.isStreaming && streamProvider.textureId != null
                   ? _TextureStreamWidget(
                       textureId: streamProvider.textureId!,
                       videoStreamSize: streamProvider.videoStreamSize,
@@ -142,16 +152,22 @@ class _StreamScreenState extends State<StreamScreen> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                               ),
+                              // While blocked, Start is disabled — say why,
+                              // otherwise a greyed-out button reads as a bug.
                               child: Text(
-                                'Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.',
+                                streamProvider.pendingUserActionHint ??
+                                    'Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: 15,
-                                  color: Colors.white,
+                                  color:
+                                      streamProvider.pendingUserAction != null
+                                      ? Colors.amber.shade200
+                                      : Colors.white,
                                 ),
                               ),
                             ),
@@ -275,6 +291,11 @@ class _StreamScreenState extends State<StreamScreen> {
                           ),
                           MetaButton.icon(
                             icon: const Icon(Icons.camera_alt),
+                            // Shooting and transferring the photo off the
+                            // glasses takes a few seconds before the share
+                            // sheet can open — without this the tap looks
+                            // like it did nothing.
+                            loading: streamProvider.isCapturingPhoto,
                             onPressed: () async {
                               unawaited(HapticFeedback.mediumImpact());
 

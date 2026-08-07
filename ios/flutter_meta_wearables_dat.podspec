@@ -4,13 +4,13 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_meta_wearables_dat'
-  s.version          = '0.7.2'
+  s.version          = '0.8.0'
   s.summary          = "Flutter bridge to Meta's Wearables DAT for iOS and Android."
   s.description      = <<-DESC
 Flutter plugin providing a bridge to Meta's Wearables Device Access Toolkit (DAT)
 for integration with Meta AI Glasses (Ray-Ban Meta). Supports device registration,
 camera permissions, video streaming with raw (BGRA) and hvc1 (HEVC) codecs, photo
-capture, and background streaming on iOS 17.0+.
+capture, and background streaming on iOS 17.2+.
                        DESC
   s.homepage         = 'https://github.com/rodcone/flutter_meta_wearables_dat'
   s.license          = { :file => '../LICENSE' }
@@ -18,7 +18,7 @@ capture, and background streaming on iOS 17.0+.
   s.source           = { :path => '.' }
   s.source_files = 'flutter_meta_wearables_dat/Sources/flutter_meta_wearables_dat/**/*'
   s.dependency 'Flutter'
-  s.platform = :ios, '17.0'
+  s.platform = :ios, '17.2'
   s.static_framework = true
   s.vendored_frameworks = [
     'flutter_meta_wearables_dat/Frameworks/MWDATCore.xcframework',
