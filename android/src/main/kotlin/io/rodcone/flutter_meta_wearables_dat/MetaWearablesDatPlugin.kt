@@ -1223,15 +1223,28 @@ class MetaWearablesDatPlugin :
                         }
 
                 // Teardown cascades parent -> child but NOT child -> parent, so a
-                // stream that stops on its own (a stream-level error such as
-                // `start()` returns a DatResult we used to discard, silently
-                // swallowing start failures. The texture is already registered
-                // and the jobs are wired at this point, so report the failure on
-                // the error channel rather than failing the call — the stream
-                // state channel will follow with whatever state it settles in.
+                // `start()` returns a DatResult that used to be discarded,
+                // silently swallowing start failures. A failure here means the
+                // texture will never receive a frame, so tear it down and fail
+                // the call — returning success would hand back a dead texture,
+                // and an app without an error-stream subscription would see a
+                // successful Future and a permanently frozen view. The typed
+                // error still goes out on the channel for subscribers.
+                //
+                // iOS cannot do this: its `Stream.start()` returns Void, so a
+                // synchronous start failure is undetectable there and the
+                // texture is always returned.
+                var startFailure: String? = null
                 newStream.start().onFailure { error, _ ->
                     Log.e(TAG, "Stream start failed: ${error.description}")
                     streamSessionErrorStreamHandler?.send(error)
+                    startFailure = error.description
+                }
+                val failure = startFailure
+                if (failure != null) {
+                    teardownStreamOnly()
+                    result.error("STREAM_ERROR", failure, null)
+                    return@launch
                 }
                 result.success(textureId)
             } catch (e: Exception) {

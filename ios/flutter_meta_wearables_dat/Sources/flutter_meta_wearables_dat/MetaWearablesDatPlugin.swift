@@ -102,9 +102,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var camera: MWDATCamera.Camera?
   private var streamSession: MWDATCamera.Stream?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
-  // Guards `teardownStreamOnly` against re-entry — it is reachable from the
-  // method channel, the device-session observer and the start-failure paths.
-  private var isTearingDownStream = false
+  // Serializes `teardownStreamOnly` — it is reachable from the method channel,
+  // the device-session observer and the start-failure paths, and callers must
+  // await an in-flight teardown rather than skip it.
+  private var teardownTask: Task<Void, Never>?
+  private var teardownSeq = 0
   private var frameCounter: Int = 0
   private var currentTargetFPS: Double = 30.0
   private var lastFrameSendTime: Date?
@@ -763,19 +765,43 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   /// Tears down the active stream but leaves the DeviceSession alive, so the
   /// next `startStreamSession` is a fast `addCamera` on the existing session.
+  ///
+  /// Callers are serialized against any teardown already in flight, then run
+  /// their own. Skipping instead — the previous behaviour — let
+  /// `stopStreamSession` report success without having stopped anything: a stop
+  /// arriving while an earlier teardown was still waiting returned immediately,
+  /// leaving a stream that had been started in the meantime running.
   @MainActor
   private func teardownStreamOnly() async {
-    if isTearingDownStream { return }
-    isTearingDownStream = true
-    defer { isTearingDownStream = false }
+    if let inFlight = teardownTask {
+      await inFlight.value
+    }
+    teardownSeq += 1
+    let mySeq = teardownSeq
+    let task = Task { @MainActor in await self.performTeardownStreamOnly() }
+    teardownTask = task
+    await task.value
+    // Only the most recent starter clears the slot, so a caller that queued
+    // behind us isn't dropped from the chain.
+    if teardownSeq == mySeq { teardownTask = nil }
+  }
+
+  @MainActor
+  private func performTeardownStreamOnly() async {
     NSLog("[MWDAT] teardownStreamOnly — stopping camera, awaiting stop cascade")
 
-    if let token = videoListenerToken {
-      await token.cancel()
-      videoListenerToken = nil
-    }
+    // Capture identities and stop BEFORE the first suspension below. While this
+    // method is suspended the stream must already be `.stopping`: otherwise a
+    // concurrent `startStreamSession` takes the "a stream is already active"
+    // branch and hands Dart back a texture id this teardown is about to
+    // unregister.
+    let stoppingCamera = camera
+    let stoppingStream = streamSession
+    let stoppingTextureId = textureId
+
     streamStateHandler.session = nil
     streamErrorHandler.session = nil
+
     // `Camera.stop()` synchronously calls `Stream.stop()` and detaches the
     // capability from the DeviceSession.
     //
@@ -784,7 +810,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // the stream — and removes the DWA capability — runs afterwards on a Task,
     // and the SDK's state machine holds the `Stream` only **weakly**. Once
     // `Camera.stop()` has detached from the session, our two ivars are the last
-    // strong owners of the whole graph, so releasing them in this same turn
+    // strong owners of the whole graph, so releasing them in the same turn
     // deallocates the `Stream` before that Task runs: the weak load yields nil,
     // the transition is cancelled, and nothing ever reaches the device. The
     // glasses are left holding a live capability — no stream-ended tone, and a
@@ -794,20 +820,21 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // *was* the `Stream` and there was no removal API, so the DeviceSession
     // retained it for its whole life and our nil was never the last release.
     // Under 0.9.0 it is — hence the bounded wait below before letting go.
-    //
-    // Everything below is scoped to the resources this call started with. The
-    // wait suspends for up to `streamStopTimeout`, and `Camera.stop()` has
-    // already detached the capability synchronously by then — so a concurrent
-    // `startStreamSession` can legitimately succeed during the wait and install
-    // a *new* camera, stream and texture. That's fine and worth allowing (it's
-    // a fast restart), but this teardown must not then clear the newcomer's
-    // state: doing so would unregister a live texture and orphan a running
-    // stream with no reference left to stop it.
-    let stoppingCamera = camera
-    let stoppingStream = streamSession
-    let stoppingTextureId = textureId
-
     camera?.stop()
+
+    if let token = videoListenerToken {
+      await token.cancel()
+      videoListenerToken = nil
+    }
+
+    // Everything below is scoped to the resources this call started with. The
+    // wait suspends for up to `streamStopTimeout`, and the capability is
+    // already detached by then — so a concurrent `startStreamSession` can
+    // legitimately succeed during the wait and install a *new* camera, stream
+    // and texture. That's fine and worth allowing (it's a fast restart), but
+    // this teardown must not then clear the newcomer's state: doing so would
+    // unregister a live texture and orphan a running stream with no reference
+    // left to stop it.
     if let stoppingStream {
       let deadline = Date().addingTimeInterval(streamStopTimeout)
       while stoppingStream.state != .stopped, Date() < deadline {
