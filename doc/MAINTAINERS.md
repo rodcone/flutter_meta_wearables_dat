@@ -129,6 +129,8 @@ Keep the two values in sync — mixing versions across the two plugins risks ABI
 
 If Gradle fails with `401 Unauthorized` resolving `com.meta.wearable:mwdat-*`, your GitHub token (`GITHUB_TOKEN` or `github_token` in `local.properties`) is expired — regenerate one with `read:packages` scope.
 
+**The same applies in CI.** The `android-build` job in [`ci.yml`](../.github/workflows/ci.yml) builds the example APK, which is the only job that compiles either plugin's Kotlin. It reads the token from `MWDAT_PACKAGES_TOKEN` (a repo secret — a PAT with `read:packages`) and falls back to the workflow's built-in `GITHUB_TOKEN`. The built-in token is scoped to this repository and is not reliably accepted for `facebook/meta-wearables-dat-android`, so **if `android-build` starts failing with `401 Unauthorized`, add or refresh the `MWDAT_PACKAGES_TOKEN` secret** (Settings → Secrets and variables → Actions). The job is skipped on fork PRs, where no secrets are available.
+
 ### 4. Implement API Changes
 
 Review the DAT release notes for breaking changes, new APIs, or deprecations. Update the plugin implementation (native Kotlin and Dart) to adopt new features and fix any issues introduced by the update.
