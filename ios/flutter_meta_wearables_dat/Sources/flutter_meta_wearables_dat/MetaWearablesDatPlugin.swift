@@ -635,7 +635,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // The rewarm above can run a teardown + selector rebuild; re-check the
       // deadline before sleeping so a late iteration doesn't overshoot it.
       if Date() >= deadline { return }
-      try? await Task.sleep(nanoseconds: 200_000_000)
+      try? await Task.sleep(for: .milliseconds(200))
     }
   }
 
@@ -708,7 +708,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return .streamEnded
       }
       group.addTask {
-        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        try? await Task.sleep(for: .seconds(timeout))
         return .timedOut
       }
       let first = await group.next() ?? .streamEnded
@@ -1226,7 +1226,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       if pinChanged, requestedDeviceId != nil {
         let deadline = Date().addingTimeInterval(selectorResolveTimeout)
         while deviceSelector.activeDevice == nil, Date() < deadline {
-          try? await Task.sleep(nanoseconds: 150_000_000)
+          try? await Task.sleep(for: .milliseconds(150))
         }
       }
 
@@ -1412,7 +1412,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // unresolved forever.
       let timeoutSeconds = 15.0
       Task { @MainActor in
-        try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+        try? await Task.sleep(for: .seconds(timeoutSeconds))
         respond(FlutterError(
           code: "CAPTURE_PHOTO_FAILED",
           message: "Photo capture timed out.",
