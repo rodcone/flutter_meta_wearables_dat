@@ -1,3 +1,11 @@
+## 0.9.0
+**BREAKING CHANGES**
+* iOS: `stopStreamSession()` now ends the underlying `DeviceSession` instead of keeping it cached for the process lifetime. The glasses' stream-ended tone hangs off the session lifecycle, so the cached session meant the tone only played when the app was killed. The Dart API is unchanged, but every `startStreamSession()` after a stop now pays a full session reconnect instead of a fast capability re-add.
+* iOS: session teardown waits for the `DeviceSession` to actually reach `.stopped` (10 s backstop) before releasing it, so the session-end handshake reliably reaches the glasses.
+* iOS: stream teardown is now event-driven — the plugin holds its `Camera`/`Stream` references until the SDK reports `.stopped` (30 s backstop) instead of polling for 3 s and releasing unconditionally. The SDK's stop cascade holds the `Stream` weakly; the old bounded release could cancel the stop handshake mid-flight and strand a live capability on the glasses.
+* iOS: `stopStreamSession()` with no active stream still ends a lingering `DeviceSession` left behind by a failed start (the call still rejects with `SESSION_NOT_FOUND` afterwards).
+* Example app: iOS camera transport switched from Bluetooth Classic to Wi-Fi. The glasses play their stream-started tone only on the Wi-Fi transport; the Info.plist and entitlements comments document how to switch back. Delete and reinstall the app after switching transports — stale accessory pairing state otherwise keeps the old transport.
+
 ## 0.8.0
 **BREAKING CHANGES**
 * Update to Meta Wearables DAT **0.9.0** on both platforms.
