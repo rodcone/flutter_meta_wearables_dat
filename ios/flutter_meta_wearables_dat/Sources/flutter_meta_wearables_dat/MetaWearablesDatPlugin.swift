@@ -1,9 +1,9 @@
-import Flutter
-import UIKit
-import MWDATCore
-import MWDATCamera
 import AVFoundation
 import CoreMedia
+import Flutter
+import MWDATCamera
+import MWDATCore
+import UIKit
 import VideoToolbox
 
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
@@ -35,6 +35,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       filter: { $0.identifier == id }
     )
   }
+
   // Guards concurrent startStreamSession calls: a second start that tore down
   // the first's in-flight session would leave the first awaiting `.started`.
   private var isStartingSession = false
@@ -201,63 +202,63 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
-      case "requestAndroidPermissions":
-        // No-op on iOS — Android-only runtime permissions
-        result(true)
-      case "restartActiveDeviceMonitoring":
-        // Relaunch the active-device + device-state stream loops, which the SDK
-        // terminates on unregistration. Dart calls this after returning from
-        // Meta AI so streaming can resume after a disconnect/re-register cycle
-        // without an app restart. Also relaunch the plugin's internal
-        // availability watchdog — its `for await` dies with the SDK stream and
-        // would otherwise stay dead for the rest of the process. When the
-        // shared selector has gone blind (typical right after a first
-        // registration — see `rebuildDeviceSelectorIfBlind`), it is recreated
-        // and the loops are force-restarted onto the new instance.
-        Task { @MainActor in
-          // The SDK terminates its device streams on unregistration — including
-          // `devicesStream()`, which feeds `knownDeviceIds` and drives the
-          // selector re-warm. Relaunch that lifetime subscription here (it's
-          // idempotent: `startDeviceListMonitoring` cancels any live task first)
-          // so a disconnect/re-register cycle doesn't leave the device-list
-          // cache permanently stale — mirroring the sibling availability loop.
-          self.startDeviceListMonitoring()
-          let rebuilt = await self.rebuildDeviceSelectorIfBlind()
-          self.activeDeviceHandler?.restartMonitoring(force: rebuilt)
-          self.deviceStateHandler?.restartMonitoring(force: rebuilt)
-          if !rebuilt {
-            self.startDeviceAvailabilityMonitoring()
-          }
-          result(true)
+    case "requestAndroidPermissions":
+      // No-op on iOS — Android-only runtime permissions
+      result(true)
+    case "restartActiveDeviceMonitoring":
+      // Relaunch the active-device + device-state stream loops, which the SDK
+      // terminates on unregistration. Dart calls this after returning from
+      // Meta AI so streaming can resume after a disconnect/re-register cycle
+      // without an app restart. Also relaunch the plugin's internal
+      // availability watchdog — its `for await` dies with the SDK stream and
+      // would otherwise stay dead for the rest of the process. When the
+      // shared selector has gone blind (typical right after a first
+      // registration — see `rebuildDeviceSelectorIfBlind`), it is recreated
+      // and the loops are force-restarted onto the new instance.
+      Task { @MainActor in
+        // The SDK terminates its device streams on unregistration — including
+        // `devicesStream()`, which feeds `knownDeviceIds` and drives the
+        // selector re-warm. Relaunch that lifetime subscription here (it's
+        // idempotent: `startDeviceListMonitoring` cancels any live task first)
+        // so a disconnect/re-register cycle doesn't leave the device-list
+        // cache permanently stale — mirroring the sibling availability loop.
+        self.startDeviceListMonitoring()
+        let rebuilt = await self.rebuildDeviceSelectorIfBlind()
+        self.activeDeviceHandler?.restartMonitoring(force: rebuilt)
+        self.deviceStateHandler?.restartMonitoring(force: rebuilt)
+        if !rebuilt {
+          self.startDeviceAvailabilityMonitoring()
         }
-      case "startRegistration":
-        startRegistration(result: result)
-      case "disconnect":
-        disconnect(result: result)
-      case "handleUrl":
-        handleUrl(call: call, result: result)
-      case "getCameraPermissionStatus":
-        getCameraPermissionStatus(result: result)
-      case "requestCameraPermission":
-        requestCameraPermission(result: result)
-      case "startStreamSession":
-        startStreamSession(call: call, result: result)
-      case "stopStreamSession":
-        stopStreamSession(call: call, result: result)
-      case "capturePhoto":
-        capturePhoto(call: call, result: result)
-      case "getRegistrationState":
-        getRegistrationState(result: result)
-      case "getDevices":
-        getDevices(result: result)
-      case "enableBackgroundStreaming":
-        enableBackgroundStreaming(result: result)
-      case "disableBackgroundStreaming":
-        disableBackgroundStreaming(result: result)
-      case "openDATGlassesAppUpdate":
-        openDATGlassesAppUpdate(result: result)
-      default:
-        result(FlutterMethodNotImplemented)
+        result(true)
+      }
+    case "startRegistration":
+      startRegistration(result: result)
+    case "disconnect":
+      disconnect(result: result)
+    case "handleUrl":
+      handleUrl(call: call, result: result)
+    case "getCameraPermissionStatus":
+      getCameraPermissionStatus(result: result)
+    case "requestCameraPermission":
+      requestCameraPermission(result: result)
+    case "startStreamSession":
+      startStreamSession(call: call, result: result)
+    case "stopStreamSession":
+      stopStreamSession(call: call, result: result)
+    case "capturePhoto":
+      capturePhoto(call: call, result: result)
+    case "getRegistrationState":
+      getRegistrationState(result: result)
+    case "getDevices":
+      getDevices(result: result)
+    case "enableBackgroundStreaming":
+      enableBackgroundStreaming(result: result)
+    case "disableBackgroundStreaming":
+      disableBackgroundStreaming(result: result)
+    case "openDATGlassesAppUpdate":
+      openDATGlassesAppUpdate(result: result)
+    default:
+      result(FlutterMethodNotImplemented)
     }
   }
 
@@ -297,15 +298,18 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - Background streaming
 
   private func enableBackgroundStreaming(result: @escaping FlutterResult) {
-    do {
-      try backgroundController.enable()
-      result(nil)
-    } catch {
-      result(FlutterError(
-        code: "BACKGROUND_STREAMING_ERROR",
-        message: "Failed to enable background streaming: \(error.localizedDescription). Verify the host app's Info.plist declares the 'audio' UIBackgroundMode.",
-        details: nil
-      ))
+    backgroundController.enable { error in
+      DispatchQueue.main.async {
+        guard let error else {
+          result(nil)
+          return
+        }
+        result(FlutterError(
+          code: "BACKGROUND_STREAMING_ERROR",
+          message: "Failed to enable background streaming: \(error.localizedDescription). Verify the host app's Info.plist declares the 'audio' UIBackgroundMode.",
+          details: nil
+        ))
+      }
     }
   }
 
@@ -327,7 +331,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // permission and brings the device back into `devicesStream`, so fall
         // through to it instead of surfacing DEVICE_DISCONNECTED.
         if let currentStatus = try? await Wearables.shared.checkPermissionStatus(.camera),
-           currentStatus == .granted {
+           currentStatus == .granted
+        {
           // Already granted, but the selector may still be blind (e.g. the app
           // launched already-registered and nothing has resolved a device yet).
           // Re-warm and wait briefly so a subsequent stream start succeeds —
@@ -462,7 +467,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   func handleUrl(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String : Any], let urlString = args["url"] as? String else {
+    guard let args = call.arguments as? [String: Any], let urlString = args["url"] as? String else {
       result(FlutterError(code: "INVALID_ARGS", message: "url missing", details: nil))
       return
     }
@@ -523,7 +528,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // rebuild exists to fix. The cooldown still allows a genuine retry later if
     // the new selector is itself slow to discover.
     if let last = lastSelectorRebuild,
-       Date().timeIntervalSince(last) < selectorRebuildCooldown {
+       Date().timeIntervalSince(last) < selectorRebuildCooldown
+    {
       return false
     }
     isRebuildingSelector = true
@@ -893,7 +899,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if stream.state != .stopped {
       let stopped = await withTaskGroup(of: Bool.self) { group in
         group.addTask {
-          for await state in states where state == .stopped { return true }
+          for await state in states where state == .stopped {
+            return true
+          }
           return false
         }
         group.addTask { [timeout = streamStopTimeout] in
@@ -947,7 +955,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if session.state == .stopped { return }
     let stopped = await withTaskGroup(of: Bool.self) { group in
       group.addTask {
-        for await state in stateStream where state == .stopped { return true }
+        for await state in stateStream where state == .stopped {
+          return true
+        }
         return false
       }
       group.addTask { [timeout = deviceSessionStopTimeout] in
@@ -965,6 +975,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   // MARK: - App Lifecycle (background safety for hvc1 codec)
+
   //
   // iOS forbids GPU access from backgrounded apps. The Meta DAT SDK keeps
   // delivering hvc1 CMSampleBuffers in background (CPU-only CMBlockBuffer)
@@ -984,7 +995,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // produced grey / corrupted output even in foreground, so the design
   // was reverted: hardware decoder only, always invalidated on background.
 
-  public func applicationDidEnterBackground(_ application: UIApplication) {
+  public func applicationDidEnterBackground(_: UIApplication) {
     isInBackground = true
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
@@ -993,19 +1004,20 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
   }
 
-  public func applicationWillEnterForeground(_ application: UIApplication) {
+  public func applicationWillEnterForeground(_: UIApplication) {
     isInBackground = false
     NSLog("[MWDAT] App entering foreground — HEVC decoder will be recreated on next frame")
   }
 
   // MARK: - Frame Processing (zero-copy via Texture API)
+
   /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
   /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
   private func processAndSendFrame(_ videoFrame: VideoFrame) {
     // When background streaming is NOT enabled, keep the existing behaviour:
     // drop every frame while backgrounded, since iOS forbids GPU access and
     // the Flutter raster thread is suspended.
-    if isInBackground && !backgroundController.isEnabled {
+    if isInBackground, !backgroundController.isEnabled {
       return
     }
 
@@ -1071,13 +1083,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     lastFrameSendTime = now
     frameCounter += 1
 
-    if frameCounter % 30 == 0 && timeSinceLastFrame > 0 {
+    if frameCounter % 30 == 0, timeSinceLastFrame > 0 {
       let actualFPS = 1.0 / timeSinceLastFrame
       NSLog("[MWDAT] \(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
     }
 
     guard let texture = pixelBufferTexture,
-          let texId = textureId else {
+          let texId = textureId
+    else {
       return
     }
 
@@ -1139,7 +1152,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let status = VTDecompressionSessionDecodeFrame(
       session,
       sampleBuffer: sampleBuffer,
-      flags: [],  // synchronous decode
+      flags: [], // synchronous decode
       infoFlagsOut: &flagOut,
       outputHandler: { decodeStatus, _, imageBuffer, _, _ in
         if decodeStatus == noErr {
@@ -1159,7 +1172,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - Stream Session
 
   func startStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard let args = call.arguments as? [String : Any] else {
+    guard let args = call.arguments as? [String: Any] else {
       result(FlutterError(code: "INVALID_ARGS", message: "arguments missing", details: nil))
       return
     }
@@ -1190,7 +1203,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // reference, so check the actual state. Same selection → return the
       // existing texture; a *different* device → caller must stop first.
       if let existing = streamSession {
-        if existing.state != .stopped && existing.state != .stopping {
+        if existing.state != .stopped, existing.state != .stopping {
           if requestedDeviceId == pinnedDeviceId {
             if let texId = textureId {
               result(texId)
@@ -1307,7 +1320,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
   }
 
-  func stopStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
+  func stopStreamSession(call _: FlutterMethodCall, result: @escaping FlutterResult) {
     Task { @MainActor in
       guard streamSession != nil else {
         // No stream, but a failed start can leave a started DeviceSession
@@ -1392,7 +1405,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           respond(FlutterError(
             code: "CAPTURE_PHOTO_FAILED",
             message: "Photo capture did not complete — check device storage.",
-            details: "photoCaptureFailed"))
+            details: "photoCaptureFailed"
+          ))
         }
       }
 
@@ -1403,7 +1417,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         respond(FlutterError(
           code: "CAPTURE_NOT_READY",
           message: "Capture request was not accepted.",
-          details: "captureNotReady"))
+          details: "captureNotReady"
+        ))
         return
       }
 
@@ -1416,7 +1431,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         respond(FlutterError(
           code: "CAPTURE_PHOTO_FAILED",
           message: "Photo capture timed out.",
-          details: "photoCaptureTimeout"))
+          details: "photoCaptureTimeout"
+        ))
       }
     }
   }
@@ -1485,23 +1501,23 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// Canonical device-type code, kept identical to the Android side.
   private static func deviceTypeCode(_ type: MWDATCore.DeviceType) -> String {
     switch type {
-      case .rayBanMeta:         return "rayBanMeta"
-      case .oakleyMetaHSTN:     return "oakleyMetaHSTN"
-      case .oakleyMetaVanguard: return "oakleyMetaVanguard"
-      case .metaRayBanDisplay:  return "metaRayBanDisplay"
-      case .rayBanMetaOptics:   return "rayBanMetaOptics"
-      case .metaGlasses:        return "metaGlasses"
-      case .unknown:            return "unknown"
-      @unknown default:         return "unknown"
+    case .rayBanMeta: return "rayBanMeta"
+    case .oakleyMetaHSTN: return "oakleyMetaHSTN"
+    case .oakleyMetaVanguard: return "oakleyMetaVanguard"
+    case .metaRayBanDisplay: return "metaRayBanDisplay"
+    case .rayBanMetaOptics: return "rayBanMetaOptics"
+    case .metaGlasses: return "metaGlasses"
+    case .unknown: return "unknown"
+    @unknown default: return "unknown"
     }
   }
 
   /// Canonical link-state code, kept identical to the Android side.
   private static func linkStateCode(_ state: MWDATCore.LinkState) -> String {
     switch state {
-      case .disconnected: return "disconnected"
-      case .connecting:   return "connecting"
-      case .connected:    return "connected"
+    case .disconnected: return "disconnected"
+    case .connecting: return "connecting"
+    case .connected: return "connected"
     }
   }
 
@@ -1510,35 +1526,35 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     _ compatibility: MWDATCore.Compatibility
   ) -> String {
     switch compatibility {
-      case .undefined:            return "undefined"
-      case .compatible:           return "compatible"
-      case .deviceUpdateRequired: return "deviceUpdateRequired"
-      case .sdkUpdateRequired:    return "sdkUpdateRequired"
-      @unknown default:           return "undefined"
+    case .undefined: return "undefined"
+    case .compatible: return "compatible"
+    case .deviceUpdateRequired: return "deviceUpdateRequired"
+    case .sdkUpdateRequired: return "sdkUpdateRequired"
+    @unknown default: return "undefined"
     }
   }
 
   private static func parseStreamQuality(_ value: String?) -> StreamQuality {
     switch value?.lowercased() {
-      case "high":
-        return .high
-      case "low":
-        return .low
-      case "medium":
-        return .medium
-      default:
-        return .high
+    case "high":
+      return .high
+    case "low":
+      return .low
+    case "medium":
+      return .medium
+    default:
+      return .high
     }
   }
 
   private static func resolution(for quality: StreamQuality) -> StreamingResolution {
     switch quality {
-      case .high:
-        return .high
-      case .low:
-        return .low
-      case .medium:
-        return .medium
+    case .high:
+      return .high
+    case .low:
+      return .low
+    case .medium:
+      return .medium
     }
   }
 }
