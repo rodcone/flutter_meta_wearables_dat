@@ -147,6 +147,10 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     );
   }
 
+  Future<bool> openFirmwareUpdate() {
+    throw UnimplementedError('openFirmwareUpdate() has not been implemented.');
+  }
+
   Stream<DeviceState> deviceStateStream() {
     throw UnimplementedError('deviceStateStream() has not been implemented.');
   }

@@ -257,6 +257,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       disableBackgroundStreaming(result: result)
     case "openDATGlassesAppUpdate":
       openDATGlassesAppUpdate(result: result)
+    case "openFirmwareUpdate":
+      openFirmwareUpdate(result: result)
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -281,6 +283,36 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         case .metaAINotInstalled:
           code = "metaAINotInstalled"
           message = "Meta AI app is not installed. Please install it to update the glasses app."
+        case .notRegistered:
+          code = "notRegistered"
+          message = "App is not registered with Meta AI glasses. Complete registration first."
+        @unknown default:
+          code = "unknown"
+          message = "Unknown navigation error: \(e)"
+        }
+        result(FlutterError(code: code, message: message, details: e.rawValue))
+      } catch {
+        result(FlutterError(code: "NAVIGATION_ERROR", message: error.localizedDescription, details: nil))
+      }
+    }
+  }
+
+  /// Opens the Meta AI app to the firmware update screen for the paired
+  /// glasses. Companion to a `Compatibility` of `.deviceUpdateRequired` —
+  /// a different destination from `openDATGlassesAppUpdate`, which updates
+  /// the DAT app on the glasses rather than their firmware.
+  private func openFirmwareUpdate(result: @escaping FlutterResult) {
+    Task { @MainActor in
+      do {
+        try await Wearables.shared.openFirmwareUpdate()
+        result(true)
+      } catch let e as MWDATCore.NavigationError {
+        let code: String
+        let message: String
+        switch e {
+        case .metaAINotInstalled:
+          code = "metaAINotInstalled"
+          message = "Meta AI app is not installed. Please install it to update the glasses firmware."
         case .notRegistered:
           code = "notRegistered"
           message = "App is not registered with Meta AI glasses. Complete registration first."
@@ -803,7 +835,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   @MainActor
   private func performTeardownStreamOnly() async {
-    NSLog("[MWDAT] teardownStreamOnly — stopping camera, awaiting stop cascade")
+    // Monitoring rebuilds and stopped-session observations call this
+    // defensively several times around app start with nothing to tear
+    // down; only narrate when there is an actual stream to stop.
+    if camera != nil || streamSession != nil || textureId != nil {
+      NSLog("[MWDAT] teardownStreamOnly — stopping camera, awaiting stop cascade")
+    }
 
     // Capture identities and stop BEFORE the first suspension below. While this
     // method is suspended the stream must already be `.stopping`: otherwise a

@@ -990,6 +990,22 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.openDATGlassesAppUpdate();
   }
 
+  /// Opens the Meta AI app to the firmware update screen for the paired
+  /// glasses. Call this when a device's [WearableDevice.compatibility]
+  /// reports [WearableCompatibility.deviceUpdateRequired] — a different
+  /// destination from [openDATGlassesAppUpdate], which updates the DAT app
+  /// on the glasses rather than their firmware.
+  ///
+  /// iOS only for now; on Android the call fails with a `PlatformException`
+  /// of code `UNSUPPORTED` until the Android SDK surface is verified.
+  ///
+  /// Returns `true` if the navigation succeeded. Throws a `PlatformException`
+  /// with code `metaAINotInstalled` if the Meta AI app isn't installed, or
+  /// `notRegistered` if the app hasn't completed registration.
+  static Future<bool> openFirmwareUpdate() {
+    return MetaWearablesDatPlatform.instance.openFirmwareUpdate();
+  }
+
   /// Stream of [DeviceState] snapshots for the active device.
   ///
   /// Currently emits whenever the device's [ThermalLevel] changes. Subscribe

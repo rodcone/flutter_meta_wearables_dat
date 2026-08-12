@@ -345,6 +345,12 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
+  Future<bool> openFirmwareUpdate() async {
+    final ok = await methodChannel.invokeMethod<bool>('openFirmwareUpdate');
+    return ok ?? false;
+  }
+
+  @override
   Stream<DeviceState> deviceStateStream() {
     return deviceStateEventChannel.receiveBroadcastStream().map((
       dynamic event,

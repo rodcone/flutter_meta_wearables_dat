@@ -309,6 +309,13 @@ class MetaWearablesDatPlugin :
             "enableBackgroundStreaming" -> enableBackgroundStreaming(call, result)
             "disableBackgroundStreaming" -> disableBackgroundStreaming(result)
             "openDATGlassesAppUpdate" -> openDATGlassesAppUpdate(result)
+            "openFirmwareUpdate" ->
+                    result.error(
+                            "UNSUPPORTED",
+                            "openFirmwareUpdate is not wired on Android yet; " +
+                                    "the Android SDK surface for it is unverified.",
+                            null
+                    )
             else -> result.notImplemented()
         }
     }
