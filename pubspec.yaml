@@ -1,6 +1,6 @@
 name: flutter_meta_wearables_dat
 description: "Flutter bridge to Meta's Wearables DAT for iOS and Android."
-version: 0.9.0
+version: 0.8.1
 repository: https://github.com/rodcone/flutter_meta_wearables_dat
 
 environment:
