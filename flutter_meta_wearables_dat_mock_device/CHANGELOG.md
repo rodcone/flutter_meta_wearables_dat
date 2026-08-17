@@ -1,3 +1,8 @@
+## 0.8.1
+
+* No functional changes. Version bumped to stay in lockstep with the core
+  `flutter_meta_wearables_dat` 0.8.1 release, which CI enforces.
+
 ## 0.8.0
 
 * Update to Meta Wearables DAT **0.9.0**.
