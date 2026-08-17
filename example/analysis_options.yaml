@@ -10,6 +10,14 @@ analyzer:
     lines_longer_than_80_chars: ignore
     sort_constructors_first: ignore
     sort_pub_dependencies: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 linter:
   rules:
     public_member_api_docs: false
