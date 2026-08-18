@@ -1047,12 +1047,18 @@ class MetaWearablesDatPlugin :
         val existingStream = stream
         if (existingStream != null) {
             val st = existingStream.state.value
+            // PAUSED is deliberately NOT live. The SDK exposes no public
+            // resume, so teardown + recreate is the only recovery available to
+            // an app — and treating a paused stream as live returned the caller
+            // its existing, frozen texture id without restarting anything.
+            // Mirrors the iOS guard.
             val live =
                     st != com.meta.wearable.dat.camera.types.StreamState.STOPPED &&
                             st !=
                                     com.meta.wearable.dat.camera.types.StreamState
                                             .STOPPING &&
-                            st != com.meta.wearable.dat.camera.types.StreamState.CLOSED
+                            st != com.meta.wearable.dat.camera.types.StreamState.CLOSED &&
+                            st != com.meta.wearable.dat.camera.types.StreamState.PAUSED
             if (live) {
                 if (deviceId == pinnedDeviceId) {
                     val entry = textureEntry

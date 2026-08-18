@@ -89,6 +89,15 @@ enum StreamSessionState {
   streaming(4),
 
   /// The session is temporarily paused.
+  ///
+  /// The DAT SDK pauses the stream itself — most device-initiated stops arrive
+  /// as this state rather than as an error, and the frame feed goes silent
+  /// while it lasts. There is no public resume: recovery is
+  /// [MetaWearablesDat.stopStreamSession] followed by a fresh
+  /// [MetaWearablesDat.startStreamSession].
+  ///
+  /// Treat it as terminal for rendering purposes. Left alone, your `Texture`
+  /// keeps showing its last frame and nothing signals otherwise.
   paused(5);
 
   const StreamSessionState(this.value);
