@@ -456,7 +456,7 @@ class _ReconnectingView extends StatelessWidget {
 ///
 /// The aspect ratio is driven by the native frame dimensions surfaced via
 /// `videoStreamSizeStream`. Until the first size arrives we fall back to a
-/// 9:16 portrait frame, which matches the Ray-Ban Meta's default stream
+/// 1080x1920 portrait frame, which matches the Ray-Ban Meta's default stream
 /// orientation.
 class _TextureStreamWidget extends StatelessWidget {
   final int textureId;
@@ -469,13 +469,22 @@ class _TextureStreamWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final aspectRatio = videoStreamSize?.aspectRatio ?? 9 / 16;
     return ColoredBox(
       color: Colors.black,
-      child: Center(
-        child: AspectRatio(
-          aspectRatio: aspectRatio,
-          child: Texture(textureId: textureId),
+      child: ClipRect(
+        child: FittedBox(
+          // `cover` fills the viewport so there are no letterbox bars. The
+          // frame is scaled until both axes are covered and the overflow is
+          // clipped, so whichever axis is proportionally shorter than the
+          // viewport loses field of view. `contain` instead of `cover` brings
+          // the bars back and keeps the whole frame visible.
+          fit: BoxFit.cover,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(
+            width: videoStreamSize?.width.toDouble() ?? 1080,
+            height: videoStreamSize?.height.toDouble() ?? 1920,
+            child: Texture(textureId: textureId),
+          ),
         ),
       ),
     );
