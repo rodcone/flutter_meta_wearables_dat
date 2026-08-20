@@ -320,15 +320,21 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - Background streaming
 
   private func enableBackgroundStreaming(result: @escaping FlutterResult) {
-    do {
-      try backgroundController.enable()
-      result(nil)
-    } catch {
-      result(FlutterError(
-        code: "BACKGROUND_STREAMING_ERROR",
-        message: "Failed to enable background streaming: \(error.localizedDescription). Verify the host app's Info.plist declares the 'audio' UIBackgroundMode.",
-        details: nil
-      ))
+    // The controller does its AVAudioSession work off the main thread, so the
+    // result is delivered from its completion — hopped back to main because
+    // FlutterResult must be called there.
+    backgroundController.enable { error in
+      DispatchQueue.main.async {
+        guard let error else {
+          result(nil)
+          return
+        }
+        result(FlutterError(
+          code: "BACKGROUND_STREAMING_ERROR",
+          message: "Failed to enable background streaming: \(error.localizedDescription). Verify the host app's Info.plist declares the 'audio' UIBackgroundMode.",
+          details: nil
+        ))
+      }
     }
   }
 
