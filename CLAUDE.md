@@ -29,8 +29,10 @@ cd example && flutter build apk
 # Clean
 cd example && flutter clean
 
-# iOS pod sync after framework changes
-cd example/ios && pod update
+# iOS: force SwiftPM to re-resolve after framework changes (example app is
+# deintegrated from CocoaPods and builds via SwiftPM)
+rm -rf example/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+rm -rf example/ios/Runner.xcworkspace/xcshareddata/swiftpm
 
 # Android dependency sync
 cd example/android && ./gradlew build --refresh-dependencies
@@ -92,7 +94,7 @@ Deep link handling via `app_links` package for DAT registration callbacks.
 ## Updating DAT Versions
 
 See `doc/MAINTAINERS.md` for detailed steps. Currently on **DAT 0.9.0** on both platforms. **Always update both plugins together** — core alone is not enough.
-- **iOS**: Download xcframeworks from github.com/facebook/meta-wearables-dat-ios releases → replace **all three**: `MWDATCore` + `MWDATCamera` in `ios/flutter_meta_wearables_dat/Frameworks/` **and** `MWDATMockDevice` in `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks/` → run `./scripts/thin-xcframeworks.sh` → `pod update` in example/ios (or delete the workspace's `swiftpm/` dirs under SPM mode). Skip `MWDATDisplay` and `MWDATMockDeviceTestClient` xcframeworks — not vendored. Both CocoaPods and Swift Package Manager are supported; CI exercises both via the `ios-build` matrix.
+- **iOS**: Download xcframeworks from github.com/facebook/meta-wearables-dat-ios releases → replace **all three**: `MWDATCore` + `MWDATCamera` in `ios/flutter_meta_wearables_dat/Frameworks/` **and** `MWDATMockDevice` in `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks/` → run `./scripts/thin-xcframeworks.sh` → delete the example workspace's `swiftpm/` dirs so SwiftPM re-resolves against the new binaries. Skip `MWDATDisplay` and `MWDATMockDeviceTestClient` xcframeworks — not vendored. Both plugins still ship a podspec **and** a `Package.swift`, per Flutter's guidance that plugins support both until further notice — but the **example app is now SwiftPM-only** (fully deintegrated from CocoaPods), so `ios-build` exercises only the SwiftPM path. The podspecs ship unexercised by CI; CocoaPods' registry goes read-only on 2 December 2026.
 - **Android**: Update `ext.mwdat_version` in both `android/build.gradle` files (core + mock add-on, must match) → sync Gradle. The `versions-in-sync` CI job enforces this.
 
 ## Linting

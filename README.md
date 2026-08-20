@@ -265,7 +265,9 @@ Do **not** add the ExternalAccessory keys below — while they are present the S
 </array>
 ```
 
-> The example app is configured for **Bluetooth Classic** — it needs no entitlements and no paid Apple Developer account, so it's the fastest thing to get running. Both recipes are one comment-block apart in [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements) if you want to try Wi‑Fi. Wi‑Fi is still the recommendation for production apps that need the bandwidth.
+> The example app is configured for **Bluetooth Classic**, not the Wi‑Fi transport recommended above, and that is deliberate: Wi‑Fi needs the *Access WiFi information* and *Hotspot* capabilities, and per Apple's [supported capabilities table](https://developer.apple.com/help/account/reference/supported-capabilities-ios/) neither is available to a free Apple Developer account. Bluetooth Classic needs no entitlements at all (`UISupportedExternalAccessoryProtocols` is an `Info.plist` key, not a capability), so the example signs and runs on a free account. It also connects near-instantly, where Wi‑Fi adds roughly 10 seconds before the first frame while the phone associates to the glasses' access point.
+>
+> Wi‑Fi remains the recommendation for production apps that need the bandwidth. Both recipes are one comment-block apart in [`example/ios/Runner/Info.plist`](example/ios/Runner/Info.plist) and [`example/ios/Runner/Runner.entitlements`](example/ios/Runner/Runner.entitlements) — switch, then delete the app from the device before reinstalling so stale accessory pairing state doesn't keep the old transport.
 
 > **App Store note.** Transport choice does **not** affect App Store eligibility. The DAT SDK links `ExternalAccessory.framework` regardless of transport (Apple's binary scanner flags this MFi dependency); see [Publishing and availability](#publishing-and-availability) for current program eligibility. Wi‑Fi's advantage is bandwidth, not publishability.
 

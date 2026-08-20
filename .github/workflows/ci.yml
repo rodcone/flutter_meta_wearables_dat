@@ -146,15 +146,13 @@ jobs:
         working-directory: ${{ matrix.package }}
         run: dart pub global run pana --no-warning --exit-code-threshold 0 .
 
-  # Build the example app on both iOS resolvers. Example app is committed in
-  # its CocoaPods baseline state; on the SPM job Flutter migrates the
-  # pbxproj on the fly. Catches regressions on either path.
+  # Build the example app. The example is committed fully deintegrated from
+  # CocoaPods and its pbxproj carries the SwiftPM package references, so only
+  # the SwiftPM path is covered here. Both plugins still ship a podspec for
+  # CocoaPods consumers, but nothing in this repo builds through it — see
+  # "Test Build" in doc/MAINTAINERS.md.
   ios-build:
     runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        resolver: [cocoapods, spm]
     steps:
       - uses: actions/checkout@v4
       # `BackgroundStreamingController.swift` uses iOS-18+ AVAudioSession APIs
@@ -166,13 +164,13 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Configure iOS resolver (${{ matrix.resolver }})
+      # Both plugins are Swift-Package-only — the podspecs are gone. SwiftPM is
+      # on by default from Flutter 3.44, so there is nothing to configure; this
+      # is asserted rather than set so a Flutter that silently flipped the
+      # default back fails here instead of building the wrong integration.
+      - name: Assert SwiftPM is the resolver
         run: |
-          if [ "${{ matrix.resolver }}" = "spm" ]; then
-            flutter config --enable-swift-package-manager
-          else
-            flutter config --no-enable-swift-package-manager
-          fi
+          flutter config --list | grep -q 'enable-swift-package-manager: true'
       - name: flutter pub get
         working-directory: example
         run: flutter pub get

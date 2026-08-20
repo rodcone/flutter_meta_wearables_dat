@@ -5,6 +5,11 @@ publish_to: 'none'
 
 environment:
   sdk: ^3.9.2
+  # The Xcode project is deintegrated from CocoaPods and carries SwiftPM
+  # package references, so it only builds on a Flutter that has SwiftPM on by
+  # default. Without this, an older Flutter fails deep in xcodebuild with an
+  # unresolvable-package error instead of here with a clear message.
+  flutter: '>=3.44.0'
 
 dependencies:
   flutter:
