@@ -134,6 +134,7 @@ Before planning a public launch, confirm your current eligibility with Meta. See
 - Meta Ray-Ban Display
 - Oakley Meta HSTN
 - Oakley Meta Vanguard
+- Meta AI Glasses (Starfire, Adventurer, Fury)
 
 ## Setup
 
