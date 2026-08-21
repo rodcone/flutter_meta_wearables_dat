@@ -1483,7 +1483,12 @@ class MetaWearablesDatPlugin :
         videoJob = null
         streamErrorJob?.cancel()
         streamErrorJob = null
-        streamStateStreamHandler?.stream = null
+        // Detach *and* tell Dart. A bare `stream = null` cancels the state
+        // collector before `stream.stop()` below produces STOPPING / STOPPED,
+        // so every plugin-initiated teardown reached Dart as silence — a live
+        // texture id and a frozen preview with nothing to react to. Matches the
+        // iOS fix from 0.8.1.
+        streamStateStreamHandler?.detachEmittingStopped()
         // Stop BOTH, stream first — they do different jobs and neither
         // substitutes for the other:
         //
