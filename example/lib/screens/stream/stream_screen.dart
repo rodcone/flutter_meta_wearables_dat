@@ -454,15 +454,19 @@ class _ReconnectingView extends StatelessWidget {
 /// The native side pushes CVPixelBuffer / SurfaceTexture frames directly —
 /// no JPEG encoding, no byte copying, no Dart-side decoding.
 ///
-/// The frame dimensions come from the native side via
-/// `videoStreamSizeStream`. Actual resolution varies with the requested
-/// [StreamQuality] and with the device, commonly a 720x1280-class portrait
-/// frame, so nothing here assumes a fixed size.
-///
-/// Only the ratio of the values below is used, since [BoxFit.cover] scales the
-/// frame to the viewport either way. They are a 9:16 portrait placeholder to
-/// orient the first frame correctly, replaced as soon as a real size arrives.
+/// The shape of the frame comes from [VideoStreamSize.aspectRatio], surfaced
+/// natively via `videoStreamSizeStream`. Resolution follows the requested
+/// [StreamQuality] (the SDK fixes high at 720x1280, medium at 504x896, low at
+/// 360x640), but every tier is 9:16, so the ratio is invariant and only the
+/// ratio matters here: [BoxFit.cover] scales the frame to the viewport either
+/// way. That is also why the pre-first-frame fallback below is 9:16 rather
+/// than a guess.
 class _TextureStreamWidget extends StatelessWidget {
+  /// Arbitrary base the aspect ratio is expressed against. Any value works
+  /// since only the resulting ratio is read; this is large enough to keep the
+  /// derived width well clear of sub-pixel rounding.
+  static const double _aspectRatioBase = 1000;
+
   final int textureId;
   final VideoStreamSize? videoStreamSize;
 
@@ -477,16 +481,18 @@ class _TextureStreamWidget extends StatelessWidget {
       color: Colors.black,
       child: ClipRect(
         child: FittedBox(
-          // `cover` fills the viewport so there are no letterbox bars. The
-          // frame is scaled until both axes are covered and the overflow is
-          // clipped, so whichever axis is proportionally shorter than the
-          // viewport loses field of view. `contain` instead of `cover` brings
-          // the bars back and keeps the whole frame visible.
+          // `cover` fills the viewport so there are no letterbox bars. It
+          // scales by the larger of the two axis ratios, so the axis in which
+          // the frame is proportionally *longer* than the viewport overflows
+          // and is clipped. A 9:16 frame on a taller-than-16:9 phone therefore
+          // loses width: on a 393x852 viewport it scales to 479 wide and about
+          // 18% of the frame's width is cropped. `contain` instead of `cover`
+          // brings the bars back and keeps the whole frame visible.
           fit: BoxFit.cover,
           clipBehavior: Clip.hardEdge,
           child: SizedBox(
-            width: videoStreamSize?.width.toDouble() ?? 720,
-            height: videoStreamSize?.height.toDouble() ?? 1280,
+            height: _aspectRatioBase,
+            width: _aspectRatioBase * (videoStreamSize?.aspectRatio ?? 9 / 16),
             child: Texture(textureId: textureId),
           ),
         ),

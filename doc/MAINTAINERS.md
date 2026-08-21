@@ -89,7 +89,7 @@ cd example && flutter clean
 
 Then a Clean Build Folder in Xcode (`Cmd+Shift+K`) if you build from there.
 
-SwiftPM caches binary-target checksums in `Package.resolved`; clearing the workspace state forces a fresh resolve against the new xcframeworks.
+Note this is hygiene rather than a checksum problem: both plugins use `.binaryTarget(path:)`, which carries no checksum, and neither committed `Package.resolved` contains an MWDAT entry at all (they only pin the remote packages that `image_picker` and friends pull in). Clearing the workspace state forces Xcode to re-read the replaced xcframeworks instead of reusing a stale build graph.
 
 ### 4. Implement API Changes
 
@@ -107,7 +107,9 @@ cd example && flutter clean && flutter build ios --release --no-codesign
 
 Then run the example app on a device or simulator to verify the new DAT version actually works at runtime. CI's `ios-build` job covers this on every PR.
 
-**The podspec path is not covered.** The example app is deintegrated from CocoaPods, so nothing in this repo builds the plugins through their podspecs any more. The podspecs are still shipped and still need their `s.version` bumped and their file/framework lists kept in step with `Package.swift` — but a break there will not be caught by CI or by a local example build. Verify it by hand against a CocoaPods app if you change source paths, system frameworks, or vendored frameworks.
+**The podspec path is covered by CI, not by the example app.** The example app is deintegrated from CocoaPods, so a local example build only ever exercises SwiftPM. The `cocoapods-build` CI job scaffolds a throwaway app, adds both plugins as path dependencies, disables SwiftPM and builds through the podspecs, then asserts both appear in the generated `Podfile.lock`. Changes to source paths, system frameworks, or vendored frameworks still have to be applied to *both* manifests, but a podspec break will now fail CI rather than reaching consumers.
+
+To reproduce it locally, follow the same steps the job does: `flutter config --no-enable-swift-package-manager`, `flutter create` a scratch app, `flutter pub add` both plugins by path, raise `IPHONEOS_DEPLOYMENT_TARGET` and the Podfile `platform` to 17.2, then build. Re-enable SwiftPM afterwards.
 
 ## iOS resolver layout
 

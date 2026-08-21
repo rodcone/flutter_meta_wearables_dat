@@ -117,4 +117,6 @@ for xcf in "${xcframeworks[@]}"; do
   fi
 done
 
-echo "Done. Delete example/ios/*/xcshareddata/swiftpm to force a fresh SwiftPM resolve."
+echo "Done. Delete both swiftpm state dirs to force a fresh SwiftPM resolve:"
+echo "  example/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
+echo "  example/ios/Runner.xcworkspace/xcshareddata/swiftpm"
