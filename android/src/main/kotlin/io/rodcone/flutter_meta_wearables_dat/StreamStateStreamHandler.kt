@@ -42,6 +42,31 @@ internal class StreamStateStreamHandler : EventChannel.StreamHandler {
         eventSink = null
     }
 
+    /**
+     * Detaches from the current stream and pushes a terminal `stopped` to Dart.
+     *
+     * A plain `stream = null` detaches *silently*: [resubscribe] cancels the
+     * collector and returns early on a null stream, so the SDK's STOPPING /
+     * STOPPED transitions produced by the subsequent `stream.stop()` are never
+     * observed. That left every plugin-initiated teardown invisible to Dart —
+     * the app kept a live texture id and a frozen preview with no state change
+     * and no error to act on. iOS fixed this in 0.8.1; Android did not, which
+     * is why the background contract needs it here.
+     *
+     * Safe to double-emit: if the SDK also reported STOPPED before we detached,
+     * Dart sees the same terminal state twice.
+     *
+     * Emits synchronously. Callers run on `Dispatchers.Main.immediate` — the
+     * same dispatcher backing [scope] — so the sink is reachable directly and
+     * the terminal event cannot be reordered behind a restart that re-seeds the
+     * channel.
+     */
+    fun detachEmittingStopped() {
+        stream = null
+        val sink = eventSink ?: return
+        sink.success(STOPPED_VALUE)
+    }
+
     private fun resubscribe() {
         job?.cancel()
         job = null
@@ -62,6 +87,12 @@ internal class StreamStateStreamHandler : EventChannel.StreamHandler {
     }
 
     companion object {
+        /**
+         * The Dart-facing value for `stopped`, used by [detachEmittingStopped].
+         * Derived from [mapState] rather than hard-coded so the two cannot drift.
+         */
+        val STOPPED_VALUE: Int = mapState(StreamState.STOPPED)
+
         /**
          * Maps Android SDK StreamState to int values expected by Dart.
          *

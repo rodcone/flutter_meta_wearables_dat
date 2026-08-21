@@ -979,11 +979,24 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let pts = CMSampleBufferGetPresentationTimeStamp(videoFrame.sampleBuffer)
     let ptsUs: Int64 = pts.isValid ? Int64(CMTimeGetSeconds(pts) * 1_000_000) : 0
 
-    // Forward the hvc1 compressed sample to Dart BEFORE decoding — this lets
-    // apps record the raw bitstream even when no decode path is needed (e.g.
-    // no texture subscriber, or we're backgrounded with no GPU access).
-    if currentVideoCodec == .hvc1, videoFrameHandler.hasListener {
-      videoFrameHandler.emitHvc1(sampleBuffer: videoFrame.sampleBuffer, ptsUs: ptsUs)
+    // Forward the frame to Dart BEFORE the background bail-out, the FPS
+    // throttle, and any decode. Recording subscribers want every frame in both
+    // foreground and background, and neither branch here touches the GPU: hvc1
+    // forwards the CMBlockBuffer the sample already carries, and raw reads the
+    // CVPixelBuffer already attached to it.
+    //
+    // `emitRaw` used to live further down, past `if isInBackground { return }`
+    // and past the throttle. That made two promises false at once: with
+    // `VideoCodec.raw` nothing reached `videoFramesStream()` while backgrounded
+    // even with background streaming on, and raw subscribers silently got a
+    // throttled subset of frames while hvc1 subscribers got all of them.
+    // Android has no such gate; iOS now matches it.
+    if videoFrameHandler.hasListener {
+      if currentVideoCodec == .hvc1 {
+        videoFrameHandler.emitHvc1(sampleBuffer: videoFrame.sampleBuffer, ptsUs: ptsUs)
+      } else if let rawBuffer = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer) {
+        videoFrameHandler.emitRaw(pixelBuffer: rawBuffer, ptsUs: ptsUs)
+      }
     }
 
     // While backgrounded with bg streaming on (the only way we reach here in
