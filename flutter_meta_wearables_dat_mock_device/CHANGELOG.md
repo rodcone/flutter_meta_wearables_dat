@@ -1,3 +1,7 @@
+## 0.8.1
+
+* Align version with core package's 0.8.1 release. No API changes.
+
 ## 0.8.0
 
 * Update to Meta Wearables DAT **0.9.0**.
