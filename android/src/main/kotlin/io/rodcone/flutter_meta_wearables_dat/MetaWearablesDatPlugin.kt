@@ -325,16 +325,36 @@ class MetaWearablesDatPlugin :
 
     private fun handleEnteredBackground() {
         isAppInBackground = true
-        // The background stop lands in the next PR. Logged so the hook can be
-        // verified on device before anything acts on it.
+        // Background streaming ON is the opt-in: keep everything alive.
+        if (backgroundStreamingStarted) return
+        // Nothing live means nothing to stop. Without this, every backgrounding
+        // would emit a terminal `stopped` at idle apps that merely subscribed
+        // to the state channel.
+        if (stream == null && session == null) return
+
+        Log.d(TAG, "lifecycle: stopping session (background streaming off)")
+        // Tell Dart why, before the terminal `stopped`, so consumers can tell a
+        // deliberate stop from a fault and skip their retry logic.
+        streamSessionErrorStreamHandler?.sendError(
+                "stoppedForBackground",
+                "The app was backgrounded and background streaming is not enabled.",
+                bypassSuppression = true,
+        )
+        // Everything after this is teardown noise. The SDK emits
+        // `videoStreamingError` as the pipeline comes down, which is true when
+        // the stream died on its own and false when we stopped it on purpose.
+        // Bounded so a stalled teardown cannot hide unrelated later errors.
+        streamSessionErrorStreamHandler?.beginBackgroundStopSuppression(scope)
+        // The whole session, matching iOS and Meta's CameraAccess sample.
         //
-        // Unlike iOS there is no suspension deadline here: Android does not
-        // freeze the process on backgrounding, so the stop cascade can complete
-        // normally and needs no equivalent of iOS's beginBackgroundTask
-        // assertion. Do not port that here.
-        if (!backgroundStreamingStarted && stream != null) {
-            Log.d(TAG, "lifecycle: would stop stream (background streaming off) — not yet wired")
-        }
+        // Note there is no equivalent of iOS's beginBackgroundTask assertion
+        // here, deliberately: Android does not freeze the process on
+        // backgrounding, so the stop cascade completes normally. Do not port
+        // that machinery over.
+        teardownSession()
+        // Teardown is synchronous here, so the window can close immediately
+        // rather than riding out the timeout.
+        streamSessionErrorStreamHandler?.endBackgroundStopSuppression()
     }
 
     private fun handleEnteredForeground() {
@@ -1079,10 +1099,32 @@ class MetaWearablesDatPlugin :
 
     // region Streaming
 
+    /**
+     * True when starting would immediately contradict the background contract.
+     * Checked at the commit point too, not just on entry, because a start can
+     * be in flight when the app backgrounds.
+     */
+    private val mustNotStreamNow: Boolean
+        get() = isAppInBackground && !backgroundStreamingStarted
+
     private fun startStreamSession(call: MethodCall, result: Result) {
         val app = application
         if (app == null) {
             result.error("STREAM_ERROR", "Application context is not available.", null)
+            return
+        }
+
+        // Refuse outright while backgrounded — the belt to the contract's
+        // braces. Even a consumer whose retry logic ignores
+        // `stoppedForBackground` cannot reactivate the glasses camera from the
+        // background. Same error code as iOS so Dart handling is uniform.
+        if (mustNotStreamNow) {
+            result.error(
+                    "APP_BACKGROUNDED",
+                    "Cannot start a stream while the app is backgrounded. " +
+                            "Call enableBackgroundStreaming() first if you need background capture.",
+                    null,
+            )
             return
         }
 
@@ -1323,6 +1365,20 @@ class MetaWearablesDatPlugin :
                 if (failure != null) {
                     teardownStreamOnly()
                     result.error("STREAM_ERROR", failure, null)
+                    return@launch
+                }
+                // Last commit point. Bringing a session up can take seconds,
+                // which is ample time for the user to background the app
+                // mid-start. Committing anyway would leave a live stream
+                // running in a backgrounded app that nothing will stop.
+                if (mustNotStreamNow) {
+                    Log.d(TAG, "app backgrounded during start — abandoning")
+                    teardownStreamOnly()
+                    result.error(
+                            "APP_BACKGROUNDED",
+                            "The app was backgrounded before the stream could start.",
+                            null,
+                    )
                     return@launch
                 }
                 result.success(textureId)

@@ -447,7 +447,31 @@ class StreamSessionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The plugin stopped the session on purpose because the app was
+  /// backgrounded without `enableBackgroundStreaming()`. Not a failure, and
+  /// emphatically not something to retry: restarting here would reactivate the
+  /// glasses camera from the background, which is what the contract forbids —
+  /// and the plugin would reject it with `APP_BACKGROUNDED` anyway.
+  static const String _backgroundStopCode = 'stoppedForBackground';
+
   Future<void> _setError(StreamSessionError error) async {
+    if (error.code == _backgroundStopCode) {
+      // Disarm recovery before the terminal `stopped` lands. Without this the
+      // SDK's own `videoStreamingError` death-rattle races the deliberate stop
+      // and `_scheduleRecovery` restarts a session we just chose to end.
+      _streamingIntended = false;
+      _recoveryAttempts = 0;
+      _cancelRecovery();
+      // No banner: the user backgrounded the app, they know why it stopped.
+      // The terminal `stopped` clears the texture and re-enables Start.
+      debugPrint('[MetaWearablesDAT] session stopped for background');
+      notifyListeners();
+      return;
+    }
+    return _setStreamError(error);
+  }
+
+  Future<void> _setStreamError(StreamSessionError error) async {
     // A terminal error has already told the user what to do. The SDK keeps
     // emitting teardown noise while that stop converges, and letting it through
     // would swap the actionable message ("put your glasses back on") for a

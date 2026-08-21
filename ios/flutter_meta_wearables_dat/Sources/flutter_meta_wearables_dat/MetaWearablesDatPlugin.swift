@@ -149,6 +149,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// `AppLifecycleObserver` for why this does not use `addApplicationDelegate`
   /// or `addSceneDelegate`.
   private let lifecycleObserver = AppLifecycleObserver()
+  /// Keeps the process scheduled long enough for a background-triggered
+  /// teardown to reach the glasses. `.invalid` when none is held.
+  private var backgroundStopTaskId: UIBackgroundTaskIdentifier = .invalid
+  /// Set when the assertion expires, so the stop-confirmation poll in
+  /// `performTeardownStreamOnly` gives up instead of burning the last of our
+  /// budget on a wait that cannot finish.
+  private var abortStopWait = false
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: registrar.messenger())
@@ -893,11 +900,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // left to stop it.
     if let stoppingStream {
       let deadline = Date().addingTimeInterval(streamStopTimeout)
-      while stoppingStream.state != .stopped, Date() < deadline {
+      // `abortStopWait` lets an expiring background assertion cut the wait
+      // short. Continuing to poll after the OS has told us we are out of time
+      // just burns the last of the budget on a wait that cannot complete.
+      while stoppingStream.state != .stopped, Date() < deadline, !abortStopWait {
         try? await Task.sleep(nanoseconds: 50_000_000)
       }
       if stoppingStream.state != .stopped {
-        NSLog("[MWDAT] stream did not reach .stopped within \(streamStopTimeout)s (state: \(stoppingStream.state))")
+        NSLog("[MWDAT] stream did not reach .stopped (state: \(stoppingStream.state), aborted: \(abortStopWait))")
       }
     }
 
@@ -990,12 +1000,77 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       NSLog("[MWDAT] VTDecompressionSession invalidated (app entered background)")
     }
 
-    // The background stop lands in the next PR. Logged here so the hook can be
-    // verified on device — including on a scene-based host, which is the case
-    // `addApplicationDelegate` never reached — before anything acts on it.
-    if !backgroundController.isEnabled && streamSession != nil {
-      NSLog("[MWDAT] lifecycle: would stop stream (background streaming off) — not yet wired")
+    // Background streaming ON is the whole point of the opt-in: keep everything
+    // alive and let the preview resume on foreground.
+    guard !backgroundController.isEnabled else { return }
+    // Nothing streaming means nothing to stop. Without this guard every
+    // backgrounding would emit a terminal `stopped` at idle apps that merely
+    // subscribed to the state channel.
+    guard streamSession != nil || deviceSession != nil else { return }
+
+    NSLog("[MWDAT] lifecycle: stopping session (background streaming off)")
+    // Tell Dart *why* before the terminal `stopped` lands, so consumers can
+    // tell a deliberate stop from a fault and skip their retry logic. Emitted
+    // first because `teardownStreamOnly()` detaches the error handler.
+    streamErrorHandler.sendError(
+      code: "stoppedForBackground",
+      message: "The app was backgrounded and background streaming is not enabled.",
+      bypassSuppression: true
+    )
+    // Everything after this point is teardown noise. The SDK emits
+    // `videoStreamingError` as the pipeline comes down, which is true when the
+    // stream died on its own and false when we stopped it on purpose — the app
+    // asked for this by backgrounding. Bounded so a stalled teardown cannot
+    // hide unrelated later errors.
+    streamErrorHandler.beginBackgroundStopSuppression()
+
+    beginBackgroundStopAssertion()
+    Task { @MainActor in
+      defer {
+        endBackgroundStopAssertion()
+        streamErrorHandler.endBackgroundStopSuppression()
+      }
+      // The whole DeviceSession, not just the stream — matching Meta's
+      // CameraAccess sample. Stopping only the stream leaves the plugin as the
+      // last strong owner of the `Stream`, which is why that path needs a
+      // 3s poll before releasing (see `performTeardownStreamOnly`). Suspension
+      // mid-poll would then strand a live capability on the glasses and break
+      // the *next* start. Stopping the session makes that unreachable: the SDK
+      // owns it, and the capability goes away with it either way.
+      await teardownDeviceSession()
+      NSLog("[MWDAT] lifecycle: session stopped for background")
     }
+  }
+
+  // MARK: - Background stop assertion
+  //
+  // iOS suspends the process shortly after `didEnterBackground` returns. The
+  // teardown below can take up to `streamStopTimeout`, so without an assertion
+  // it would be frozen mid-cascade. Taken synchronously, before the `Task`, or
+  // the process can be suspended before the Task's first hop even runs.
+
+  private func beginBackgroundStopAssertion() {
+    guard backgroundStopTaskId == .invalid else { return }
+    abortStopWait = false
+    backgroundStopTaskId = UIApplication.shared.beginBackgroundTask(
+      withName: "io.rodcone.mwdat.stopStreamOnBackground"
+    ) { [weak self] in
+      // UIKit calls this on the main thread when our budget runs out. It must
+      // be fast and it MUST end the task, or the watchdog kills the app.
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.abortStopWait = true
+        NSLog("[MWDAT] background stop assertion expired — abandoning stop confirmation")
+        self.endBackgroundStopAssertion()
+      }
+    }
+  }
+
+  private func endBackgroundStopAssertion() {
+    guard backgroundStopTaskId != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(backgroundStopTaskId)
+    // Idempotent: ending an already-ended identifier trips a UIKit assertion.
+    backgroundStopTaskId = .invalid
   }
 
   @MainActor
@@ -1194,6 +1269,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   // MARK: - Stream Session
 
+  /// True when starting a stream would immediately contradict the background
+  /// contract. Checked at every commit point in `startStreamSession`, not just
+  /// on entry, because a start can be in flight when the app backgrounds.
+  @MainActor
+  private var mustNotStreamNow: Bool {
+    isInBackground && !backgroundController.isEnabled
+  }
+
   func startStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard let args = call.arguments as? [String : Any] else {
       result(FlutterError(code: "INVALID_ARGS", message: "arguments missing", details: nil))
@@ -1216,6 +1299,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // `.started` forever.
       if isStartingSession {
         result(FlutterError(code: "STREAM_ACTIVE", message: "A stream start is already in progress.", details: nil))
+        return
+      }
+      // Refuse outright while backgrounded. This is the belt to the contract's
+      // braces: even a consumer whose retry logic ignores `stoppedForBackground`
+      // physically cannot reactivate the glasses camera from the background.
+      if mustNotStreamNow {
+        result(FlutterError(
+          code: "APP_BACKGROUNDED",
+          message: "Cannot start a stream while the app is backgrounded. Call enableBackgroundStreaming() first if you need background capture.",
+          details: nil))
         return
       }
       isStartingSession = true
@@ -1340,6 +1433,21 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         self.processAndSendFrame(videoFrame)
+      }
+
+      // Last commit point. A device session can take up to
+      // `deviceSessionStartTimeout` to come up, which is ample time for the
+      // user to background the app mid-start. Committing here anyway would
+      // install a live stream in a backgrounded app that nothing is going to
+      // stop — the one outcome worse than the freeze this all replaces.
+      if mustNotStreamNow {
+        NSLog("[MWDAT] app backgrounded during start — abandoning")
+        await teardownStreamOnly()
+        result(FlutterError(
+          code: "APP_BACKGROUNDED",
+          message: "The app was backgrounded before the stream could start.",
+          details: nil))
+        return
       }
 
       camera = addedCamera

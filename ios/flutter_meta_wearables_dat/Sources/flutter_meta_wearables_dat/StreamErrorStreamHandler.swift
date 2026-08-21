@@ -39,12 +39,61 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     return nil
   }
 
+  /// True while the plugin is deliberately tearing the session down because
+  /// the app was backgrounded. See `beginBackgroundStopSuppression()`.
+  private var isStoppingForBackground = false
+  private var suppressionExpiry: Task<Void, Never>?
+
+  /// Suppresses teardown noise for the duration of a deliberate background
+  /// stop.
+  ///
+  /// The SDK emits `videoStreamingError` as the pipeline comes down. That is
+  /// accurate when the stream died on its own and actively false when *we*
+  /// stopped it: the app implicitly asked for the stop by backgrounding, so
+  /// telling it "video streaming encountered an error" is misinformation, and
+  /// consumers reasonably render it as a red banner.
+  ///
+  /// Bounded on purpose. A teardown that stalls must not be able to hide
+  /// unrelated later errors indefinitely, so the window closes on a timer even
+  /// if `endBackgroundStopSuppression()` never arrives. Meta's CameraAccess
+  /// sample solves the same problem the same way, app-side; doing it here means
+  /// every consumer gets it rather than each rediscovering the banner.
+  ///
+  /// `stoppedForBackground` is emitted *before* this opens, so the app still
+  /// learns why the session ended.
+  @MainActor
+  func beginBackgroundStopSuppression(timeout: Duration = .seconds(5)) {
+    isStoppingForBackground = true
+    suppressionExpiry?.cancel()
+    suppressionExpiry = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: timeout)
+      guard let self, !Task.isCancelled else { return }
+      self.isStoppingForBackground = false
+      self.suppressionExpiry = nil
+    }
+  }
+
+  @MainActor
+  func endBackgroundStopSuppression() {
+    suppressionExpiry?.cancel()
+    suppressionExpiry = nil
+    isStoppingForBackground = false
+  }
+
   /// Pushes a synthesised error onto the event channel. Used by the plugin
   /// to surface errors that happen before a `Stream` exists (e.g.
   /// `DeviceSession.start()` throwing `.noEligibleDevice`).
-  func sendError(code: String, message: String) {
+  ///
+  /// `bypassSuppression` is for the plugin's own deliberate-stop notice, which
+  /// must reach Dart even though it opens the suppression window immediately
+  /// afterwards.
+  func sendError(code: String, message: String, bypassSuppression: Bool = false) {
     guard let events = eventSink else { return }
     Task { @MainActor in
+      guard bypassSuppression || !self.isStoppingForBackground else {
+        NSLog("[MWDAT] suppressed '\(code)' during background stop")
+        return
+      }
       events(["code": code, "message": message])
     }
   }
@@ -65,6 +114,13 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     listenerToken = session.errorPublisher.listen { [weak self] error in
       Task { @MainActor in
         guard let self, self.subscriptionGeneration == generation else { return }
+        // Teardown noise from a stop we asked for is not an error. This is the
+        // path that produced "Video streaming encountered an error" right after
+        // a deliberate background stop.
+        guard !self.isStoppingForBackground else {
+          NSLog("[MWDAT] suppressed stream error during background stop")
+          return
+        }
         // `errorToMap` returns nil for errors that are deliberately not part of
         // this channel's contract (see `.photoCaptureFailed`).
         guard let payload = Self.errorToMap(error) else { return }
