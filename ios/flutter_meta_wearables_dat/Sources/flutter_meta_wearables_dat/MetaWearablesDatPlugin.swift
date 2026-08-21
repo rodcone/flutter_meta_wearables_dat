@@ -40,6 +40,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var deviceSessionStateTask: Task<Void, Never>?
   private var deviceSessionErrorTask: Task<Void, Never>?
   private var deviceAvailabilityTask: Task<Void, Never>?
+  // Debounces the availability watchdog below. `activeDeviceStream()` yields nil
+  // as soon as no device satisfies `AutoDeviceSelector`'s eligibility test, and
+  // that test requires `LinkState.connected` — so a momentary `.connecting`
+  // blip emits nil even though the device never went away. The SDK's own stream
+  // handler is more forgiving than that: it stops the stream only on a genuine
+  // `.disconnected`. Tearing the whole DeviceSession down on the first nil made
+  // the plugin strictly more trigger-happy than the SDK on the same signal, and
+  // nothing re-armed afterwards.
+  private var pendingAvailabilityTeardown: Task<Void, Never>?
+  private let deviceAvailabilityGrace: TimeInterval = 2.0
   // Last error observed on the DeviceSession's errorStream. Used to surface
   // the genuine failure reason when the session stops before reaching
   // `.started` (instead of a fabricated `noEligibleDevice`). Cleared at the
@@ -533,14 +543,43 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func startDeviceAvailabilityMonitoring() {
     deviceAvailabilityTask?.cancel()
+    // A pending teardown belongs to the selector we're replacing; letting it
+    // fire would act on the old selector's verdict.
+    cancelAvailabilityTeardown()
     deviceAvailabilityTask = Task { [weak self] in
       guard let self else { return }
       for await deviceId in self.deviceSelector.activeDeviceStream() {
         if deviceId == nil {
-          await self.teardownDeviceSession()
+          self.scheduleAvailabilityTeardown()
+        } else {
+          self.cancelAvailabilityTeardown()
         }
       }
     }
+  }
+
+  /// Arms the grace period before acting on a `nil` active device. A device id
+  /// arriving before it elapses cancels the teardown; otherwise we re-check the
+  /// selector and only tear down if it is still blind.
+  @MainActor
+  private func scheduleAvailabilityTeardown() {
+    guard pendingAvailabilityTeardown == nil else { return }
+    let grace = deviceAvailabilityGrace
+    pendingAvailabilityTeardown = Task { [weak self] in
+      try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
+      guard let self, !Task.isCancelled else { return }
+      self.pendingAvailabilityTeardown = nil
+      // Re-check rather than trust the emission that armed us: the device may
+      // have come back during the grace period without a new emission racing us.
+      guard self.deviceSelector.activeDevice == nil else { return }
+      await self.teardownDeviceSession()
+    }
+  }
+
+  @MainActor
+  private func cancelAvailabilityTeardown() {
+    pendingAvailabilityTeardown?.cancel()
+    pendingAvailabilityTeardown = nil
   }
 
   /// Keeps a lifetime subscription on `Wearables.shared.devicesStream()` so the
@@ -799,7 +838,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let stoppingStream = streamSession
     let stoppingTextureId = textureId
 
-    streamStateHandler.session = nil
+    // Detach *and* tell Dart. This teardown is reachable from paths the SDK
+    // never reports on (the device-availability watchdog, a DeviceSession that
+    // stopped underneath us), and a silent detach left the app holding a live
+    // texture id with no terminal event — a `Texture` frozen on its last frame.
+    streamStateHandler.detachEmittingStopped()
     streamErrorHandler.session = nil
 
     // `Camera.stop()` synchronously calls `Stream.stop()` and detaches the
@@ -1050,6 +1093,20 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return nil
     }
 
+    // The glasses can push a new codec configuration mid-stream (the SDK's
+    // `WarpEventCoordinator.handleCodecConfig` rebuilds its CMFormatDescription
+    // unconditionally), so every later sample buffer carries the new format.
+    // A session created from the old one then fails on every frame, and because
+    // `decompressionSession` stays non-nil the lazy-create below never re-fires:
+    // the texture freezes permanently with no error on any channel. Meta's own
+    // in-SDK decoder does exactly this check before recreating.
+    if let existing = decompressionSession,
+       !VTDecompressionSessionCanAcceptFormatDescription(existing, formatDescription: formatDescription) {
+      NSLog("[MWDAT] HEVC format description changed mid-stream — recreating decompression session")
+      VTDecompressionSessionInvalidate(existing)
+      decompressionSession = nil
+    }
+
     // Lazily create decompression session on first frame.
     if decompressionSession == nil {
       setupDecompressionSession(formatDescription: formatDescription)
@@ -1114,6 +1171,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // reference, so check the actual state. Same selection → return the
       // existing texture; a *different* device → caller must stop first.
       if let existing = streamSession {
+        // `.paused` counts as LIVE, deliberately. `Stream` exposes no
+        // `resume()` — but that absence is not an invitation to recreate the
+        // session, it is because the SDK drives the stream out of `.paused`
+        // itself. Meta's guidance is explicit: "On PAUSED, keep the connection
+        // and wait for STARTED or STOPPED", and "your app should not attempt to
+        // restart a device session while it is paused". `thermalCritical` pauses
+        // exactly this way and resumes once the glasses cool, so tearing down
+        // here would destroy the SDK's own thermal recovery. An app that really
+        // does want a fresh session calls `stopStreamSession()` first, which
+        // never reaches this guard.
         if existing.state != .stopped && existing.state != .stopping {
           if requestedDeviceId == pinnedDeviceId {
             if let texId = textureId {

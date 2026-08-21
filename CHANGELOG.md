@@ -1,3 +1,8 @@
+## 0.8.1
+* **Stream teardowns are no longer silent.** iOS detached the stream-state handler *before* stopping the camera, so every plugin-initiated teardown — the device-availability watchdog, or a `DeviceSession` that stopped underneath us — reached Dart as nothing at all. Apps were left holding a live texture id and a `Texture` frozen on its last frame, with no state change and no error. `streamSessionStateStream()` now emits a terminal `stopped` on those paths.
+* **The iOS device-availability watchdog no longer tears the session down on a transient link blip.** `activeDeviceStream()` yields `nil` as soon as no device satisfies the SDK's eligibility test, which requires `LinkState.connected` — so a momentary `.connecting` emitted `nil` even though the glasses never went away. The SDK's own handler stops the stream only on a genuine `.disconnected`. A 2 s grace period now has to elapse, and the selector is re-checked, before anything is torn down.
+* **iOS `hvc1`: recover from a mid-stream codec-configuration change.** The `VTDecompressionSession` was built from the first frame's `CMFormatDescription` and cached forever. The glasses can push a new codec config mid-stream, after which every decode failed and — because the cached session stayed non-`nil` — nothing ever recreated it: a permanent freeze with no error on any channel. The session is now revalidated against each frame's format description and recreated when it no longer matches.
+
 ## 0.8.0
 **BREAKING CHANGES**
 * Update to Meta Wearables DAT **0.9.0** on both platforms.

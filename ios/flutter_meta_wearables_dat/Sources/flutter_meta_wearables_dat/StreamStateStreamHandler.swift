@@ -28,6 +28,35 @@ class StreamStateStreamHandler: NSObject, FlutterStreamHandler {
     return nil
   }
 
+  /// Detaches from the current stream and pushes a terminal `stopped` to Dart.
+  ///
+  /// Plain `session = nil` detaches *silently*: `resubscribe()` cancels the
+  /// listener and returns early on a nil session, so nothing is emitted. That is
+  /// wrong for every plugin-initiated teardown, because those run on paths the
+  /// SDK never reports on — the device-availability watchdog and a DeviceSession
+  /// that stopped underneath us. Dart was left holding a live texture id and a
+  /// `Texture` frozen on its last frame, with no state change and no error to
+  /// act on. Emitting the terminal state here is what makes those teardowns
+  /// observable.
+  ///
+  /// Safe to double-emit: if the SDK also reported `.stopped` before we
+  /// detached, Dart sees the same terminal state twice.
+  ///
+  /// The emit is **synchronous** on purpose. The sole caller,
+  /// `performTeardownStreamOnly()`, is `@MainActor` and calls this before its
+  /// first suspension, so we are already on the platform thread and may touch
+  /// the sink directly. Deferring it onto a `Task` instead would hand this
+  /// terminal `stopped` an unordered slot: a restart that re-seeds the channel
+  /// from `session`'s `didSet` could publish `starting`/`streaming` first, and
+  /// the late `stopped` would then tell the app to drop a texture id that
+  /// belongs to the *new* stream.
+  @MainActor
+  func detachEmittingStopped() {
+    session = nil
+    guard let events = eventSink else { return }
+    events(Self.stoppedValue)
+  }
+
   private func resubscribe() {
     cancelListener()
     guard let session = session, let events = eventSink else { return }
@@ -49,6 +78,10 @@ class StreamStateStreamHandler: NSObject, FlutterStreamHandler {
       listenerToken = nil
     }
   }
+
+  /// The Dart-facing value for `stopped`. Kept next to `stateToInt` so the two
+  /// can't drift.
+  private static let stoppedValue = 1
 
   /// Maps StreamState to the int values expected by Dart.
   private static func stateToInt(_ state: StreamState) -> Int {
