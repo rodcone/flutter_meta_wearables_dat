@@ -63,9 +63,20 @@ android {
 
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")
+        // `useJUnitPlatform()` below has been configured since before any tests
+        // existed, but without an engine on the test runtime classpath Gradle
+        // discovers zero tests and reports success — so the suite silently did
+        // not run. Required for the JUnit 5 annotations to execute.
+        testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")
+        testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
     }
 
     testOptions {
+        // Without this, any `android.util.Log` call reached from code under
+        // test throws "not mocked" and fails the test for a reason that has
+        // nothing to do with the behaviour being asserted.
+        unitTests.returnDefaultValues = true
+
         unitTests.all {
             useJUnitPlatform()
 

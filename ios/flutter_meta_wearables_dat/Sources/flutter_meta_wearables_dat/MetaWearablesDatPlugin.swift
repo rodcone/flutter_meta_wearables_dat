@@ -145,15 +145,20 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // backgrounded apps).
   private let backgroundController = BackgroundStreamingController()
   private let videoFrameHandler = VideoFrameStreamHandler()
+  /// Single source of truth for background/foreground transitions. See
+  /// `AppLifecycleObserver` for why this does not use `addApplicationDelegate`
+  /// or `addSceneDelegate`.
+  private let lifecycleObserver = AppLifecycleObserver()
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: registrar.messenger())
     let instance = MetaWearablesDatPlugin()
     instance.textureRegistry = registrar.textures()
     registrar.addMethodCallDelegate(instance, channel: channel)
-    // Receive applicationDidEnterBackground / applicationWillEnterForeground
-    // callbacks so we can safely manage the hvc1 HEVC decoder across app
-    // lifecycle transitions (iOS forbids GPU access from backgrounded apps).
+    // Kept as a secondary input only. Flutter stops forwarding these once the
+    // host adopts UISceneDelegate, so `AppLifecycleObserver` — not this — is
+    // what actually guarantees delivery. Both funnel into the same latch, so a
+    // host that delivers both is deduplicated rather than double-handled.
     registrar.addApplicationDelegate(instance)
     // Event channel for registration state updates
     let registrationStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/registration_state", binaryMessenger: registrar.messenger())
@@ -191,6 +196,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceStateChannel.setStreamHandler(deviceStateHandler)
 
     Task { @MainActor in
+      instance.lifecycleObserver.onDidEnterBackground = { [weak instance] in
+        instance?.handleDidEnterBackground()
+      }
+      instance.lifecycleObserver.onWillEnterForeground = { [weak instance] in
+        instance?.handleWillEnterForeground()
+      }
+      instance.lifecycleObserver.start()
+
       try? Wearables.configure()
       // Keep a lifetime subscription on the SDK device list (Meta's canonical
       // pattern, started right after `configure()`) so discovery stays warm and
@@ -951,18 +964,47 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // produced grey / corrupted output even in foreground, so the design
   // was reverted: hardware decoder only, always invalidated on background.
 
+  // MARK: - App lifecycle
+  //
+  // These two are thin forwarders. Flutter stops calling them once the host
+  // adopts UISceneDelegate, so they are a secondary input to
+  // `AppLifecycleObserver`, never the primary one. The observer's latch
+  // deduplicates, so a host that delivers both paths still transitions once.
+
   public func applicationDidEnterBackground(_ application: UIApplication) {
+    Task { @MainActor in lifecycleObserver.noteDidEnterBackground() }
+  }
+
+  public func applicationWillEnterForeground(_ application: UIApplication) {
+    Task { @MainActor in lifecycleObserver.noteWillEnterForeground() }
+  }
+
+  /// Runs once per genuine background transition, from whichever input saw it
+  /// first.
+  @MainActor
+  private func handleDidEnterBackground() {
     isInBackground = true
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
       NSLog("[MWDAT] VTDecompressionSession invalidated (app entered background)")
     }
+
+    // The background stop lands in the next PR. Logged here so the hook can be
+    // verified on device — including on a scene-based host, which is the case
+    // `addApplicationDelegate` never reached — before anything acts on it.
+    if !backgroundController.isEnabled && streamSession != nil {
+      NSLog("[MWDAT] lifecycle: would stop stream (background streaming off) — not yet wired")
+    }
   }
 
-  public func applicationWillEnterForeground(_ application: UIApplication) {
+  @MainActor
+  private func handleWillEnterForeground() {
     isInBackground = false
     NSLog("[MWDAT] App entering foreground — HEVC decoder will be recreated on next frame")
+    // Deliberately nothing else. With background streaming off the session is
+    // stopped and stays stopped: the plugin never reactivates the glasses
+    // camera on its own. Do not add a resume here.
   }
 
   // MARK: - Frame Processing (zero-copy via Texture API)
