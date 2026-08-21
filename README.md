@@ -37,7 +37,7 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.8.0
+  flutter_meta_wearables_dat: ^0.8.1
 ```
 
 ### 2. Configure iOS or Android
@@ -666,8 +666,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.8.0
-  flutter_meta_wearables_dat_mock_device: ^0.8.0
+  flutter_meta_wearables_dat: ^0.8.1
+  flutter_meta_wearables_dat_mock_device: ^0.8.1
 ```
 
 ```dart

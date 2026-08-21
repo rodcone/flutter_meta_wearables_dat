@@ -36,24 +36,28 @@ class MockDeviceSheet extends StatelessWidget {
       alignment: Alignment.topCenter,
       child: Padding(
         padding: const EdgeInsets.only(left: 25, right: 25, bottom: 100),
-        child: Consumer2<MockDeviceProvider, stream_providers.StreamSessionProvider>(
-          builder: (context, mockDeviceProvider, streamProvider, child) {
-            return SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SheetHandleBar(),
-                  _PairingCard(mockDeviceProvider: mockDeviceProvider),
-                  if (mockDeviceProvider.deviceUUID != null)
-                    _DeviceControlsCard(
-                      mockDeviceProvider: mockDeviceProvider,
-                      streamProvider: streamProvider,
-                    ),
-                ],
-              ),
-            );
-          },
-        ),
+        child:
+            Consumer2<
+              MockDeviceProvider,
+              stream_providers.StreamSessionProvider
+            >(
+              builder: (context, mockDeviceProvider, streamProvider, child) {
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SheetHandleBar(),
+                      _PairingCard(mockDeviceProvider: mockDeviceProvider),
+                      if (mockDeviceProvider.deviceUUID != null)
+                        _DeviceControlsCard(
+                          mockDeviceProvider: mockDeviceProvider,
+                          streamProvider: streamProvider,
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
       ),
     );
   }
@@ -83,8 +87,9 @@ class _PairingCard extends StatelessWidget {
                 if (paired)
                   Text(
                     'Device paired',
-                    style: Theme.of(context).textTheme.bodyMedium!
-                        .copyWith(color: Colors.green),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium!.copyWith(color: Colors.green),
                   )
                 else
                   const Text('No device paired'),
@@ -363,9 +368,9 @@ class _CameraFacingRow extends StatelessWidget {
             enabled: enabled,
             color: selected == CameraFacing.front ? Colors.green : null,
             onPressed: () {
-              context
-                  .read<MockDeviceProvider>()
-                  .setCameraFacing(CameraFacing.front);
+              context.read<MockDeviceProvider>().setCameraFacing(
+                CameraFacing.front,
+              );
             },
           ),
         ),
@@ -375,9 +380,9 @@ class _CameraFacingRow extends StatelessWidget {
             enabled: enabled,
             color: selected == CameraFacing.back ? Colors.green : null,
             onPressed: () {
-              context
-                  .read<MockDeviceProvider>()
-                  .setCameraFacing(CameraFacing.back);
+              context.read<MockDeviceProvider>().setCameraFacing(
+                CameraFacing.back,
+              );
             },
           ),
         ),

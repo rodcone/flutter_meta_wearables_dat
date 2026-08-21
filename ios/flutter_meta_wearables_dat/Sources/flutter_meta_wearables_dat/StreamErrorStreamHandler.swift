@@ -20,6 +20,13 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
   private var eventSink: FlutterEventSink?
   private var listenerToken: AnyListenerToken?
 
+  /// See `StreamStateStreamHandler.subscriptionGeneration` — same hazard, same
+  /// guard. It matters at least as much here: consumers treat a subset of these
+  /// codes as terminal and tear the session down on them, so a stale
+  /// `hingesClosed` from a stream we already dropped would take down its
+  /// replacement.
+  private var subscriptionGeneration: UInt64 = 0
+
   public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
     eventSink = events
     resubscribe()
@@ -54,8 +61,10 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     cancelListener()
     guard let session = session, let events = eventSink else { return }
 
-    listenerToken = session.errorPublisher.listen { error in
+    let generation = subscriptionGeneration
+    listenerToken = session.errorPublisher.listen { [weak self] error in
       Task { @MainActor in
+        guard let self, self.subscriptionGeneration == generation else { return }
         // `errorToMap` returns nil for errors that are deliberately not part of
         // this channel's contract (see `.photoCaptureFailed`).
         guard let payload = Self.errorToMap(error) else { return }
@@ -65,6 +74,9 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
   }
 
   private func cancelListener() {
+    // Bump before cancelling — see StreamStateStreamHandler for why the async
+    // token cancel cannot be relied on to stop an in-flight callback.
+    subscriptionGeneration &+= 1
     if let token = listenerToken {
       Task { await token.cancel() }
       listenerToken = nil
