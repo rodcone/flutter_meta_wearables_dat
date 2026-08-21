@@ -1,3 +1,30 @@
+## 0.9.0
+
+**BREAKING CHANGES**
+
+* **Backgrounding now stops the stream session unless you opt in.** Previously the plugin only stopped *rendering* while backgrounded on iOS and did nothing at all on Android, leaving a live session, an attached camera capability and a registered texture with no event to Dart — apps were left holding a texture id and a `Texture` frozen on its last frame. Now a true background transition (app backgrounded or phone locked) tears the `DeviceSession` down, emits a terminal `stopped`, and releases the texture. Call `enableBackgroundStreaming()` **before** `startStreamSession()` to keep the old behaviour.
+* **There is no auto-resume.** Returning to the foreground does nothing by design — the plugin never reactivates the glasses camera on its own. Show your placeholder and let the user restart.
+* **`startStreamSession()` now fails with `APP_BACKGROUNDED`** while the app is backgrounded and background streaming is off. Checked on entry and again at the final commit point, so a start that was in flight when the app backgrounded cannot leave a live stream running with nothing to stop it.
+* **New `stoppedForBackground` code on `streamSessionErrorStream()`**, emitted just before the terminal `stopped`, so a deliberate stop is distinguishable from a fault. Exclude it from any retry logic.
+* **iOS: raw-codec frames now reach `videoFramesStream()` while backgrounded.** `emitRaw` sat after the background guard while `emitHvc1` sat before it, so with `VideoCodec.raw` — the default — nothing was delivered in background despite the documented contract. Raw frames are also no longer FPS-throttled, matching hvc1 and Android; apps with a low `fps` subscribed to `videoFramesStream()` will see more callbacks.
+
+**What you must change**
+
+Subscribe to `streamSessionStateStream()` and clear your texture id on `StreamSessionState.stopped`. An app that caches the texture id and never listens will render an unregistered texture — black or frozen — after any background round trip.
+
+**Fixes**
+
+* **Android emitted no terminal `stopped` on any plugin-initiated teardown.** The state handler was detached before `stream.stop()`, so the SDK's `STOPPING`/`STOPPED` transitions were never observed. This affected every stop, not just backgrounding — the same bug iOS fixed in 0.8.1.
+* **iOS lifecycle detection missed `UISceneDelegate` hosts entirely.** Flutter stops forwarding application lifecycle events once a host adopts scenes, and current Flutter templates are scene-based by default, so the plugin was silently blind on a growing share of apps. Lifecycle is now observed via `NotificationCenter`, which UIKit posts in both cases.
+* Android gained process-wide foreground detection, which it had no notion of at all. Rotation, activity transitions and multi-window do not count as backgrounding.
+* Teardown noise no longer surfaces as an error: the SDK's `videoStreamingError` during a deliberate background stop is suppressed for a bounded window, so apps stop showing "Video streaming encountered an error" for a clean shutdown.
+* Android: the foreground service no longer resurrects itself after process death with default branding, no engine and an unstoppable wake lock; it also stops when the user swipes the app from Recents. The wake lock gained a timeout backstop.
+* Transient interruptions never stop a stream: Control Center, the notification shade, the app-switcher preview and incoming-call banners on iOS; rotation and split-screen on Android.
+
+**Added**
+
+* `MetaWearablesDat.isBackgroundStreamingEnabled()` — reads the flag from the native side. Dart's copy drifts across a hot restart, where the isolate resets but the audio session or foreground service keeps running.
+
 ## 0.8.1
 * **Stream teardowns are no longer silent.** iOS detached the stream-state handler *before* stopping the camera, so every plugin-initiated teardown — the device-availability watchdog, or a `DeviceSession` that stopped underneath us — reached Dart as nothing at all. Apps were left holding a live texture id and a `Texture` frozen on its last frame, with no state change and no error. `streamSessionStateStream()` now emits a terminal `stopped` on those paths.
 * **The iOS device-availability watchdog no longer tears the session down on a transient link blip.** `activeDeviceStream()` yields `nil` as soon as no device satisfies the SDK's eligibility test, which requires `LinkState.connected` — so a momentary `.connecting` emitted `nil` even though the glasses never went away. The SDK's own handler stops the stream only on a genuine `.disconnected`. A 2 s grace period now has to elapse, and the selector is re-checked, before anything is torn down.

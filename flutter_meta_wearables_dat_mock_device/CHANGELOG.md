@@ -1,3 +1,9 @@
+## 0.9.0
+
+* Align version with core package's 0.9.0 release. No API changes.
+
+  Note the core package's background-streaming contract changed in a breaking way in this release, and mock-backed streams are subject to it too: backgrounding now stops the session unless `enableBackgroundStreaming()` was called. Mock behaviour on background is not fully representative of real glasses — MockDeviceKit drives the phone's camera, which iOS stops on background regardless — so validate background behaviour on hardware.
+
 ## 0.8.1
 
 * Align version with core package's 0.8.1 release. No API changes.

@@ -77,6 +77,16 @@ enum StreamSessionState {
   stopping(0),
 
   /// The session is completely stopped.
+  ///
+  /// **Terminal — clear your texture id when you see this.** The native texture
+  /// is unregistered alongside it, so continuing to render it shows a black or
+  /// frozen frame.
+  ///
+  /// Since 0.9.0 this also arrives when the app is backgrounded without
+  /// [MetaWearablesDat.enableBackgroundStreaming], preceded by a
+  /// `stoppedForBackground` code on
+  /// [MetaWearablesDat.streamSessionErrorStream]. That variant is deliberate,
+  /// not a failure: do not retry it, and expect no auto-resume on foreground.
   stopped(1),
 
   /// The session is waiting for a device to become available.
@@ -933,7 +943,17 @@ class MetaWearablesDat {
   ///
   /// Call this BEFORE [startStreamSession] if you want the stream to survive
   /// the host app being backgrounded, the screen being locked, or the user
-  /// switching apps. Safe to call again to reconfigure the Android
+  /// switching apps.
+  ///
+  /// **Without this, backgrounding stops the session.** Since 0.9.0 a true
+  /// background transition tears the session down, emits `stoppedForBackground`
+  /// on [streamSessionErrorStream] followed by a terminal
+  /// [StreamSessionState.stopped], and releases the texture. Nothing resumes on
+  /// foreground — the plugin never reactivates the glasses camera on its own.
+  ///
+  /// Cannot be enabled *while* already backgrounded: iOS refuses to activate an
+  /// audio session and Android forbids starting a foreground service from the
+  /// background on API 31+. Call it before you background. Safe to call again to reconfigure the Android
   /// notification; safe to call after [startStreamSession] too — the
   /// keep-alive mechanism engages immediately.
   ///
@@ -966,8 +986,33 @@ class MetaWearablesDat {
   /// service / releases the wake lock on Android. Safe to call multiple
   /// times. Does NOT stop the active stream session; use
   /// [stopStreamSession] for that.
+  ///
+  /// Worth calling when you observe a terminal [StreamSessionState.stopped] and
+  /// do not intend to restart: the keep-alive is not tied to the stream, so an
+  /// Android foreground service otherwise keeps showing a "streaming"
+  /// notification over a held wake lock with nothing streaming. The plugin does
+  /// not do this for you — an app that stops between captures still wants the
+  /// keep-alive, and on API 31+ it could not restart the service from the
+  /// background if the plugin had dropped it.
   static Future<void> disableBackgroundStreaming() {
     return MetaWearablesDatPlatform.instance.disableBackgroundStreaming();
+  }
+
+  /// Whether background streaming is currently enabled, read from the native
+  /// side rather than from Dart state.
+  ///
+  /// The flag lives natively — an active `AVAudioSession` on iOS, a running
+  /// foreground service on Android — so a Dart-side mirror drifts. The common
+  /// case is a hot restart: the isolate resets to `false` while the audio
+  /// session or service is still very much alive, and the app then renders a
+  /// toggle that disagrees with reality. Seed your UI from this instead.
+  ///
+  /// Returns `false` on a cold launch, correctly: neither keep-alive survives
+  /// process death, so background streaming really is off until you enable it
+  /// again. Do not persist the toggle across launches — you would be showing
+  /// `true` for something that is not running.
+  static Future<bool> isBackgroundStreamingEnabled() {
+    return MetaWearablesDatPlatform.instance.isBackgroundStreamingEnabled();
   }
 
   /// Stream of per-frame [VideoFrame] events. Emitted whenever a Dart

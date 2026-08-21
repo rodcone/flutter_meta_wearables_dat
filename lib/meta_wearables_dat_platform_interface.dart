@@ -137,6 +137,12 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     );
   }
 
+  Future<bool> isBackgroundStreamingEnabled() {
+    throw UnimplementedError(
+      'isBackgroundStreamingEnabled() has not been implemented.',
+    );
+  }
+
   Stream<VideoFrame> videoFramesStream() {
     throw UnimplementedError('videoFramesStream() has not been implemented.');
   }

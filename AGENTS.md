@@ -490,7 +490,7 @@ Codec payload layout:
 
 `videoFramesStream()` is zero-cost when no subscriber is attached. Subscribe **before** `startStreamSession()` to capture the opening keyframe.
 
-**Without `enableBackgroundStreaming()`**, only `VideoCodec.hvc1` on iOS survives a brief background transition (HEVC decoder auto-paused / auto-recreated; last rendered frame preserved). All other combinations stop frame delivery when the host OS suspends the app. `captureStreamFrame` always returns `null` while backgrounded — use `videoFramesStream()` instead if you need pixel data in background.
+**Without `enableBackgroundStreaming()`**, backgrounding the app or locking the phone **stops the stream session** on both platforms as of 0.9.0. The plugin emits `stoppedForBackground` on `streamSessionErrorStream()` followed by a terminal `stopped`, and releases the texture. Nothing resumes on foreground — show a placeholder and let the user restart. `startStreamSession()` refuses with `APP_BACKGROUNDED` while backgrounded. `captureStreamFrame` always returns `null` while backgrounded — use `videoFramesStream()` instead if you need pixel data in background.
 
 ### Raw frame capture for ML/OCR
 
@@ -511,7 +511,7 @@ final frame = await MetaWearablesDat.captureStreamFrame(
 | Feature | iOS | Android |
 |---------|-----|---------|
 | Video codec `raw` | Yes (BGRA on the `videoFramesStream`) | Yes (I420 planar YUV on the `videoFramesStream`) |
-| Video codec `hvc1` | Yes — without `enableBackgroundStreaming()`, also survives a brief background transition (decoder auto-paused, session stays alive) | No (ignored, falls back to raw) |
+| Video codec `hvc1` | Yes — decoder auto-paused on background and recreated on foreground (brief keyframe-wait stall) | No (ignored, falls back to raw) |
 | `enableBackgroundStreaming()` | Activates `AVAudioSession` to keep the process alive in background. HEVC hardware decoder is invalidated on background and recreated on foreground (brief keyframe-wait stall, no freeze). Requires `audio` + `bluetooth-central` in `UIBackgroundModes` | Starts a foreground service (type `connectedDevice`) + holds a `PARTIAL_WAKE_LOCK`. Requires `BackgroundNotification`. Manifest permissions auto-merge |
 | `videoFramesStream()` | Emits BGRA (`raw`) or HEVC NAL units (`hvc1`) | Emits I420 planar YUV (`raw` only) |
 | `requestAndroidPermissions()` | No-op | Required before any DAT call |

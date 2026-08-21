@@ -539,17 +539,38 @@ Store every `StreamSubscription` created for registration, device, session, erro
 | Codec             | Platform      | Description                                                                                                                                                                                                                                                                                          |
 |-------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `VideoCodec.raw`  | iOS & Android | Raw uncompressed frames. iOS: BGRA pixel data. Android: I420 planar YUV. Default.                                                                                                                                                                                                                    |
-| `VideoCodec.hvc1` | iOS only      | Compressed HEVC (`hvc1` NAL units) decoded via `VTDecompressionSession`. Smaller over-the-wire payload than `raw` and the only codec that survives a brief background transition without any opt-in (hardware decoder is paused on background and auto-recreated on foreground). Ignored on Android. |
+| `VideoCodec.hvc1` | iOS only      | Compressed HEVC (`hvc1` NAL units) decoded via `VTDecompressionSession`. Smaller over-the-wire payload than `raw`. The hardware decoder is paused on background entry and recreated on the first frame after foreground, so a resumed stream stalls briefly waiting for a keyframe. Ignored on Android. |
 
 For full background streaming (app backgrounded, phone locked, or both) on **either** platform and **either** codec, see [Background streaming](#background-streaming) below.
 
 #### Background streaming
 
-By default the host OS suspends your app shortly after it's no longer visible, and the DAT stream dies with it. Call `enableBackgroundStreaming()` **before** `startStreamSession()` to keep the session alive across all three "not visible" states:
+**By default, the plugin stops the stream session when your app is no longer visible.** Call `enableBackgroundStreaming()` **before** `startStreamSession()` to keep it alive instead.
 
-1. Flutter app sent to background (user taps home / switches apps).
-2. Screen locked while the app is in foreground.
-3. Both combined.
+| `enableBackgroundStreaming()` | App backgrounded, or phone locked |
+| --- | --- |
+| **not called** (default) | Session is **stopped**. You get `stoppedForBackground` on `streamSessionErrorStream()`, then a terminal `stopped`, and the texture is released. Nothing resumes on foreground. |
+| **called** | Session stays alive. The preview resumes on foreground (brief keyframe-wait stall on `hvc1`). |
+
+This covers all three "not visible" states: the app sent to background, the screen locked while the app is in front, and both combined.
+
+**What counts as backgrounded.** Only a genuine background transition. These do **not** stop a stream: Control Center, the notification shade, the app-switcher preview, an incoming-call banner, Face ID and system alerts on iOS; rotation, split-screen and multi-window on Android. Lingering in Android's Recents *does*, because the Activity genuinely stops — a platform difference with no equivalent on iOS.
+
+**You must handle the terminal `stopped`.** Subscribe to `streamSessionStateStream()` and clear your texture id when it arrives:
+
+```dart
+MetaWearablesDat.streamSessionStateStream().listen((state) {
+  if (state == StreamSessionState.stopped) {
+    setState(() { _textureId = null; _isStreaming = false; });
+  }
+});
+```
+
+An app that caches the texture id without listening will render an unregistered texture — black or frozen — after any background round trip.
+
+**Do not add your own lifecycle handling.** The plugin observes lifecycle natively; driving stop/start from a `WidgetsBindingObserver` on top would double-tear-down. And do not auto-retry on `stoppedForBackground`: it is not a failure, and `startStreamSession()` refuses with `APP_BACKGROUNDED` while the app is backgrounded anyway.
+
+You can read the current state with `MetaWearablesDat.isBackgroundStreamingEnabled()`, which reads the native flag. Seed any UI toggle from it rather than from Dart state — a hot restart resets the isolate while the audio session or foreground service keeps running. Don't persist the toggle across launches: neither keep-alive survives process death, so it is genuinely off on a cold start.
 
 ```dart
 // Enable before starting the session. Notification fields are required on Android

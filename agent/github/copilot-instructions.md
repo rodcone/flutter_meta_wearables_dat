@@ -29,7 +29,8 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 - `stopStreamSession(deviceId)` — end session
 - `capturePhoto(deviceId, format:)` — PhotoCaptureFormat.jpeg or .heic
 - `captureStreamFrame(textureId, width:, height:, format:)` — Dart-side rasterization for ML/OCR. Returns `null` while backgrounded.
-- `enableBackgroundStreaming(androidNotification: BackgroundNotification(...))` — opt-in; call BEFORE `startStreamSession()` to keep the session alive while backgrounded or screen-locked. iOS + Android. `BackgroundNotification` is required on Android.
+- `enableBackgroundStreaming(androidNotification: BackgroundNotification(...))` — opt-in; call BEFORE `startStreamSession()` to keep the session alive while backgrounded or screen-locked. **Without it the plugin stops the session on background** (0.9.0+): you get `stoppedForBackground` then a terminal `stopped`, and no auto-resume. iOS + Android. `BackgroundNotification` is required on Android.
+- `isBackgroundStreamingEnabled()` — reads the native flag; seed UI toggles from it rather than Dart state, which drifts across a hot restart.
 - `disableBackgroundStreaming()` — tears down the iOS `AVAudioSession` / stops the Android foreground service. Idempotent.
 - `videoFramesStream()` — per-frame `VideoFrame` (codec, bytes, width, height, presentationTimestampUs, isKeyframe) in both foreground and background. Zero-cost when no listener is attached. Subscribe before `startStreamSession()` to capture the opening keyframe.
 

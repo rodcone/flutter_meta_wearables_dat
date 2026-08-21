@@ -33,6 +33,8 @@ internal class BackgroundStreamingService : Service() {
         private const val TAG = "MetaWearablesDat"
         private const val NOTIFICATION_ID = 0x4D574441 // "MWDA"
         private const val WAKE_LOCK_TAG = "MWDAT::StreamingWakeLock"
+        /** Backstop only — see `acquireWakeLock`. */
+        private const val WAKE_LOCK_TIMEOUT_MS = 8L * 60L * 60L * 1_000L
 
         const val EXTRA_TITLE = "title"
         const val EXTRA_TEXT = "text"
@@ -51,6 +53,21 @@ internal class BackgroundStreamingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A null Intent means Android restarted us after killing the process.
+        // Restarting is the wrong thing to do: there is no Flutter engine, no
+        // DeviceSession and no stream, the consumer's notification branding
+        // (title/text/channel/icon) is gone because extras are not re-delivered,
+        // and the plugin cannot stop us either — `backgroundStreamingStarted` is
+        // false in the fresh process. The result was an undismissable "Streaming"
+        // notification over a CPU wake lock with nothing streaming, until the
+        // user force-stopped the app. Stand down instead and let the app start
+        // us again if it still wants background streaming.
+        if (intent == null) {
+            Log.w(TAG, "Restarted with no Intent after process death — stopping instead")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: DEFAULT_TITLE
         val text = intent?.getStringExtra(EXTRA_TEXT) ?: DEFAULT_TEXT
         val channelId = intent?.getStringExtra(EXTRA_CHANNEL_ID) ?: DEFAULT_CHANNEL_ID
@@ -76,9 +93,21 @@ internal class BackgroundStreamingService : Service() {
         acquireWakeLock()
         Log.d(TAG, "BackgroundStreamingService started (wake lock + foreground notification)")
 
-        // START_STICKY: if Android kills us for memory pressure, re-deliver
-        // the service intent (without extras) so the notification comes back.
+        // START_STICKY so a memory-pressure kill brings the service back while
+        // the app is still alive. The null-Intent branch above handles the case
+        // where the whole process died and there is nothing left to serve.
         return START_STICKY
+    }
+
+    /**
+     * The user swiped the app out of Recents. Nothing is going to consume the
+     * stream, so holding a wake lock and an ongoing notification past that
+     * point is pure battery drain the user cannot dismiss.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.d(TAG, "Task removed — stopping background streaming service")
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
@@ -142,9 +171,12 @@ internal class BackgroundStreamingService : Service() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         val lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
         lock.setReferenceCounted(false)
-        // No timeout — we hold the lock for the lifetime of the service and
-        // release it in `onDestroy`. This mirrors Meta's reference service.
-        lock.acquire()
+        // Normally released in `onDestroy`. The timeout is a backstop, not the
+        // mechanism: if the service is ever destroyed without `onDestroy`
+        // running, an untimed PARTIAL_WAKE_LOCK holds the CPU awake until
+        // reboot. Bounded at 8h — far longer than any plausible session, short
+        // enough to not be a battery bug. Also satisfies lint's WakelockTimeout.
+        lock.acquire(WAKE_LOCK_TIMEOUT_MS)
         wakeLock = lock
     }
 

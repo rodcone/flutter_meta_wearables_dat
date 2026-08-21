@@ -315,6 +315,14 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
+  Future<bool> isBackgroundStreamingEnabled() async {
+    final enabled = await methodChannel.invokeMethod<bool>(
+      'isBackgroundStreamingEnabled',
+    );
+    return enabled ?? false;
+  }
+
+  @override
   Stream<VideoFrame> videoFramesStream() {
     return videoFramesEventChannel.receiveBroadcastStream().map((
       dynamic event,
