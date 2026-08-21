@@ -90,14 +90,19 @@ enum StreamSessionState {
 
   /// The session is temporarily paused.
   ///
-  /// The DAT SDK pauses the stream itself — most device-initiated stops arrive
-  /// as this state rather than as an error, and the frame feed goes silent
-  /// while it lasts. There is no public resume: recovery is
-  /// [MetaWearablesDat.stopStreamSession] followed by a fresh
-  /// [MetaWearablesDat.startStreamSession].
+  /// The DAT SDK both enters and leaves this state on its own. The common
+  /// trigger is `thermalCritical`, which pauses the stream while the glasses
+  /// cool and then returns it to [streaming]. There is no public resume because
+  /// none is needed — per Meta's guidance, keep the connection and wait for
+  /// [streaming] or [stopped] rather than restarting.
   ///
-  /// Treat it as terminal for rendering purposes. Left alone, your `Texture`
-  /// keeps showing its last frame and nothing signals otherwise.
+  /// Do **not** treat it as terminal. Tearing the session down here destroys the
+  /// SDK's own recovery, and [MetaWearablesDat.startStreamSession] deliberately
+  /// will not recreate a paused stream — it returns the existing texture id, so
+  /// frames resume on the texture you already have.
+  ///
+  /// The feed does go silent while it lasts, so your `Texture` holds its last
+  /// frame. Render a "paused" affordance over it instead of swapping it out.
   paused(5);
 
   const StreamSessionState(this.value);

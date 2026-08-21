@@ -1047,18 +1047,21 @@ class MetaWearablesDatPlugin :
         val existingStream = stream
         if (existingStream != null) {
             val st = existingStream.state.value
-            // PAUSED is deliberately NOT live. The SDK exposes no public
-            // resume, so teardown + recreate is the only recovery available to
-            // an app — and treating a paused stream as live returned the caller
-            // its existing, frozen texture id without restarting anything.
+            // PAUSED counts as LIVE, deliberately. There is no public
+            // resume, but that is because the SDK drives the stream out of
+            // PAUSED itself — Meta's guidance is "On PAUSED, keep the
+            // connection and wait for STARTED or STOPPED". thermalCritical
+            // pauses exactly this way and resumes once the glasses cool, so
+            // tearing down here would destroy the SDK's own thermal recovery.
+            // An app that really does want a fresh session calls
+            // stopStreamSession() first, which never reaches this guard.
             // Mirrors the iOS guard.
             val live =
                     st != com.meta.wearable.dat.camera.types.StreamState.STOPPED &&
                             st !=
                                     com.meta.wearable.dat.camera.types.StreamState
                                             .STOPPING &&
-                            st != com.meta.wearable.dat.camera.types.StreamState.CLOSED &&
-                            st != com.meta.wearable.dat.camera.types.StreamState.PAUSED
+                            st != com.meta.wearable.dat.camera.types.StreamState.CLOSED
             if (live) {
                 if (deviceId == pinnedDeviceId) {
                     val entry = textureEntry

@@ -1171,13 +1171,17 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // reference, so check the actual state. Same selection → return the
       // existing texture; a *different* device → caller must stop first.
       if let existing = streamSession {
-        // `.paused` is deliberately NOT live. The SDK exposes no public resume
-        // (`Stream` has only start/stop/capturePhoto), so teardown + recreate is
-        // the only recovery available to an app — and treating a paused stream
-        // as live returned the caller its existing, frozen texture id without
-        // restarting anything.
-        if existing.state != .stopped && existing.state != .stopping
-            && existing.state != .paused {
+        // `.paused` counts as LIVE, deliberately. `Stream` exposes no
+        // `resume()` — but that absence is not an invitation to recreate the
+        // session, it is because the SDK drives the stream out of `.paused`
+        // itself. Meta's guidance is explicit: "On PAUSED, keep the connection
+        // and wait for STARTED or STOPPED", and "your app should not attempt to
+        // restart a device session while it is paused". `thermalCritical` pauses
+        // exactly this way and resumes once the glasses cool, so tearing down
+        // here would destroy the SDK's own thermal recovery. An app that really
+        // does want a fresh session calls `stopStreamSession()` first, which
+        // never reaches this guard.
+        if existing.state != .stopped && existing.state != .stopping {
           if requestedDeviceId == pinnedDeviceId {
             if let texId = textureId {
               result(texId)
