@@ -29,8 +29,8 @@ class SettingsSheet extends StatelessWidget {
             Text(
               'Settings',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 18),
             const _StreamSettingsSection(),
@@ -218,8 +218,8 @@ class _FpsSlider extends StatelessWidget {
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                   color: enabled
                       ? (isSelected
-                          ? theme.colorScheme.primary
-                          : theme.colorScheme.onSurface.withOpacity(0.45))
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.onSurface.withOpacity(0.45))
                       : theme.colorScheme.onSurface.withOpacity(0.25),
                 ),
               );
@@ -303,15 +303,15 @@ class _ResolutionChip extends StatelessWidget {
     final fg = !enabled
         ? theme.colorScheme.onSurface.withOpacity(0.3)
         : selected
-            ? theme.colorScheme.onPrimary
-            : theme.colorScheme.onSurface.withOpacity(0.7);
+        ? theme.colorScheme.onPrimary
+        : theme.colorScheme.onSurface.withOpacity(0.7);
 
     return Material(
       color: !enabled
           ? theme.colorScheme.onSurface.withOpacity(0.04)
           : selected
-              ? theme.colorScheme.primary
-              : theme.colorScheme.onSurface.withOpacity(0.06),
+          ? theme.colorScheme.primary
+          : theme.colorScheme.onSurface.withOpacity(0.06),
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
@@ -442,10 +442,9 @@ class _SectionTitle extends StatelessWidget {
         Text(
           title,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                color:
-                    Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
-              ),
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
+          ),
         ),
       ],
     );

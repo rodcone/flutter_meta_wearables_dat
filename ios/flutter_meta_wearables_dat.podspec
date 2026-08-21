@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_meta_wearables_dat'
-  s.version          = '0.8.0'
+  s.version          = '0.8.1'
   s.summary          = "Flutter bridge to Meta's Wearables DAT for iOS and Android."
   s.description      = <<-DESC
 Flutter plugin providing a bridge to Meta's Wearables Device Access Toolkit (DAT)

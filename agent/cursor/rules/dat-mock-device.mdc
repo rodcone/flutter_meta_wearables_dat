@@ -10,8 +10,8 @@ Mock APIs live in the optional add-on `flutter_meta_wearables_dat_mock_device` (
 ## Add the dev-only dependency
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.8.0
-  flutter_meta_wearables_dat_mock_device: ^0.8.0
+  flutter_meta_wearables_dat: ^0.8.1
+  flutter_meta_wearables_dat_mock_device: ^0.8.1
 ```
 
 ```dart

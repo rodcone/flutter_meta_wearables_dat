@@ -76,15 +76,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify both pubspec versions match
+      # All FOUR version locations must agree, matching the pre-flight checklist
+      # in doc/MAINTAINERS.md. The two pubspecs alone are not enough: the
+      # podspecs carry their own `s.version`, they feed the pod versions
+      # recorded in consumers' Podfile.lock, and nothing else in CI reads them —
+      # 0.8.1 shipped to review with both podspecs still on 0.8.0.
+      - name: Verify all four version locations match
         run: |
-          CORE_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          MOCK_VERSION=$(grep '^version:' flutter_meta_wearables_dat_mock_device/pubspec.yaml | awk '{print $2}')
-          if [ "$CORE_VERSION" != "$MOCK_VERSION" ]; then
-            echo "ERROR: core ($CORE_VERSION) and mock add-on ($MOCK_VERSION) versions must match — they release in lockstep"
+          CORE_PUBSPEC=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          MOCK_PUBSPEC=$(grep '^version:' flutter_meta_wearables_dat_mock_device/pubspec.yaml | awk '{print $2}')
+          CORE_PODSPEC=$(grep "s.version" ios/flutter_meta_wearables_dat.podspec | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+          MOCK_PODSPEC=$(grep "s.version" flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device.podspec | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+
+          echo "core   pubspec.yaml : $CORE_PUBSPEC"
+          echo "mock   pubspec.yaml : $MOCK_PUBSPEC"
+          echo "core   podspec      : $CORE_PODSPEC"
+          echo "mock   podspec      : $MOCK_PODSPEC"
+
+          FAIL=0
+          for pair in "mock pubspec:$MOCK_PUBSPEC" "core podspec:$CORE_PODSPEC" "mock podspec:$MOCK_PODSPEC"; do
+            LABEL="${pair%%:*}"
+            VALUE="${pair##*:}"
+            if [ "$VALUE" != "$CORE_PUBSPEC" ]; then
+              echo "ERROR: $LABEL is $VALUE but core pubspec.yaml is $CORE_PUBSPEC"
+              FAIL=1
+            fi
+          done
+          if [ -z "$CORE_PODSPEC" ] || [ -z "$MOCK_PODSPEC" ]; then
+            echo "ERROR: failed to parse a podspec version — check the s.version format"
+            FAIL=1
+          fi
+          if [ "$FAIL" -ne 0 ]; then
+            echo "All four locations must match — they release in lockstep (see doc/MAINTAINERS.md)"
             exit 1
           fi
-          echo "OK: both packages are at $CORE_VERSION"
+          echo "OK: all four version locations are at $CORE_PUBSPEC"
 
   # Gate on a perfect pub.dev score for both packages. pana is the analyzer
   # behind pub.dev's "pub points"; --exit-code-threshold 0 fails the job when
