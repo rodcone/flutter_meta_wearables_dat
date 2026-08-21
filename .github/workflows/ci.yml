@@ -1,8 +1,19 @@
 name: CI
 
 on:
+  # No `branches:` filter on purpose. Restricting to `main` meant a PR based on
+  # another branch — every PR in a stack except the bottom one — got no CI at
+  # all. That is not loud: `gh pr checks` prints "no checks reported", which
+  # reads like "nothing failing", and the GitHub UI shows no red. The 0.9.0
+  # background-streaming work shipped as a four-PR stack in which three were
+  # merged-ready with zero validation until they were retargeted one at a time.
   pull_request:
-    branches: [main]
+  # Retargeting a PR fires `pull_request.edited`, which is NOT in the default
+  # trigger set (opened / synchronize / reopened), so changing a base does not
+  # re-run CI. `edited` is deliberately not added here — it also fires on every
+  # title and body edit. Use this manual trigger instead of the close/reopen
+  # dance when you need a re-run without a new commit.
+  workflow_dispatch:
 
 jobs:
   analyze:
@@ -186,7 +197,13 @@ jobs:
   # permanently red check that a contributor cannot fix.
   android-build:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Skipped for fork PRs, which cannot read the GitHub Packages token the
+    # Android build needs. `github.event.pull_request` is null on a manual
+    # dispatch, so without the first clause this job would silently skip on
+    # every `workflow_dispatch` run — a green CI that never built Android.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
