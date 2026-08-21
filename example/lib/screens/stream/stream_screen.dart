@@ -454,10 +454,14 @@ class _ReconnectingView extends StatelessWidget {
 /// The native side pushes CVPixelBuffer / SurfaceTexture frames directly —
 /// no JPEG encoding, no byte copying, no Dart-side decoding.
 ///
-/// The aspect ratio is driven by the native frame dimensions surfaced via
-/// `videoStreamSizeStream`. Until the first size arrives we fall back to a
-/// 1080x1920 portrait frame, which matches the Ray-Ban Meta's default stream
-/// orientation.
+/// The frame dimensions come from the native side via
+/// `videoStreamSizeStream`. Actual resolution varies with the requested
+/// [StreamQuality] and with the device, commonly a 720x1280-class portrait
+/// frame, so nothing here assumes a fixed size.
+///
+/// Only the ratio of the values below is used, since [BoxFit.cover] scales the
+/// frame to the viewport either way. They are a 9:16 portrait placeholder to
+/// orient the first frame correctly, replaced as soon as a real size arrives.
 class _TextureStreamWidget extends StatelessWidget {
   final int textureId;
   final VideoStreamSize? videoStreamSize;
@@ -481,8 +485,8 @@ class _TextureStreamWidget extends StatelessWidget {
           fit: BoxFit.cover,
           clipBehavior: Clip.hardEdge,
           child: SizedBox(
-            width: videoStreamSize?.width.toDouble() ?? 1080,
-            height: videoStreamSize?.height.toDouble() ?? 1920,
+            width: videoStreamSize?.width.toDouble() ?? 720,
+            height: videoStreamSize?.height.toDouble() ?? 1280,
             child: Texture(textureId: textureId),
           ),
         ),
