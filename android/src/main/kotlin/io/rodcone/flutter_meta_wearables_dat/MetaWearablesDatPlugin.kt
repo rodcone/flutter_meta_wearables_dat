@@ -42,6 +42,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
@@ -109,6 +110,14 @@ class MetaWearablesDatPlugin :
     // started so we can idempotently re-start / stop it, and so we can tear
     // it down on plugin detach.
     @Volatile private var backgroundStreamingStarted: Boolean = false
+
+    /**
+     * Process-wide foreground tracking. `isAppInBackground` is the single
+     * source of truth for "the app is not visible"; Android had no notion of
+     * this at all before 0.9.0.
+     */
+    private var foregroundTracker: AppForegroundTracker? = null
+    @Volatile private var isAppInBackground: Boolean = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // Gate SDK initialization until BT permissions are granted (mirrors reference app).
@@ -271,12 +280,71 @@ class MetaWearablesDatPlugin :
 
         val context = flutterPluginBinding.applicationContext
         application = context as? Application
+        registerForegroundTracker()
         // NOTE: Do NOT call ensureWearablesInitialized() here.
         // The reference app initializes the SDK only AFTER Bluetooth permissions
         // are granted. Calling it before permissions breaks device discovery.
         // The SDK will be initialized lazily when first needed (e.g. after
         // requestAndroidPermissions grants BT permissions).
     }
+
+    // region App lifecycle
+
+    /**
+     * Registers the process-wide foreground tracker. Idempotent: re-registering
+     * after a hot restart (where `onDetachedFromEngine` is NOT called, despite
+     * what the comment there used to imply) would otherwise leave one live
+     * tracker per restart, each firing against stale plugin state.
+     */
+    private fun registerForegroundTracker() {
+        val app = application ?: return
+        unregisterForegroundTracker()
+        val tracker =
+                AppForegroundTracker(
+                        schedule = { delayMs, action ->
+                            val job =
+                                    scope.launch {
+                                        delay(delayMs)
+                                        action()
+                                    }
+                            AppForegroundTracker.Cancellable { job.cancel() }
+                        },
+                )
+        tracker.onEnteredBackground = { handleEnteredBackground() }
+        tracker.onEnteredForeground = { handleEnteredForeground() }
+        app.registerActivityLifecycleCallbacks(tracker)
+        foregroundTracker = tracker
+    }
+
+    private fun unregisterForegroundTracker() {
+        val tracker = foregroundTracker ?: return
+        application?.unregisterActivityLifecycleCallbacks(tracker)
+        tracker.dispose()
+        foregroundTracker = null
+    }
+
+    private fun handleEnteredBackground() {
+        isAppInBackground = true
+        // The background stop lands in the next PR. Logged so the hook can be
+        // verified on device before anything acts on it.
+        //
+        // Unlike iOS there is no suspension deadline here: Android does not
+        // freeze the process on backgrounding, so the stop cascade can complete
+        // normally and needs no equivalent of iOS's beginBackgroundTask
+        // assertion. Do not port that here.
+        if (!backgroundStreamingStarted && stream != null) {
+            Log.d(TAG, "lifecycle: would stop stream (background streaming off) — not yet wired")
+        }
+    }
+
+    private fun handleEnteredForeground() {
+        isAppInBackground = false
+        // Deliberately nothing else. With background streaming off the session
+        // is stopped and stays stopped; the plugin never restarts the glasses
+        // camera on its own. Do not add a resume here.
+    }
+
+    // endregion
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
@@ -335,6 +403,8 @@ class MetaWearablesDatPlugin :
         deviceStateChannel.setStreamHandler(null)
         deviceStateStreamHandler?.dispose()
         deviceStateStreamHandler = null
+
+        unregisterForegroundTracker()
 
         // Tear down any active session and stream
         teardownSession()

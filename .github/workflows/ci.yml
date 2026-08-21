@@ -204,3 +204,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MWDAT_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: flutter build apk --release
+      # The plugin's Kotlin unit tests. They cover the process-wide foreground
+      # detection rules, which are pure logic and the only part of the
+      # background-streaming behaviour that is verifiable without hardware.
+      # Runs from example/android because the plugin's Gradle project is only
+      # resolvable in the context of a host app.
+      - name: Android unit tests
+        working-directory: example/android
+        env:
+          GITHUB_TOKEN: ${{ secrets.MWDAT_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: ./gradlew :flutter_meta_wearables_dat:testDebugUnitTest
