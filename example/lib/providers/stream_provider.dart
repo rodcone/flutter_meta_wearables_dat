@@ -780,6 +780,22 @@ class StreamSessionProvider extends ChangeNotifier {
     }
   }
 
+  /// Seeds the toggle from the native flag rather than trusting Dart state.
+  ///
+  /// A hot restart resets this isolate but leaves the iOS audio session or the
+  /// Android foreground service running, so the toggle would otherwise show
+  /// "off" for something that is very much on.
+  Future<void> syncBackgroundStreamingState() async {
+    try {
+      final enabled = await MetaWearablesDat.isBackgroundStreamingEnabled();
+      if (enabled == _backgroundStreamingEnabled) return;
+      _backgroundStreamingEnabled = enabled;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[MetaWearablesDAT] Could not read background state: $e');
+    }
+  }
+
   Future<void> setBackgroundStreamingEnabled(bool enabled) async {
     if (_backgroundStreamingEnabled == enabled) return;
     try {

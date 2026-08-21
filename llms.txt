@@ -26,7 +26,7 @@ The package exposes a single static facade, `MetaWearablesDat`, that delegates t
 - [Phase 1 — Registration](https://github.com/rodcone/flutter_meta_wearables_dat#1-registration-one-time): `startRegistration()` + deep-link callback through `handleUrl()` from the Meta AI app.
 - [Phase 2 — Camera permission](https://github.com/rodcone/flutter_meta_wearables_dat#2-permissions-first-time-camera-access): `requestCameraPermission()`.
 - [Phase 3 — Streaming](https://github.com/rodcone/flutter_meta_wearables_dat#3-session-after-registration-and-permissions): `startStreamSession()` returns a texture ID; subscribe to `streamSessionStateStream()`, `streamSessionErrorStream()`, `videoStreamSizeStream()`, `deviceStateStream()`.
-- [Background streaming](https://github.com/rodcone/flutter_meta_wearables_dat#background-streaming): opt in with `enableBackgroundStreaming()` before starting the session — iOS keeps the process alive via an `AVAudioSession`; Android runs a foreground service with a `connectedDevice` type and a `PARTIAL_WAKE_LOCK`.
+- [Background streaming](https://github.com/rodcone/flutter_meta_wearables_dat#background-streaming): backgrounding or locking the phone STOPS the session by default (0.9.0+); opt in with `enableBackgroundStreaming()` before starting the session to keep it alive — iOS keeps the process alive via an `AVAudioSession`; Android runs a foreground service with a `connectedDevice` type and a `PARTIAL_WAKE_LOCK`.
 - [Raw video frames](https://github.com/rodcone/flutter_meta_wearables_dat#accessing-raw-frame-bytes): `videoFramesStream()` delivers BGRA / I420 / hvc1 NAL payloads for recording, ML, or re-muxing — zero-cost when no listener is attached.
 
 ## AI assistant resources

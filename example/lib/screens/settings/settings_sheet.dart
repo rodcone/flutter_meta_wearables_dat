@@ -9,8 +9,26 @@ import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dar
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/sheet_handle_bar.dart';
 import 'package:provider/provider.dart';
 
-class SettingsSheet extends StatelessWidget {
+class SettingsSheet extends StatefulWidget {
   const SettingsSheet({super.key});
+
+  @override
+  State<SettingsSheet> createState() => _SettingsSheetState();
+}
+
+class _SettingsSheetState extends State<SettingsSheet> {
+  @override
+  void initState() {
+    super.initState();
+    // Re-read the native flag whenever the sheet opens. Dart's copy drifts
+    // across a hot restart, where the isolate resets but the iOS audio session
+    // or Android foreground service keeps running.
+    unawaited(
+      context
+          .read<stream_providers.StreamSessionProvider>()
+          .syncBackgroundStreamingState(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

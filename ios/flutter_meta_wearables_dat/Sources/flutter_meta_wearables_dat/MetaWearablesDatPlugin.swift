@@ -275,6 +275,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         enableBackgroundStreaming(result: result)
       case "disableBackgroundStreaming":
         disableBackgroundStreaming(result: result)
+      case "isBackgroundStreamingEnabled":
+        result(backgroundController.isEnabled)
       case "openDATGlassesAppUpdate":
         openDATGlassesAppUpdate(result: result)
       default:

@@ -396,6 +396,7 @@ class MetaWearablesDatPlugin :
             "capturePhoto" -> capturePhoto(call, result)
             "enableBackgroundStreaming" -> enableBackgroundStreaming(call, result)
             "disableBackgroundStreaming" -> disableBackgroundStreaming(result)
+            "isBackgroundStreamingEnabled" -> result.success(backgroundStreamingStarted)
             "openDATGlassesAppUpdate" -> openDATGlassesAppUpdate(result)
             else -> result.notImplemented()
         }
@@ -429,8 +430,16 @@ class MetaWearablesDatPlugin :
         // Tear down any active session and stream
         teardownSession()
 
-        // Stop the background service if it's running — otherwise the
-        // notification would hang around after a hot restart.
+        // Stop the background service if it's running, so the notification and
+        // wake lock don't outlive the engine.
+        //
+        // NOTE: this does NOT run on a Dart hot restart. Hot restart replaces
+        // the isolate but keeps the FlutterEngine and its plugin instances
+        // alive, so the session, service, notification and wake lock all
+        // survive it — the previous comment here claimed otherwise. If you are
+        // debugging a notification that persists across `R`, that is why;
+        // `registerForegroundTracker()` is unregister-first for the same
+        // reason.
         stopBackgroundServiceIfRunning()
 
         textureRegistry = null

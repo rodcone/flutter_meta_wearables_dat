@@ -43,7 +43,7 @@ Texture(textureId: textureId)
 | Codec | Platform | Description |
 |-------|----------|-------------|
 | `VideoCodec.raw` | iOS & Android | Raw uncompressed frames. iOS: BGRA. Android: I420 planar YUV. Default. |
-| `VideoCodec.hvc1` | iOS only | Compressed HEVC. Smaller over-the-wire payload than `raw`. Without `enableBackgroundStreaming()`, also survives a brief background transition — HEVC decoder auto-paused on background, auto-recreated on foreground. Ignored on Android. |
+| `VideoCodec.hvc1` | iOS only | Compressed HEVC. Smaller over-the-wire payload than `raw`. HEVC decoder auto-paused on background, auto-recreated on foreground (brief keyframe-wait stall). Ignored on Android. |
 
 ## Background streaming (optional — both platforms, both codecs)
 
@@ -91,7 +91,7 @@ Payload layout:
 
 `videoFramesStream()` is zero-cost when no subscriber is attached. Subscribe **before** `startStreamSession()` to capture the opening keyframe. `captureStreamFrame` still returns `null` while backgrounded — use `videoFramesStream()` for pixel data in background.
 
-**Without `enableBackgroundStreaming()`**, the SDK stops delivering frames when the host OS suspends the app. Exception: `VideoCodec.hvc1` on iOS survives brief transitions via the auto-managed decoder lifecycle (for long-lived background, still call `enableBackgroundStreaming()`).
+**Without `enableBackgroundStreaming()`**, backgrounding or locking the phone **stops the stream session** on both platforms (0.9.0+). You get `stoppedForBackground` then a terminal `stopped`; clear your texture id and show a placeholder. Nothing resumes on foreground by design.
 
 ## Stream quality (resolution)
 

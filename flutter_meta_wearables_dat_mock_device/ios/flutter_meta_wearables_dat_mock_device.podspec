@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_meta_wearables_dat_mock_device'
-  s.version          = '0.8.1'
+  s.version          = '0.9.0'
   s.summary          = 'Optional MockDeviceKit add-on for flutter_meta_wearables_dat.'
   s.description      = <<-DESC
 Optional MockDeviceKit add-on for flutter_meta_wearables_dat. Pull this in only
