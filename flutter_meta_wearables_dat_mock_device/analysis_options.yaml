@@ -7,3 +7,11 @@ analyzer:
     public_member_api_docs: ignore
     sort_constructors_first: ignore
     todo: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
