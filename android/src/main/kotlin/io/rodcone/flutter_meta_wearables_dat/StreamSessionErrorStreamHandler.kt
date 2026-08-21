@@ -1,8 +1,13 @@
 package io.rodcone.flutter_meta_wearables_dat
 
+import android.util.Log
 import com.meta.wearable.dat.camera.types.StreamError
 import com.meta.wearable.dat.core.types.DeviceSessionError
 import io.flutter.plugin.common.EventChannel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Stream handler for stream-related errors. Acts as a programmable sink that
@@ -31,11 +36,60 @@ internal class StreamSessionErrorStreamHandler : EventChannel.StreamHandler {
         eventSink = null
     }
 
+    /** True while the plugin is deliberately stopping for a background transition. */
+    private var isStoppingForBackground = false
+    private var suppressionExpiry: Job? = null
+
+    /**
+     * Suppresses teardown noise for the duration of a deliberate background
+     * stop.
+     *
+     * The SDK emits `videoStreamingError` as the pipeline comes down. That is
+     * accurate when the stream died on its own and actively false when *we*
+     * stopped it — the app implicitly asked for the stop by backgrounding — so
+     * consumers were rendering a red "streaming encountered an error" banner
+     * for a clean, expected shutdown.
+     *
+     * Bounded on purpose: a stalled teardown must not be able to hide unrelated
+     * later errors indefinitely, so the window closes on a timer even if
+     * [endBackgroundStopSuppression] never arrives. Mirrors iOS.
+     *
+     * `stoppedForBackground` is emitted *before* this opens, so the app still
+     * learns why the session ended.
+     */
+    fun beginBackgroundStopSuppression(
+            scope: CoroutineScope,
+            timeoutMs: Long = DEFAULT_SUPPRESSION_TIMEOUT_MS,
+    ) {
+        isStoppingForBackground = true
+        suppressionExpiry?.cancel()
+        suppressionExpiry =
+                scope.launch {
+                    delay(timeoutMs)
+                    isStoppingForBackground = false
+                    suppressionExpiry = null
+                }
+    }
+
+    fun endBackgroundStopSuppression() {
+        suppressionExpiry?.cancel()
+        suppressionExpiry = null
+        isStoppingForBackground = false
+    }
+
     /**
      * Emit an error event to the Dart side.
      * Map format: `{"code": "...", "message": "..."}`.
+     *
+     * [bypassSuppression] is for the plugin's own deliberate-stop notice, which
+     * must reach Dart even though it opens the suppression window immediately
+     * afterwards.
      */
-    fun sendError(code: String, message: String) {
+    fun sendError(code: String, message: String, bypassSuppression: Boolean = false) {
+        if (!bypassSuppression && isStoppingForBackground) {
+            Log.d(TAG, "suppressed '$code' during background stop")
+            return
+        }
         eventSink?.success(mapOf("code" to code, "message" to message))
     }
 
@@ -65,6 +119,15 @@ internal class StreamSessionErrorStreamHandler : EventChannel.StreamHandler {
     }
 
     companion object {
+        private const val TAG = "MetaWearablesDat"
+
+        /**
+         * Upper bound on the background-stop suppression window. Long enough to
+         * cover a normal teardown, short enough that a stalled one cannot hide
+         * unrelated errors for meaningfully long. Matches iOS.
+         */
+        const val DEFAULT_SUPPRESSION_TIMEOUT_MS = 5_000L
+
         // String-pattern matching against `error.toString()` keeps us
         // forward-compatible: new error cases that aren't explicitly listed
         // here still get a reasonable fallback code rather than crashing.

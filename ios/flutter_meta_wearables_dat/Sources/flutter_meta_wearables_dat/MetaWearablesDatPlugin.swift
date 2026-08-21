@@ -1014,12 +1014,22 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // first because `teardownStreamOnly()` detaches the error handler.
     streamErrorHandler.sendError(
       code: "stoppedForBackground",
-      message: "The app was backgrounded and background streaming is not enabled."
+      message: "The app was backgrounded and background streaming is not enabled.",
+      bypassSuppression: true
     )
+    // Everything after this point is teardown noise. The SDK emits
+    // `videoStreamingError` as the pipeline comes down, which is true when the
+    // stream died on its own and false when we stopped it on purpose — the app
+    // asked for this by backgrounding. Bounded so a stalled teardown cannot
+    // hide unrelated later errors.
+    streamErrorHandler.beginBackgroundStopSuppression()
 
     beginBackgroundStopAssertion()
     Task { @MainActor in
-      defer { endBackgroundStopAssertion() }
+      defer {
+        endBackgroundStopAssertion()
+        streamErrorHandler.endBackgroundStopSuppression()
+      }
       // The whole DeviceSession, not just the stream — matching Meta's
       // CameraAccess sample. Stopping only the stream leaves the plugin as the
       // last strong owner of the `Stream`, which is why that path needs a

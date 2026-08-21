@@ -338,7 +338,13 @@ class MetaWearablesDatPlugin :
         streamSessionErrorStreamHandler?.sendError(
                 "stoppedForBackground",
                 "The app was backgrounded and background streaming is not enabled.",
+                bypassSuppression = true,
         )
+        // Everything after this is teardown noise. The SDK emits
+        // `videoStreamingError` as the pipeline comes down, which is true when
+        // the stream died on its own and false when we stopped it on purpose.
+        // Bounded so a stalled teardown cannot hide unrelated later errors.
+        streamSessionErrorStreamHandler?.beginBackgroundStopSuppression(scope)
         // The whole session, matching iOS and Meta's CameraAccess sample.
         //
         // Note there is no equivalent of iOS's beginBackgroundTask assertion
@@ -346,6 +352,9 @@ class MetaWearablesDatPlugin :
         // backgrounding, so the stop cascade completes normally. Do not port
         // that machinery over.
         teardownSession()
+        // Teardown is synchronous here, so the window can close immediately
+        // rather than riding out the timeout.
+        streamSessionErrorStreamHandler?.endBackgroundStopSuppression()
     }
 
     private fun handleEnteredForeground() {
