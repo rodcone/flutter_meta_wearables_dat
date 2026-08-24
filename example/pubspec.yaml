@@ -41,6 +41,14 @@ dev_dependencies:
 
 
 flutter:
+  # Pin the resolver at project scope. The `flutter: '>=3.44.0'` constraint
+  # above guarantees a Flutter that has SwiftPM, but it does not override a
+  # developer's global `flutter config --no-enable-swift-package-manager`.
+  # With that set, `flutter pub get` regenerates ios/Podfile and the CocoaPods
+  # xcconfig includes, and the build then fails because the committed Xcode
+  # project carries SwiftPM package references.
+  config:
+    enable-swift-package-manager: true
 
   uses-material-design: true
 
