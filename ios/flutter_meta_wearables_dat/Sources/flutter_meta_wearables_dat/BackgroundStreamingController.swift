@@ -9,34 +9,38 @@ import UIKit
 /// suspending the process, which in turn keeps the BLE / External Accessory
 /// link to the glasses alive.
 final class BackgroundStreamingController {
-  /// Guards `_isEnabled` and `_desiredEnabled`. Both are read from the main
-  /// thread (`handleDidEnterBackground`, `mustNotStreamNow`, the method
-  /// channel), from the SDK's frame-delivery thread (`processAndSendFrame`),
-  /// and from whichever thread AVAudioSession posts its notifications on.
+  /// Guards `_isEnabled`, which is read from the main thread
+  /// (`handleDidEnterBackground`, `mustNotStreamNow`, the method channel),
+  /// from the SDK's frame-delivery thread (`processAndSendFrame`), and from
+  /// whichever thread AVAudioSession posts its notifications on.
   private let stateLock = NSLock()
 
-  /// True only once the AVAudioSession keep-alive is genuinely active.
+  /// True once the AVAudioSession keep-alive has been established, until it is
+  /// torn down or an attempt to restore it fails.
   ///
-  /// Written exclusively from `sessionQueue`, so writes land in the same
-  /// order as the calls that requested them. This is deliberately *not* set
-  /// optimistically ahead of activation: the plugin reads it as authority to
-  /// skip the background teardown (`handleDidEnterBackground`) and to allow a
-  /// stream start while backgrounded (`mustNotStreamNow`). Claiming a
-  /// keep-alive that has not been established yet would let the app suspend
-  /// with a live `DeviceSession` and a texture nothing will release. While
-  /// activation is in flight this reads `false`, so both call sites take the
-  /// safe branch and tear down rather than trust an unfulfilled promise.
+  /// `sessionQueue` owns this: every write happens there, and every decision
+  /// that depends on it is made there too, so the queue's serial order is the
+  /// state machine. That is why no separate record of "what was last
+  /// requested" is needed — an `enable` and a `disable` run in call order and
+  /// each sees what the previous one left.
+  ///
+  /// A transient OS interruption (phone call, Siri) deactivates the session
+  /// underneath us without clearing this, which is deliberate: it is what lets
+  /// the `.ended` handler know the keep-alive is ours to restore. So this is
+  /// "the keep-alive is established", not "audio is flowing this instant".
+  ///
+  /// Deliberately *not* set optimistically ahead of activation. The plugin
+  /// reads it as authority to skip the background teardown
+  /// (`handleDidEnterBackground`) and to allow a stream start while
+  /// backgrounded (`mustNotStreamNow`); claiming a keep-alive that has not
+  /// been established yet would let the app suspend with a live
+  /// `DeviceSession` and a texture nothing will release. While activation is
+  /// in flight this reads `false`, so both call sites take the safe branch.
   private var _isEnabled = false
 
-  /// The most recently requested state, written on the caller's thread the
-  /// moment `enable`/`disable` is called. Queued work re-reads it so a
-  /// request that was superseded while it waited becomes a no-op — this is
-  /// what stops a failed activation's rollback from clobbering a later
-  /// successful one, and stops an interruption re-activation from resurrecting
-  /// a session that was disabled while the notification was in flight.
-  private var _desiredEnabled = false
-
-  /// Whether the AVAudioSession keep-alive is currently active.
+  /// Whether the AVAudioSession keep-alive is currently active. Reads from
+  /// off the queue are a snapshot; the authoritative checks are the ones
+  /// inside the queued blocks.
   var isEnabled: Bool {
     stateLock.lock()
     defer { stateLock.unlock() }
@@ -67,12 +71,10 @@ final class BackgroundStreamingController {
   /// the serial queue rather than being told it already succeeded.
   func enable(completion: @escaping (Error?) -> Void) {
     registerObserversIfNeeded()
-    setDesiredEnabled(true)
     sessionQueue.async { [weak self] in
-      // Nothing to do, and nothing to report: the controller is gone, a
-      // `disable()` superseded this request while it waited, or the session is
-      // already active.
-      guard let self, self.desiredEnabled, !self.isEnabled else {
+      // Nothing to do, and nothing to report: the controller is gone, or the
+      // session is already active.
+      guard let self, !self.isEnabled else {
         completion(nil)
         return
       }
@@ -94,11 +96,10 @@ final class BackgroundStreamingController {
   /// keeps the common "stop streaming, then leave the app" sequence from
   /// being suspended with the session still active.
   func disable(completion: @escaping () -> Void = {}) {
-    setDesiredEnabled(false)
     sessionQueue.async { [weak self] in
-      // Same three cases as `enable`, inverted: gone, superseded by a later
-      // `enable()`, or already inactive.
-      guard let self, !self.desiredEnabled, self.isEnabled else {
+      // Same as `enable`, inverted: the controller is gone, or the session is
+      // already inactive.
+      guard let self, self.isEnabled else {
         completion()
         return
       }
@@ -124,21 +125,9 @@ final class BackgroundStreamingController {
     try session.setActive(true)
   }
 
-  private var desiredEnabled: Bool {
-    stateLock.lock()
-    defer { stateLock.unlock() }
-    return _desiredEnabled
-  }
-
   private func setEnabled(_ value: Bool) {
     stateLock.lock()
     _isEnabled = value
-    stateLock.unlock()
-  }
-
-  private func setDesiredEnabled(_ value: Bool) {
-    stateLock.lock()
-    _desiredEnabled = value
     stateLock.unlock()
   }
 
@@ -162,7 +151,7 @@ final class BackgroundStreamingController {
   }
 
   @objc private func handleInterruption(_ notification: Notification) {
-    guard desiredEnabled,
+    guard isEnabled,
           let info = notification.userInfo,
           let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
           let type = AVAudioSession.InterruptionType(rawValue: typeValue)
@@ -177,7 +166,7 @@ final class BackgroundStreamingController {
       // above and this block, and the serial queue would otherwise order the
       // re-activation *after* the deactivation and leave the session live.
       sessionQueue.async { [weak self] in
-        guard let self, self.desiredEnabled else { return }
+        guard let self, self.isEnabled else { return }
         do {
           try AVAudioSession.sharedInstance().setActive(true)
           self.setEnabled(true)
@@ -195,10 +184,10 @@ final class BackgroundStreamingController {
   @objc private func handleMediaServicesReset() {
     // Rare but documented — whole audio stack reset. Re-activate if we were
     // keeping the session alive.
-    guard desiredEnabled else { return }
+    guard isEnabled else { return }
     NSLog("[MWDAT] AVAudioSession media services were reset — re-activating")
     sessionQueue.async { [weak self] in
-      guard let self, self.desiredEnabled else { return }
+      guard let self, self.isEnabled else { return }
       do {
         try Self.activateSession()
         self.setEnabled(true)
