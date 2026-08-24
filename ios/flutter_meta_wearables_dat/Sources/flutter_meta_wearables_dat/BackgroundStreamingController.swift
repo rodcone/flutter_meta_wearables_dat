@@ -69,15 +69,10 @@ final class BackgroundStreamingController {
     registerObserversIfNeeded()
     setDesiredEnabled(true)
     sessionQueue.async { [weak self] in
-      guard let self else {
-        completion(nil)
-        return
-      }
-      guard self.desiredEnabled else {
-        completion(nil)
-        return
-      }
-      if self.isEnabled {
+      // Nothing to do, and nothing to report: the controller is gone, a
+      // `disable()` superseded this request while it waited, or the session is
+      // already active.
+      guard let self, self.desiredEnabled, !self.isEnabled else {
         completion(nil)
         return
       }
@@ -101,11 +96,9 @@ final class BackgroundStreamingController {
   func disable(completion: @escaping () -> Void = {}) {
     setDesiredEnabled(false)
     sessionQueue.async { [weak self] in
-      guard let self else {
-        completion()
-        return
-      }
-      guard !self.desiredEnabled, self.isEnabled else {
+      // Same three cases as `enable`, inverted: gone, superseded by a later
+      // `enable()`, or already inactive.
+      guard let self, !self.desiredEnabled, self.isEnabled else {
         completion()
         return
       }
