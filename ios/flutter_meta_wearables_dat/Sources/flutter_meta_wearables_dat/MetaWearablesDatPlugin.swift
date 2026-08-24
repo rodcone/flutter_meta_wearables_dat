@@ -339,8 +339,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   private func disableBackgroundStreaming(result: @escaping FlutterResult) {
-    backgroundController.disable()
-    result(nil)
+    // Resolved from the completion rather than immediately: the deactivation
+    // runs on the controller's queue, and answering Dart before it lands lets
+    // the app background and be suspended with the session still active.
+    backgroundController.disable {
+      DispatchQueue.main.async { result(nil) }
+    }
   }
 
   // MARK: - Permissions
@@ -1437,7 +1441,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let session = addedCamera.stream
 
       // 4. Wire listeners. Stream errors are forwarded to Dart by
-      // `streamErrorHandler` once its `session` is set below.
+      // `streamErrorHandler` once its `session` is set below. The frame
+      // handler outlives the session, so drop any parameter sets cached from
+      // a previous stream before the first frame of this one arrives.
+      videoFrameHandler.resetParameterSetCache()
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         self.processAndSendFrame(videoFrame)
