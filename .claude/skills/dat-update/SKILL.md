@@ -263,6 +263,6 @@ maintainer reviews these like any other change.
 ## If the run has to abort
 
 Say so immediately with what completed and what didn't. The branch holds the partial work — leave
-it, don't try to unwind it. Restore only global state you changed: the Flutter SPM setting (Phase 6)
-and the CocoaPods baseline. Never `git checkout` or `git reset` across the maintainer's uncommitted
+it, don't try to unwind it. Restore only global state you changed: the Flutter SPM setting (Phase 6).
+There is no CocoaPods baseline to restore any more — the example app is committed deintegrated. Never `git checkout` or `git reset` across the maintainer's uncommitted
 work.
