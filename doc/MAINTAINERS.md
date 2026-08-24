@@ -79,11 +79,7 @@ The script strips x86_64 from each simulator slice, renames the directory from `
 
 Force the example app to recognize the updated files:
 
-1. Navigate to the example's iOS folder: `cd example/ios`
-2. Update Pods: Run `pod update` (not just `pod install`) to re-link the local vendored files
-3. Clean Build: Open Xcode and perform a Clean Build Folder (`Cmd+Shift+K`)
-
-If you're testing under Swift Package Manager (`flutter config --enable-swift-package-manager`), skip the `pod update` step and instead delete any cached SwiftPM state before rebuilding:
+The example app builds via SwiftPM, so delete the cached SwiftPM state to force a fresh resolve against the new binaries:
 
 ```bash
 rm -rf example/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
@@ -91,7 +87,9 @@ rm -rf example/ios/Runner.xcworkspace/xcshareddata/swiftpm
 cd example && flutter clean
 ```
 
-SwiftPM caches binary-target checksums in `Package.resolved`; clearing the workspace state forces a fresh resolve against the new xcframeworks.
+Then a Clean Build Folder in Xcode (`Cmd+Shift+K`) if you build from there.
+
+Note this is hygiene rather than a checksum problem: both plugins use `.binaryTarget(path:)`, which carries no checksum, and neither committed `Package.resolved` contains an MWDAT entry at all (they only pin the remote packages that `image_picker` and friends pull in). Clearing the workspace state forces Xcode to re-read the replaced xcframeworks instead of reusing a stale build graph.
 
 ### 4. Implement API Changes
 
@@ -101,19 +99,17 @@ Meta ships its own AI skills alongside the SDK at [`plugins/mwdat-ios/skills/`](
 
 ### 5. Test Build
 
-Verify both iOS resolvers from a clean state:
+Verify the iOS build from a clean state:
 
 ```bash
-# CocoaPods (the example app's committed baseline)
-flutter config --no-enable-swift-package-manager
 cd example && flutter clean && flutter build ios --release --no-codesign
-
-# Swift Package Manager (Flutter migrates the pbxproj on the fly)
-flutter config --enable-swift-package-manager
-flutter clean && flutter build ios --release --no-codesign
 ```
 
-Then run the example app on a device or simulator on whichever resolver matches your usual workflow, to verify the new DAT version actually works at runtime. CI's `ios-build` job covers both paths on every PR.
+Then run the example app on a device or simulator to verify the new DAT version actually works at runtime. CI's `ios-build` job covers this on every PR.
+
+**The podspec path is covered by CI, not by the example app.** The example app is deintegrated from CocoaPods, so a local example build only ever exercises SwiftPM. The `cocoapods-build` CI job scaffolds a throwaway app, adds both plugins as path dependencies, disables SwiftPM and builds through the podspecs, then asserts both appear in the generated `Podfile.lock`. Changes to source paths, system frameworks, or vendored frameworks still have to be applied to *both* manifests, but a podspec break will now fail CI rather than reaching consumers.
+
+To reproduce it locally, follow the same steps the job does: `flutter config --no-enable-swift-package-manager`, `flutter create` a scratch app, `flutter pub add` both plugins by path, raise `IPHONEOS_DEPLOYMENT_TARGET` and the Podfile `platform` to 17.2, then build. Re-enable SwiftPM afterwards.
 
 ## iOS resolver layout
 

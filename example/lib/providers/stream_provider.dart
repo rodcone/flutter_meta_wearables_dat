@@ -22,7 +22,7 @@ class StreamSessionProvider extends ChangeNotifier {
   VideoStreamSize? _videoStreamSize;
   bool _hasActiveDevice = false;
   bool _isStreaming = false;
-  double _fps = 15;
+  double _fps = 30;
   StreamQuality _streamQuality = StreamQuality.medium;
   VideoCodec _videoCodec = VideoCodec.raw;
   StreamSessionState? _sessionState;

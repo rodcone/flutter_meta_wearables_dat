@@ -117,4 +117,6 @@ for xcf in "${xcframeworks[@]}"; do
   fi
 done
 
-echo "Done. Run 'cd example/ios && pod update' to refresh the example."
+echo "Done. Delete both swiftpm state dirs to force a fresh SwiftPM resolve:"
+echo "  example/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
+echo "  example/ios/Runner.xcworkspace/xcshareddata/swiftpm"
