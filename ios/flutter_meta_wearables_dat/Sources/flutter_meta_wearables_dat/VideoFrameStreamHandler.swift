@@ -171,13 +171,17 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         let params = cachedParameterSets
         cacheLock.unlock()
 
-        // A burst can open on any true IRAP picture, which the SDK's
-        // `DependsOnOthers` attachment does not always flag. Union the two
-        // rather than replacing one with the other: the NAL scan fails closed
-        // on framing it cannot read, and on its own that would ship an IRAP
-        // without parameter sets — the very green-frame bug this exists to fix.
+        // A burst opens on a true IRAP picture, keyed off the NAL type. The
+        // SDK's `DependsOnOthers` attachment is consulted ONLY when the scan
+        // could not read the framing: the attachment is absent on most
+        // predicted frames (which reads as isKeyframe == true), and treating
+        // that as "opens a burst" stapled VPS/SPS/PPS onto nearly every
+        // P-frame — parameter sets are the universal "decode from here"
+        // marker, so downstream decoders sampled mid-GOP P-frames as entry
+        // points and produced green, glitched frames. Verified on hardware
+        // 2026-08-24: keying off the scan alone restored clean recognition.
         let summary = Self.summarizeNalUnits(frameBytes)
-        let opensBurst = summary.hasIrap || isKeyframe
+        let opensBurst = summary.hasIrap || (!summary.parsed && isKeyframe)
 
         // Only withhold the cached sets when the frame genuinely carries all
         // three itself. Checking just the first NAL is not enough: encoders
@@ -216,6 +220,10 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
 
     /// What a single walk of an access unit's NAL units established.
     private struct NalSummary {
+        /// The walk read the framing cleanly end to end. False when the data
+        /// was too short or a length prefix was malformed — only then is the
+        /// SDK's keyframe attachment worth consulting as a fallback.
+        var parsed = true
         /// An IRAP picture appears in the access unit.
         var hasIrap = false
         /// VPS, SPS and PPS all appear ahead of the first IRAP, so the frame
@@ -236,6 +244,11 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         var sawSps = false
         var sawPps = false
 
+        guard data.count >= nalLengthSize + 1 else {
+            summary.parsed = false
+            return summary
+        }
+
         var pos = data.startIndex
         while pos + nalLengthSize < data.endIndex {
             var length = 0
@@ -244,6 +257,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             }
             let payloadStart = pos + nalLengthSize
             guard length > 0, payloadStart + length <= data.endIndex else {
+                summary.parsed = false
                 return summary
             }
             let type = (data[payloadStart] >> 1) & 0x3F
