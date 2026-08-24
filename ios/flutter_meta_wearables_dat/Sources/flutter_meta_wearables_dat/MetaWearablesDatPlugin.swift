@@ -64,6 +64,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // actually reach `.stopped` before releasing its references. See the comment
   // there: letting go early cancels the SDK's stop cascade mid-flight.
   private let streamStopTimeout: TimeInterval = 3.0
+  private let deviceSessionStopTimeout: TimeInterval = 10.0
   // After a pin change the shared selector is rebuilt and resolves its active
   // device asynchronously; `createSession` against an unresolved selector
   // returns `noEligibleDevice`. Bound how long we wait for the pinned device
@@ -1006,8 +1007,52 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceSessionErrorTask?.cancel()
     deviceSessionErrorTask = nil
     if let session = deviceSession {
-      session.stop()
+      // Capture the state stream BEFORE stop() so the transition can't be
+      // missed, then hold the strong reference until the session actually
+      // reaches `.stopped` — same weak-executor hazard as the stream's stop
+      // cascade: releasing early can cancel the SDK's session-end handshake
+      // before the glasses hear about it, which also mutes the stream-ended
+      // tone the glasses play on session end.
+      let stateStream = session.stateStream()
       deviceSession = nil
+      session.stop()
+      await awaitDeviceSessionStopped(session, stateStream: stateStream)
+    }
+  }
+
+  /// Suspends until `session` reaches `.stopped`, with
+  /// `deviceSessionStopTimeout` as a backstop for a dead device or wedged SDK
+  /// and `abortStopWait` as an early out when the background stop assertion
+  /// expires.
+  @MainActor
+  private func awaitDeviceSessionStopped(
+    _ session: DeviceSession,
+    stateStream: AsyncStream<DeviceSessionState>
+  ) async {
+    if session.state == .stopped { return }
+    let stopped = await withTaskGroup(of: Bool.self) { group in
+      group.addTask {
+        for await state in stateStream where state == .stopped { return true }
+        return false
+      }
+      group.addTask { [timeout = deviceSessionStopTimeout] in
+        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        return false
+      }
+      group.addTask { @MainActor [weak self] in
+        while !Task.isCancelled {
+          guard let self, !self.abortStopWait else { return false }
+          try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return false
+      }
+      let first = await group.next() ?? false
+      group.cancelAll()
+      return first
+    }
+    if !stopped, session.state != .stopped {
+      NSLog(
+        "[MWDAT] device session did not reach .stopped within \(deviceSessionStopTimeout)s (state: \(session.state), aborted: \(abortStopWait)) — releasing anyway")
     }
   }
 
@@ -1524,13 +1569,24 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   func stopStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
     Task { @MainActor in
       guard streamSession != nil else {
+        // No stream, but a failed start can leave a started DeviceSession
+        // cached — end it anyway so the glasses aren't left mid-session
+        // (which would also mute the next start's tone).
+        if deviceSession != nil {
+          await teardownDeviceSession()
+        }
         result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
         return
       }
 
-      // Tear down the stream only — keep the DeviceSession alive so the next
-      // startStreamSession is a fast `addCamera` rather than a full reconnect.
-      await teardownStreamOnly()
+      // End the DeviceSession too, not just the stream. The glasses'
+      // stream-ended tone hangs off the session lifecycle — Meta's
+      // CameraAccess sample ends its session as the user-visible stop and
+      // chimes; keeping the session cached here (the old behaviour, for fast
+      // restarts) meant the glasses only chimed when the app was backgrounded
+      // or killed. Trade-off: the next startStreamSession is a full session
+      // reconnect rather than a fast addCamera.
+      await teardownDeviceSession()
       result(true)
     }
   }
