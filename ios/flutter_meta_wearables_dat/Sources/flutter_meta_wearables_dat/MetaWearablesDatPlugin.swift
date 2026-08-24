@@ -1178,6 +1178,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func handleWillEnterForeground() {
     isInBackground = false
+    // An expired background assertion sets `abortStopWait` and nothing else
+    // clears it, so without this reset one expiry would poison every later
+    // stop-wait: the abort poll in `awaitStreamStopped` /
+    // `awaitDeviceSessionStopped` would bail on its first check and release
+    // the stream or session mid-cascade — the muted-chime / stale-capability
+    // failure those waits exist to prevent.
+    abortStopWait = false
     NSLog("[MWDAT] App entering foreground — HEVC decoder will be recreated on next frame")
     // Deliberately nothing else. With background streaming off the session is
     // stopped and stays stopped: the plugin never reactivates the glasses
