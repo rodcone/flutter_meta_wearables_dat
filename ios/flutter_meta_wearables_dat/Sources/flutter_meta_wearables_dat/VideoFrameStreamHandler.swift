@@ -14,15 +14,19 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         qos: .userInitiated
     )
 
-    /// HEVC IRAP NAL unit types (BLA/CRA/IDR) — the pictures a decoder can
-    /// start on. Matches the range the Dart side uses to pick a burst start.
+    /// HEVC IRAP NAL unit types — the pictures a decoder can start on.
+    /// H.265 Table 7-1: 16-18 BLA, 19-20 IDR, 21 CRA, 22-23 reserved IRAP.
     private static let irapNalTypeRange: ClosedRange<UInt8> = 16 ... 23
 
-    /// HVCC NAL-unit length-prefix size. The whole pipeline — the parameter
-    /// sets written by `hevcParameterSetsAsHvcc` and the Dart Annex B
-    /// converter that consumes these payloads — assumes 4 bytes, so the IRAP
-    /// scan uses the same constant rather than reading it per format and
-    /// risking a framing mismatch.
+    /// HEVC parameter-set NAL unit types: 32 VPS, 33 SPS, 34 PPS.
+    private static let vpsNalType: UInt8 = 32
+    private static let spsNalType: UInt8 = 33
+    private static let ppsNalType: UInt8 = 34
+
+    /// HVCC NAL-unit length-prefix size. `hevcParameterSetsAsHvcc` writes
+    /// 4-byte prefixes, so the scan assumes the same. HVCC also permits 1 and
+    /// 2; the format description reports which, and `hevcParameterSetsAsHvcc`
+    /// logs when it is not 4 rather than letting the scan mis-parse silently.
     private static let nalLengthSize = 4
 
     /// Last parameter sets seen, refreshed from every frame that carries a
@@ -48,6 +52,18 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
     func onCancel(withArguments _: Any?) -> FlutterError? {
         sinkQueue.sync { eventSink = nil }
         return nil
+    }
+
+    /// Drops the cached parameter sets. Called when a stream session starts,
+    /// because the handler outlives every session: sets describing the
+    /// previous stream's resolution must never be prepended to a new stream's
+    /// IRAP, which would activate an SPS whose dimensions disagree with the
+    /// coded picture. Sessions restart routinely now that backgrounding tears
+    /// the DeviceSession down.
+    func resetParameterSetCache() {
+        cacheLock.lock()
+        cachedParameterSets = Data()
+        cacheLock.unlock()
     }
 
     // MARK: - Emission
@@ -155,19 +171,34 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         let params = cachedParameterSets
         cacheLock.unlock()
 
-        // Prepend parameter sets whenever the frame opens on an IRAP picture,
-        // keyed off the NAL type rather than the SDK's keyframe attachment: a
-        // burst opening here must be self-decodable, and the two signals do
-        // not always agree. Skip if the frame already begins with parameter
-        // sets so keyframes that shipped them stay single-copy.
-        let opensOnIrap = Self.containsIrapNal(frameBytes)
-        let alreadyHasParams = Self.startsWithParameterSet(frameBytes)
+        // A burst can open on any true IRAP picture, which the SDK's
+        // `DependsOnOthers` attachment does not always flag. Union the two
+        // rather than replacing one with the other: the NAL scan fails closed
+        // on framing it cannot read, and on its own that would ship an IRAP
+        // without parameter sets — the very green-frame bug this exists to fix.
+        let summary = Self.summarizeNalUnits(frameBytes)
+        let opensBurst = summary.hasIrap || isKeyframe
+
+        // Only withhold the cached sets when the frame genuinely carries all
+        // three itself. Checking just the first NAL is not enough: encoders
+        // commonly repeat the PPS per access unit, so `[PPS, IDR]` would look
+        // self-sufficient while its VPS and SPS are missing.
+        let willPrepend = opensBurst
+            && !summary.carriesAllParameterSets
+            && !params.isEmpty
 
         var data = Data()
-        if opensOnIrap, !alreadyHasParams, !params.isEmpty {
+        if willPrepend {
             data.append(params)
         }
         data.append(frameBytes)
+
+        // `isKeyframe` is documented as "carries parameter sets and can be
+        // decoded without prior frames", so it tracks what actually shipped.
+        // Flagging an IRAP that went out without its sets would point a
+        // recorder at an undecodable segment start.
+        let selfContained = opensBurst
+            && (summary.carriesAllParameterSets || willPrepend)
 
         let payload: [String: Any] = [
             "codec": "hvc1",
@@ -175,7 +206,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             "width": width,
             "height": height,
             "ptsUs": ptsUs,
-            "isKeyframe": isKeyframe || opensOnIrap,
+            "isKeyframe": selfContained,
         ]
 
         sinkQueue.async { [weak self] in
@@ -183,41 +214,53 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         }
     }
 
-    /// The HEVC NAL unit type of the first length-prefixed NAL in [data], or
-    /// nil when the framing cannot be read. Type is bits 1-6 of the first
-    /// header byte after the length prefix.
-    private static func firstNalType(_ data: Data) -> UInt8? {
-        guard data.count >= nalLengthSize + 1 else { return nil }
-        let headerByte = data[data.startIndex + nalLengthSize]
-        return (headerByte >> 1) & 0x3F
+    /// What a single walk of an access unit's NAL units established.
+    private struct NalSummary {
+        /// An IRAP picture appears in the access unit.
+        var hasIrap = false
+        /// VPS, SPS and PPS all appear ahead of the first IRAP, so the frame
+        /// is self-decodable without anything being prepended.
+        var carriesAllParameterSets = false
     }
 
-    /// Whether the first NAL in [data] is a parameter set (VPS 32, SPS 33,
-    /// PPS 34), so a keyframe that already carries its sets is not doubled.
-    private static func startsWithParameterSet(_ data: Data) -> Bool {
-        guard let type = firstNalType(data) else { return false }
-        return type >= 32 && type <= 34
-    }
+    /// Walks the HVCC length-prefixed NAL units in [data] once, reporting
+    /// whether the access unit opens a burst and whether it already carries
+    /// the full parameter-set trio.
+    ///
+    /// Fails closed: malformed or unexpected framing returns an empty summary,
+    /// which leaves the decision to the SDK's keyframe attachment rather than
+    /// mangling a frame the scan could not read.
+    private static func summarizeNalUnits(_ data: Data) -> NalSummary {
+        var summary = NalSummary()
+        var sawVps = false
+        var sawSps = false
+        var sawPps = false
 
-    /// Whether [data] contains an IRAP picture, walking the HVCC
-    /// length-prefixed NAL units. Parameter-set NALs preceding the IRAP are
-    /// skipped over, so a frame that already opens with sets still counts.
-    private static func containsIrapNal(_ data: Data) -> Bool {
         var pos = data.startIndex
-        while pos + nalLengthSize + 1 <= data.endIndex {
+        while pos + nalLengthSize < data.endIndex {
             var length = 0
             for offset in 0 ..< nalLengthSize {
                 length = (length << 8) | Int(data[pos + offset])
             }
             let payloadStart = pos + nalLengthSize
             guard length > 0, payloadStart + length <= data.endIndex else {
-                return false
+                return summary
             }
             let type = (data[payloadStart] >> 1) & 0x3F
-            if irapNalTypeRange.contains(type) { return true }
+            if irapNalTypeRange.contains(type) {
+                summary.hasIrap = true
+                summary.carriesAllParameterSets = sawVps && sawSps && sawPps
+                return summary
+            }
+            switch type {
+            case vpsNalType: sawVps = true
+            case spsNalType: sawSps = true
+            case ppsNalType: sawPps = true
+            default: break
+            }
             pos = payloadStart + length
         }
-        return false
+        return summary
     }
 
     /// Extract HEVC parameter-set NAL units (VPS, SPS, PPS, …) from the supplied
@@ -239,6 +282,10 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             nalUnitHeaderLengthOut: &nalUnitHeaderLength
         )
         guard countStatus == noErr, paramSetCount > 0 else { return Data() }
+        if nalUnitHeaderLength != Int32(nalLengthSize) {
+            NSLog(
+                "[MWDAT] HEVC NAL length prefix is \(nalUnitHeaderLength) bytes, not \(nalLengthSize) — parameter-set framing may not match the sample data")
+        }
 
         var output = Data()
         for index in 0 ..< paramSetCount {
