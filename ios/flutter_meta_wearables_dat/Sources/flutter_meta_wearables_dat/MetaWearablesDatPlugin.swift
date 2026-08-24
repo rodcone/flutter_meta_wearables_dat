@@ -911,16 +911,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // unregister a live texture and orphan a running stream with no reference
     // left to stop it.
     if let stoppingStream {
-      let deadline = Date().addingTimeInterval(streamStopTimeout)
-      // `abortStopWait` lets an expiring background assertion cut the wait
-      // short. Continuing to poll after the OS has told us we are out of time
-      // just burns the last of the budget on a wait that cannot complete.
-      while stoppingStream.state != .stopped, Date() < deadline, !abortStopWait {
-        try? await Task.sleep(nanoseconds: 50_000_000)
-      }
-      if stoppingStream.state != .stopped {
-        NSLog("[MWDAT] stream did not reach .stopped (state: \(stoppingStream.state), aborted: \(abortStopWait))")
-      }
+      await awaitStreamStopped(stoppingStream)
     }
 
     if camera === stoppingCamera { camera = nil }
@@ -948,6 +939,60 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     frameCounter = 0
     lastFrameSendTime = nil
     videoStreamSizeHandler.reset()
+  }
+
+  /// Suspends until `stream` reaches `.stopped`, with `streamStopTimeout` as a
+  /// backstop and `abortStopWait` as an early out when the background stop
+  /// assertion expires. Event-driven on `statePublisher`, mirroring Meta's
+  /// CameraAccess sample, which releases its stream references only on the
+  /// observed `.stopped` — the SDK's stop cascade holds the `Stream` weakly,
+  /// so the caller's strong reference must outlive the whole handshake or the
+  /// glasses never receive the capability removal. The listener is attached
+  /// before the state is checked so a transition can't slip between the two.
+  @MainActor
+  private func awaitStreamStopped(_ stream: MWDATCamera.Stream) async {
+    var listenerToken: (any MWDATCore.AnyListenerToken)?
+    let states = AsyncStream<StreamState> { continuation in
+      listenerToken = stream.statePublisher.listen { state in
+        continuation.yield(state)
+      }
+    }
+
+    if stream.state != .stopped {
+      let stopped = await withTaskGroup(of: Bool.self) { group in
+        group.addTask {
+          for await state in states where state == .stopped {
+            return true
+          }
+          return false
+        }
+        group.addTask { [timeout = streamStopTimeout] in
+          try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+          return false
+        }
+        // `abortStopWait` lets an expiring background assertion cut the wait
+        // short: once the OS says the budget is gone, a wait that cannot
+        // complete only burns what little remains.
+        group.addTask { @MainActor [weak self] in
+          while !Task.isCancelled {
+            guard let self, !self.abortStopWait else { return false }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+          }
+          return false
+        }
+        let first = await group.next() ?? false
+        group.cancelAll()
+        return first
+      }
+      if !stopped, stream.state != .stopped {
+        NSLog(
+          "[MWDAT] stream did not reach .stopped within \(streamStopTimeout)s (state: \(stream.state), aborted: \(abortStopWait)) — releasing anyway; the glasses may keep a stale capability")
+      }
+    }
+
+    if let listenerToken {
+      await listenerToken.cancel()
+    }
   }
 
   /// Tears down both stream and DeviceSession. Used when the device
@@ -1044,9 +1089,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       }
       // The whole DeviceSession, not just the stream — matching Meta's
       // CameraAccess sample. Stopping only the stream leaves the plugin as the
-      // last strong owner of the `Stream`, which is why that path needs a
-      // 3s poll before releasing (see `performTeardownStreamOnly`). Suspension
-      // mid-poll would then strand a live capability on the glasses and break
+      // last strong owner of the `Stream`, which is why that path holds it
+      // through `awaitStreamStopped` before releasing. Suspension
+      // mid-wait would then strand a live capability on the glasses and break
       // the *next* start. Stopping the session makes that unreachable: the SDK
       // owns it, and the capability goes away with it either way.
       await teardownDeviceSession()
