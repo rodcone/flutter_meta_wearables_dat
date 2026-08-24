@@ -544,7 +544,9 @@ class CameraPermissionException implements Exception {
   bool get isInternalError => code == 'INTERNAL_ERROR';
 
   @override
-  String toString() => 'CameraPermissionException($code): $message';
+  String toString() => details == null
+      ? 'CameraPermissionException($code): $message'
+      : 'CameraPermissionException($code): $message $details';
 }
 
 /// Represents a photo captured from a Meta Wearables device.
