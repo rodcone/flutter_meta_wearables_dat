@@ -123,7 +123,7 @@ internal class AppForegroundTracker(
     }
 
     companion object {
-        private const val TAG = "MWDAT"
+        private const val TAG = "MetaWearablesDat"
         /** Matches `ProcessLifecycleOwner`'s own debounce. */
         const val DEFAULT_DEBOUNCE_MS = 700L
     }
