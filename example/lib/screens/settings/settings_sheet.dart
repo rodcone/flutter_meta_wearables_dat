@@ -91,10 +91,32 @@ class _StreamSettingsSection extends StatelessWidget {
               onCodecChanged: sp.setVideoCodec,
               enabled: !locked,
             ),
-            const SizedBox(height: 16),
-            _BackgroundStreamingToggle(
-              value: sp.backgroundStreamingEnabled,
-              onChanged: sp.setBackgroundStreamingEnabled,
+            // On iOS the background toggle only applies to hvc1, so it
+            // animates out when raw is selected. Android streams raw and
+            // keeps the toggle visible unconditionally.
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              switchInCurve: Curves.easeInOut,
+              switchOutCurve: Curves.easeInOut,
+              transitionBuilder: (child, animation) => SizeTransition(
+                sizeFactor: animation,
+                axisAlignment: -1,
+                child: FadeTransition(opacity: animation, child: child),
+              ),
+              child: (!sp.supportsHvc1 || sp.videoCodec == VideoCodec.hvc1)
+                  ? Column(
+                      key: const ValueKey('background-toggle'),
+                      children: [
+                        const SizedBox(height: 16),
+                        _BackgroundStreamingToggle(
+                          value: sp.backgroundStreamingEnabled,
+                          onChanged: sp.setBackgroundStreamingEnabled,
+                        ),
+                      ],
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('background-toggle-hidden'),
+                    ),
             ),
           ],
         );
@@ -390,27 +412,22 @@ class _CodecSelector extends StatelessWidget {
         const SizedBox(height: 8),
         Row(
           children: [
-            // iOS streams hvc1 exclusively in this app, so the raw chip is
-            // only offered where hvc1 is not (Android).
-            if (!hvc1Supported) ...[
-              _CodecChip(
-                label: 'RAW',
-                selected: videoCodec == VideoCodec.raw,
-                onTap: enabled ? () => onCodecChanged(VideoCodec.raw) : null,
-              ),
-              const SizedBox(width: 8),
-            ],
             _CodecChip(
-              label: 'HVC1 ${hvc1Supported ? '' : '(iOS only)'}',
-              selected: videoCodec == VideoCodec.hvc1,
-              enabled: hvc1Supported && enabled,
-              tooltip: hvc1Supported
-                  ? 'HEVC (iOS only)'
-                  : 'HVC1 is unavailable on Android',
-              onTap: (hvc1Supported && enabled)
-                  ? () => onCodecChanged(VideoCodec.hvc1)
-                  : null,
+              label: 'RAW',
+              selected: videoCodec == VideoCodec.raw,
+              onTap: enabled ? () => onCodecChanged(VideoCodec.raw) : null,
             ),
+            // The codec is only a choice on iOS; Android streams raw.
+            if (hvc1Supported) ...[
+              const SizedBox(width: 8),
+              _CodecChip(
+                label: 'HVC1',
+                selected: videoCodec == VideoCodec.hvc1,
+                enabled: enabled,
+                tooltip: 'HEVC (iOS only)',
+                onTap: enabled ? () => onCodecChanged(VideoCodec.hvc1) : null,
+              ),
+            ],
           ],
         ),
       ],

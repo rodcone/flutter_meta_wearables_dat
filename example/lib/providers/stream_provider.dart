@@ -433,8 +433,7 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   void setVideoCodec(VideoCodec codec) {
-    // iOS streams hvc1 exclusively in this app; raw is Android's codec.
-    if (Platform.isIOS && codec == VideoCodec.raw) return;
+    if (codec == VideoCodec.hvc1 && !supportsHvc1) return;
 
     HapticFeedback.lightImpact();
 
