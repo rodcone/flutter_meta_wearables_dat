@@ -24,7 +24,8 @@ class StreamSessionProvider extends ChangeNotifier {
   bool _isStreaming = false;
   double _fps = 30;
   StreamQuality _streamQuality = StreamQuality.medium;
-  VideoCodec _videoCodec = VideoCodec.raw;
+  VideoCodec _videoCodec =
+      Platform.isIOS ? VideoCodec.hvc1 : VideoCodec.raw;
   StreamSessionState? _sessionState;
   StreamSessionError? _lastError;
   ThermalLevel? _thermalLevel;
@@ -432,6 +433,9 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   void setVideoCodec(VideoCodec codec) {
+    // iOS streams hvc1 exclusively in this app; raw is Android's codec.
+    if (Platform.isIOS && codec == VideoCodec.raw) return;
+
     HapticFeedback.lightImpact();
 
     if (_videoCodec != codec) {

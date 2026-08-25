@@ -390,12 +390,16 @@ class _CodecSelector extends StatelessWidget {
         const SizedBox(height: 8),
         Row(
           children: [
-            _CodecChip(
-              label: 'RAW',
-              selected: videoCodec == VideoCodec.raw,
-              onTap: enabled ? () => onCodecChanged(VideoCodec.raw) : null,
-            ),
-            const SizedBox(width: 8),
+            // iOS streams hvc1 exclusively in this app, so the raw chip is
+            // only offered where hvc1 is not (Android).
+            if (!hvc1Supported) ...[
+              _CodecChip(
+                label: 'RAW',
+                selected: videoCodec == VideoCodec.raw,
+                onTap: enabled ? () => onCodecChanged(VideoCodec.raw) : null,
+              ),
+              const SizedBox(width: 8),
+            ],
             _CodecChip(
               label: 'HVC1 ${hvc1Supported ? '' : '(iOS only)'}',
               selected: videoCodec == VideoCodec.hvc1,
