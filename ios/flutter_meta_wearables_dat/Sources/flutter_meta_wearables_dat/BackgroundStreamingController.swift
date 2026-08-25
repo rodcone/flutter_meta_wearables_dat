@@ -120,7 +120,7 @@ final class BackgroundStreamingController {
     try session.setCategory(
       .playAndRecord,
       mode: .videoRecording,
-      options: [.allowBluetoothHFP, .mixWithOthers]
+      options: [.mixWithOthers]
     )
     try session.setActive(true)
   }
