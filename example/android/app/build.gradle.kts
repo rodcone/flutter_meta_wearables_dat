@@ -46,6 +46,14 @@ android {
         manifestPlaceholders["META_CLIENT_TOKEN"] = metaClientToken
     }
 
+    lint {
+        // lintVitalRelease cannot resolve FlutterFragmentActivity on its
+        // classpath and reports MainActivity as not instantiatable, failing
+        // the release build. Known false positive with the Flutter Gradle
+        // plugin; the activity hierarchy is exercised at runtime regardless.
+        disable += "Instantiatable"
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
