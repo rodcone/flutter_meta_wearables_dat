@@ -125,6 +125,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var textureId: Int64?
   private var currentVideoCodec: MWDATCamera.VideoCodec = .raw
   private var decompressionSession: VTDecompressionSession?
+  private var lastFormatDescription: CMFormatDescription?
+  // Raw parameter-set payloads (VPS/SPS/PPS) the live decompression session
+  // was built from, compared against the in-band sets each sync frame carries
+  // so a bandwidth-adaptation switch recreates the session. Empty whenever no
+  // session exists.
+  private var sessionParameterSets: [Data] = []
+  // The format description the live session was created from. Samples whose
+  // attached description differs are rewrapped with this one before decode.
+  private var sessionFormatDescription: CMFormatDescription?
+  // The SDK delivers video frames on a thread pool, not a serial queue.
+  // Concurrent decode calls can feed the VTDecompressionSession out of
+  // order, and one out-of-order P-frame breaks the HEVC reference chain —
+  // with no periodic keyframe in the stream, decode never recovers
+  // (-12909 on every frame). All frame processing hops onto this serial
+  // queue to keep decode order identical to arrival order.
+  private let frameQueue = DispatchQueue(
+    label: "io.rodcone.mwdat.video-frames",
+    qos: .userInteractive
+  )
   // Background/foreground state — gates frame processing and decoder lifecycle
   private var isInBackground: Bool = false
   // Texture registry
@@ -936,6 +955,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
+      sessionParameterSets = []
     }
     frameCounter = 0
     lastFrameSendTime = nil
@@ -1099,6 +1119,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
+      sessionParameterSets = []
       NSLog("[MWDAT] VTDecompressionSession invalidated (app entered background)")
     }
 
@@ -1236,20 +1257,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    let now = Date()
-    let minInterval = 1.0 / currentTargetFPS
-
-    let timeSinceLastFrame: TimeInterval
-    if let lastSendTime = lastFrameSendTime {
-      timeSinceLastFrame = now.timeIntervalSince(lastSendTime)
-      if timeSinceLastFrame < minInterval {
-        return // throttle
-      }
-    } else {
-      timeSinceLastFrame = 0
-    }
-
-    // Get pixel buffer: direct extraction for raw, decode for hvc1
+    // Decode BEFORE the FPS throttle. hvc1 frames form a reference chain:
+    // skipping a single P-frame ahead of the decoder invalidates every later
+    // frame until the next keyframe (-12909 kVTVideoDecoderBadDataErr), and
+    // with a target FPS at or below the stream's rate the old pre-decode
+    // throttle dropped roughly every other frame — the preview froze between
+    // keyframes. The throttle below now gates only the texture push.
     let pixelBuffer: CVPixelBuffer?
     if currentVideoCodec == .raw {
       pixelBuffer = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer)
@@ -1262,16 +1275,22 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    // Emit the decoded raw BGRA pixels to the video_frames event channel so
-    // Dart subscribers (e.g. recorders) can access every frame. Guarded on
-    // hasListener so we don't memcpy for apps that don't opt in.
-    if currentVideoCodec == .raw, videoFrameHandler.hasListener {
-      videoFrameHandler.emitRaw(pixelBuffer: pixelBuffer, ptsUs: ptsUs)
-    }
-
     let width = CVPixelBufferGetWidth(pixelBuffer)
     let height = CVPixelBufferGetHeight(pixelBuffer)
     videoStreamSizeHandler.send(width: width, height: height)
+
+    let now = Date()
+    let minInterval = 1.0 / currentTargetFPS
+
+    let timeSinceLastFrame: TimeInterval
+    if let lastSendTime = lastFrameSendTime {
+      timeSinceLastFrame = now.timeIntervalSince(lastSendTime)
+      if timeSinceLastFrame < minInterval {
+        return
+      }
+    } else {
+      timeSinceLastFrame = 0
+    }
 
     // Update timing + counters regardless of whether we push to the texture.
     lastFrameSendTime = now
@@ -1320,10 +1339,44 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     )
     if status == noErr, let session {
       decompressionSession = session
+      sessionFormatDescription = formatDescription
       NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding (hardware)")
     } else {
+      sessionFormatDescription = nil
       NSLog("[MWDAT] Failed to create VTDecompressionSession: \(status)")
     }
+  }
+
+  /// Rewraps a sample's CMBlockBuffer in a new CMSampleBuffer carrying the
+  /// given format description. VTDecompressionSessionDecodeFrame validates
+  /// the sample's attached description against the session's — a session
+  /// rebuilt from in-band parameter sets would otherwise reject every sample
+  /// still carrying the SDK's stale description as bad data.
+  private static func rewrap(
+    _ sampleBuffer: CMSampleBuffer,
+    with formatDescription: CMFormatDescription
+  ) -> CMSampleBuffer? {
+    guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return nil }
+    var timing = CMSampleTimingInfo()
+    CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timing)
+    var sampleSize = CMBlockBufferGetDataLength(dataBuffer)
+    var newBuffer: CMSampleBuffer?
+    let status = CMSampleBufferCreateReady(
+      allocator: kCFAllocatorDefault,
+      dataBuffer: dataBuffer,
+      formatDescription: formatDescription,
+      sampleCount: 1,
+      sampleTimingEntryCount: 1,
+      sampleTimingArray: &timing,
+      sampleSizeEntryCount: 1,
+      sampleSizeArray: &sampleSize,
+      sampleBufferOut: &newBuffer
+    )
+    guard status == noErr else {
+      NSLog("[MWDAT] Failed to rewrap sample buffer with session format description: \(status)")
+      return nil
+    }
+    return newBuffer
   }
 
   /// Decodes a compressed CMSampleBuffer (HEVC) to a CVPixelBuffer.
@@ -1334,46 +1387,265 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
     // The glasses can push a new codec configuration mid-stream (the SDK's
     // `WarpEventCoordinator.handleCodecConfig` rebuilds its CMFormatDescription
-    // unconditionally), so every later sample buffer carries the new format.
-    // A session created from the old one then fails on every frame, and because
+    // unconditionally), so a later sample buffer can carry a new format. A
+    // session created from the old one then fails on every frame, and because
     // `decompressionSession` stays non-nil the lazy-create below never re-fires:
-    // the texture freezes permanently with no error on any channel. Meta's own
-    // in-SDK decoder does exactly this check before recreating.
-    if let existing = decompressionSession,
-       !VTDecompressionSessionCanAcceptFormatDescription(existing, formatDescription: formatDescription) {
-      NSLog("[MWDAT] HEVC format description changed mid-stream — recreating decompression session")
-      VTDecompressionSessionInvalidate(existing)
-      decompressionSession = nil
+    // the texture freezes permanently with no error on any channel. Checked
+    // only when the instance changes, because a session rebuilt from in-band
+    // parameter sets (below) legitimately disagrees with the sample buffers'
+    // stale attached description — re-checking every frame would recreate the
+    // session from the stale description in a loop.
+    if let last = lastFormatDescription, last !== formatDescription {
+      if let existing = decompressionSession,
+         !VTDecompressionSessionCanAcceptFormatDescription(existing, formatDescription: formatDescription) {
+        NSLog("[MWDAT] HEVC format description changed mid-stream — recreating decompression session")
+        VTDecompressionSessionInvalidate(existing)
+        decompressionSession = nil
+        sessionParameterSets = []
+      }
+    }
+    lastFormatDescription = formatDescription
+
+    // The bitstream outranks the SDK's format description. The glasses adapt
+    // quality to Bluetooth bandwidth a few seconds into a stream (and again
+    // whenever the link degrades), announcing each switch with an in-band
+    // VPS/SPS/PPS + IDR sync frame — but the SDK's format description is not
+    // reliably rebuilt when that happens, so a session created from it rejects
+    // every post-switch frame (kVTVideoDecoderBadDataErr), sync frames
+    // included, and the preview freezes until the parameters happen to match
+    // again. Verified on hardware 2026-08-25: high/30fps + hvc1 stalled ~3s
+    // in, with the switch IDR itself as the first rejected frame. When a frame
+    // carries the full parameter-set trio and it differs from what the live
+    // session was built with, rebuild the session from the in-band sets — the
+    // sync frame then decodes immediately and the switch is seamless.
+    let inBandSets = Self.inBandParameterSets(of: sampleBuffer)
+    if !inBandSets.isEmpty, inBandSets != sessionParameterSets {
+      if let existing = decompressionSession {
+        NSLog("[MWDAT] in-band HEVC parameter sets changed — recreating decompression session")
+        VTDecompressionSessionInvalidate(existing)
+        decompressionSession = nil
+      }
+      sessionParameterSets = []
+      if let inBandDescription = Self.makeFormatDescription(parameterSets: inBandSets) {
+        setupDecompressionSession(formatDescription: inBandDescription)
+        if decompressionSession != nil {
+          sessionParameterSets = inBandSets
+        }
+      }
     }
 
     // Lazily create decompression session on first frame.
     if decompressionSession == nil {
       setupDecompressionSession(formatDescription: formatDescription)
+      if decompressionSession != nil {
+        sessionParameterSets = Self.parameterSets(of: formatDescription)
+      }
     }
 
     guard let session = decompressionSession else { return nil }
 
+    var decodeTarget = sampleBuffer
+    if let sessionDescription = sessionFormatDescription,
+       sessionDescription !== formatDescription,
+       let rewrapped = Self.rewrap(sampleBuffer, with: sessionDescription) {
+      decodeTarget = rewrapped
+    }
+
     var outputBuffer: CVPixelBuffer?
+    var failedStatus: OSStatus = noErr
     var flagOut: VTDecodeInfoFlags = []
 
     let status = VTDecompressionSessionDecodeFrame(
       session,
-      sampleBuffer: sampleBuffer,
+      sampleBuffer: decodeTarget,
       flags: [],  // synchronous decode
       infoFlagsOut: &flagOut,
       outputHandler: { decodeStatus, _, imageBuffer, _, _ in
         if decodeStatus == noErr {
           outputBuffer = imageBuffer
+        } else {
+          failedStatus = decodeStatus
         }
       }
     )
 
     if status != noErr {
-      NSLog("[MWDAT] VTDecompressionSession decode error: \(status)")
+      logDecodeFailure(sampleBuffer, status: status)
       return nil
     }
 
+    if outputBuffer == nil {
+      logDecodeFailure(sampleBuffer, status: failedStatus)
+    } else if consecutiveDecodeFailures > 0 {
+      NSLog("[MWDAT] decode recovered after \(consecutiveDecodeFailures) failures — nals: \(Self.nalTypes(of: sampleBuffer))")
+      consecutiveDecodeFailures = 0
+    }
+
     return outputBuffer
+  }
+
+  private var consecutiveDecodeFailures = 0
+
+  /// Rate-limited failure telemetry. The NAL composition of failing frames is
+  /// what separates "no sync point has arrived yet" from "the decoder is
+  /// rejecting sync frames" — the signature that identified the
+  /// bandwidth-adaptation stall this file's in-band parameter-set handling
+  /// exists for.
+  private func logDecodeFailure(_ sampleBuffer: CMSampleBuffer, status: OSStatus) {
+    consecutiveDecodeFailures += 1
+    let n = consecutiveDecodeFailures
+    let types = Self.nalTypes(of: sampleBuffer)
+    let hasParamsOrIrap = types.contains { $0 >= 16 && $0 <= 34 }
+    guard n <= 10 || n % 30 == 0 || hasParamsOrIrap else { return }
+    NSLog("[MWDAT] decode failure #\(n) — status: \(status), nals: \(types)")
+  }
+
+  /// Copies the sample buffer's HVCC-framed payload out of its CMBlockBuffer.
+  private static func blockBufferData(of sampleBuffer: CMSampleBuffer) -> Data? {
+    guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return nil }
+    var totalLength = 0
+    var dataPointer: UnsafeMutablePointer<Int8>?
+    let status = CMBlockBufferGetDataPointer(
+      blockBuffer,
+      atOffset: 0,
+      lengthAtOffsetOut: nil,
+      totalLengthOut: &totalLength,
+      dataPointerOut: &dataPointer
+    )
+    guard status == kCMBlockBufferNoErr, let dataPointer else { return nil }
+    return Data(bytes: dataPointer, count: totalLength)
+  }
+
+  /// Walks the HVCC length-prefixed NAL units and returns the raw payloads of
+  /// the parameter sets (VPS 32, SPS 33, PPS 34) appearing ahead of the first
+  /// IRAP picture. Returns an empty array unless all three kinds are present —
+  /// encoders repeat the PPS per access unit, and a lone PPS is not enough to
+  /// build a format description from.
+  private static func inBandParameterSets(of sampleBuffer: CMSampleBuffer) -> [Data] {
+    guard let data = blockBufferData(of: sampleBuffer) else { return [] }
+    var sets: [Data] = []
+    var sawVps = false
+    var sawSps = false
+    var sawPps = false
+    var pos = data.startIndex
+    scan: while pos + 4 < data.endIndex {
+      var length = 0
+      for offset in 0 ..< 4 {
+        length = (length << 8) | Int(data[pos + offset])
+      }
+      let payloadStart = pos + 4
+      guard length > 0, payloadStart + length <= data.endIndex else { return [] }
+      let type = (data[payloadStart] >> 1) & 0x3F
+      switch type {
+      case 32:
+        sawVps = true
+        sets.append(Data(data[payloadStart ..< payloadStart + length]))
+      case 33:
+        sawSps = true
+        sets.append(Data(data[payloadStart ..< payloadStart + length]))
+      case 34:
+        sawPps = true
+        sets.append(Data(data[payloadStart ..< payloadStart + length]))
+      case 16 ... 23:
+        break scan
+      default:
+        break
+      }
+      pos = payloadStart + length
+    }
+    guard sawVps, sawSps, sawPps else { return [] }
+    return sets
+  }
+
+  /// Extracts the parameter-set payloads a CMFormatDescription was built from,
+  /// in index order, for comparison against in-band sets.
+  private static func parameterSets(of formatDescription: CMFormatDescription) -> [Data] {
+    var count: size_t = 0
+    var nalHeaderLength: Int32 = 0
+    let countStatus = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+      formatDescription,
+      parameterSetIndex: 0,
+      parameterSetPointerOut: nil,
+      parameterSetSizeOut: nil,
+      parameterSetCountOut: &count,
+      nalUnitHeaderLengthOut: &nalHeaderLength
+    )
+    guard countStatus == noErr, count > 0 else { return [] }
+    var sets: [Data] = []
+    for index in 0 ..< count {
+      var pointer: UnsafePointer<UInt8>?
+      var size: size_t = 0
+      let status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+        formatDescription,
+        parameterSetIndex: index,
+        parameterSetPointerOut: &pointer,
+        parameterSetSizeOut: &size,
+        parameterSetCountOut: nil,
+        nalUnitHeaderLengthOut: nil
+      )
+      guard status == noErr, let pointer else { return [] }
+      sets.append(Data(bytes: pointer, count: size))
+    }
+    return sets
+  }
+
+  /// Builds an hvc1 CMFormatDescription from raw in-band parameter-set
+  /// payloads, with the 4-byte NAL length prefix the stream's samples use.
+  private static func makeFormatDescription(parameterSets: [Data]) -> CMFormatDescription? {
+    let flattened = [UInt8](parameterSets.joined())
+    let sizes = parameterSets.map(\.count)
+    var formatDescription: CMFormatDescription?
+    let status = flattened.withUnsafeBufferPointer { buffer -> OSStatus in
+      guard let base = buffer.baseAddress else { return -1 }
+      var pointers: [UnsafePointer<UInt8>] = []
+      var offset = 0
+      for size in sizes {
+        pointers.append(base + offset)
+        offset += size
+      }
+      return CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+        allocator: kCFAllocatorDefault,
+        parameterSetCount: pointers.count,
+        parameterSetPointers: pointers,
+        parameterSetSizes: sizes,
+        nalUnitHeaderLength: 4,
+        extensions: nil,
+        formatDescriptionOut: &formatDescription
+      )
+    }
+    guard status == noErr, let formatDescription else {
+      NSLog("[MWDAT] Failed to build format description from in-band parameter sets: \(status)")
+      return nil
+    }
+    return formatDescription
+  }
+
+  private static func nalTypes(of sampleBuffer: CMSampleBuffer) -> [UInt8] {
+    guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return [] }
+    var totalLength = 0
+    var dataPointer: UnsafeMutablePointer<Int8>?
+    let status = CMBlockBufferGetDataPointer(
+      blockBuffer,
+      atOffset: 0,
+      lengthAtOffsetOut: nil,
+      totalLengthOut: &totalLength,
+      dataPointerOut: &dataPointer
+    )
+    guard status == kCMBlockBufferNoErr, let dataPointer else { return [] }
+    let data = Data(bytes: dataPointer, count: totalLength)
+    var types: [UInt8] = []
+    var pos = data.startIndex
+    while pos + 4 < data.endIndex {
+      var length = 0
+      for offset in 0 ..< 4 {
+        length = (length << 8) | Int(data[pos + offset])
+      }
+      let payloadStart = pos + 4
+      guard length > 0, payloadStart + length <= data.endIndex else { break }
+      types.append((data[payloadStart] >> 1) & 0x3F)
+      pos = payloadStart + length
+    }
+    return types
   }
 
   // MARK: - Stream Session
@@ -1544,7 +1816,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       videoFrameHandler.resetParameterSetCache()
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
-        self.processAndSendFrame(videoFrame)
+        self.frameQueue.async {
+          self.processAndSendFrame(videoFrame)
+        }
       }
 
       // Last commit point. A device session can take up to
