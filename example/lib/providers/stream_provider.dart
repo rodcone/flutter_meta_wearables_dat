@@ -24,8 +24,7 @@ class StreamSessionProvider extends ChangeNotifier {
   bool _isStreaming = false;
   double _fps = 30;
   StreamQuality _streamQuality = StreamQuality.medium;
-  VideoCodec _videoCodec =
-      Platform.isIOS ? VideoCodec.hvc1 : VideoCodec.raw;
+  VideoCodec _videoCodec = VideoCodec.raw;
   StreamSessionState? _sessionState;
   StreamSessionError? _lastError;
   ThermalLevel? _thermalLevel;
