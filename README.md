@@ -74,7 +74,7 @@ Future<int?> completeRegistration(Uri callbackUri) async {
 }
 ```
 
-Render the returned ID with `Texture(textureId: textureId)`, and stop the session with `await MetaWearablesDat.stopStreamSession(null)` when finished.
+Render the returned ID with `Texture(textureId: textureId)`, and stop the session with `await MetaWearablesDat.stopStreamSession(null)` when finished. Since 0.9.1, stopping ends the whole device session — the glasses play their stream-ended tone, and the next start is a full reconnect rather than an instant re-attach.
 
 For a complete implementation, see the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example), which ports Meta's native Camera Access sample to Flutter.
 

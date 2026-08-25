@@ -204,14 +204,14 @@ packages:
       path: ".."
       relative: true
     source: path
-    version: "0.9.0"
+    version: "0.9.1"
   flutter_meta_wearables_dat_mock_device:
     dependency: "direct main"
     description:
       path: "../flutter_meta_wearables_dat_mock_device"
       relative: true
     source: path
-    version: "0.9.0"
+    version: "0.9.1"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:

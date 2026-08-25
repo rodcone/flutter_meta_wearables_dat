@@ -1488,12 +1488,31 @@ class MetaWearablesDatPlugin :
 
     private fun stopStreamSession(call: MethodCall, result: Result) {
         if (stream == null) {
+            // No stream, but a failed start can leave a started DeviceSession
+            // cached — end it anyway so the glasses aren't left mid-session
+            // (which would also mute the next start's tone). Mirrors iOS.
+            if (session != null) {
+                teardownSession()
+            }
             val key = sessionKey ?: "auto"
             result.error("SESSION_NOT_FOUND", "No stream found for '$key'.", null)
             return
         }
 
-        teardownStreamOnly()
+        // End the DeviceSession too, not just the stream. The glasses'
+        // stream-ended tone hangs off the session lifecycle — Meta's
+        // CameraAccess sample ends its session as the user-visible stop and
+        // chimes; keeping the session cached here (the old behaviour, for fast
+        // restarts) meant the glasses only chimed when the app was backgrounded
+        // or killed. Matches iOS as of 0.9.1, so Stop means the same thing on
+        // both platforms. Trade-off: the next startStreamSession is a full
+        // session reconnect rather than a fast addCamera.
+        //
+        // Unlike iOS there is no await-the-cascade machinery here: Kotlin
+        // objects are not deterministically freed when the plugin drops its
+        // references, so the SDK's stop cascade runs regardless. Do not port
+        // the iOS awaitDeviceSessionStopped over.
+        teardownSession()
         result.success(true)
     }
 

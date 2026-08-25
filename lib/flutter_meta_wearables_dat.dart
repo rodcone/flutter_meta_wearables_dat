@@ -771,6 +771,18 @@ class MetaWearablesDat {
 
   /// Stops the active stream session. [deviceId] is accepted for call symmetry
   /// but isn't required — there is a single active session.
+  ///
+  /// Since 0.9.1 this ends the whole device session, not just the stream, on
+  /// both platforms — the glasses play their stream-ended tone, which they
+  /// previously only did when the app was backgrounded or killed. The
+  /// trade-off is that the next [startStreamSession] is a full session
+  /// reconnect rather than a fast capability re-attach, so restarting takes
+  /// noticeably longer than it did on 0.9.0.
+  ///
+  /// The returned future resolves once the stop handshake with the glasses has
+  /// completed. That is normally quick, but is bounded by backstops of a few
+  /// seconds each for a dead device or wedged SDK — do not assume it resolves
+  /// instantly.
   static Future<bool> stopStreamSession(String? deviceId) {
     return MetaWearablesDatPlatform.instance.stopStreamSession(deviceId);
   }
@@ -995,6 +1007,11 @@ class MetaWearablesDat {
   /// service / releases the wake lock on Android. Safe to call multiple
   /// times. Does NOT stop the active stream session; use
   /// [stopStreamSession] for that.
+  ///
+  /// Since 0.9.1 the returned future resolves only once the deactivation has
+  /// actually landed (it runs off the main thread on iOS). Await it before
+  /// letting the app background if you are relying on the keep-alive being
+  /// gone.
   ///
   /// Worth calling when you observe a terminal [StreamSessionState.stopped] and
   /// do not intend to restart: the keep-alive is not tied to the stream, so an

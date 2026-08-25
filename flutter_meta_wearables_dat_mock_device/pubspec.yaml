@@ -1,6 +1,6 @@
 name: flutter_meta_wearables_dat_mock_device
 description: "Optional MockDeviceKit add-on for flutter_meta_wearables_dat — simulate Meta glasses using the phone's camera for development and testing. Omit in production."
-version: 0.9.0
+version: 0.9.1
 repository: https://github.com/rodcone/flutter_meta_wearables_dat
 
 environment:

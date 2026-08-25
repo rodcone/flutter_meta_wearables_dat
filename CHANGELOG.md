@@ -1,3 +1,21 @@
+## 0.9.1
+
+Contains contributions by [@kelvinharron](https://github.com/kelvinharron) — the AVAudioSession, stop-cascade, and HEVC keyframe work below.
+
+**Fixed**
+
+* **iOS: `enableBackgroundStreaming()` / `disableBackgroundStreaming()` no longer freeze the UI.** AVAudioSession activation and deactivation block for hundreds of milliseconds while the media server negotiates, and both ran inline on the platform thread. All session work now runs on a private serial queue; the Dart futures resolve when the work actually completes, and `disableBackgroundStreaming()` in particular now resolves only after the deactivation lands — await it before backgrounding if you rely on the keep-alive being gone.
+* **iOS: a 0.9.0 defect that could strand the glasses after a background-stop timeout.** The `abortStopWait` flag set by an expiring background assertion was never cleared, so one expiry made every later teardown skip its stop-confirmation wait and release the stream mid-cascade — the stale-capability failure that makes the next start reject. Reset on foreground.
+* **iOS: green / glitched frames in `videoFramesStream()` recordings.** The SDK's keyframe attachment is absent on most predicted frames, which read as keyframes, so VPS/SPS/PPS were prepended to nearly every P-frame and downstream decoders sampled mid-GOP entry points. Burst boundaries are now keyed off a NAL-unit scan for true IRAP pictures (the SDK flag is a fallback when framing can't be parsed), parameter sets are cached per session and prepended only where genuinely missing, and `isKeyframe` now means "self-decodable as shipped" — an IRAP that couldn't be made self-contained reports `false` rather than pointing a recorder at an undecodable segment start.
+* **iOS: stream and session stop-waits are event-driven** on the state publishers rather than 50ms polls, resolving as soon as the glasses acknowledge.
+* Android: the `AppForegroundTracker` logged under a different tag (`MWDAT`) than every other component (`MetaWearablesDat`), so the obvious logcat filter silently dropped the lifecycle lines.
+* The background-stop error-suppression window now tracks the teardown's real worst case (15s, was 5s); it still closes early the moment teardown completes.
+
+**Changed**
+
+* **`stopStreamSession()` now ends the whole device session, on both platforms.** The glasses' stream-ended tone hangs off the session lifecycle, so the previous stream-only stop never chimed — the glasses only signalled when the app was backgrounded or killed. This matches Meta's CameraAccess sample and the 0.9.0 background path. **Trade-off:** the next `startStreamSession()` is a full session reconnect rather than a fast capability re-attach, so restart takes noticeably longer. The future also resolves only after the stop handshake completes (normally quick; bounded by backstops for a dead device).
+* `CameraPermissionException.toString()` now includes the `details` map when present.
+
 ## 0.9.0
 
 **BREAKING CHANGES**

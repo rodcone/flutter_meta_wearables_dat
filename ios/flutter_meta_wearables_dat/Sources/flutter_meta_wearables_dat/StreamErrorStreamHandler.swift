@@ -59,10 +59,16 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
   /// sample solves the same problem the same way, app-side; doing it here means
   /// every consumer gets it rather than each rediscovering the banner.
   ///
+  /// The 15s bound tracks the teardown's own worst case — `streamStopTimeout`
+  /// (3s) plus `deviceSessionStopTimeout` (10s), both backstops, plus slack.
+  /// The window still closes early the moment teardown completes; the timer
+  /// only ever matters while teardown is *still running*, which is exactly
+  /// when the noise it exists to hide is still being produced.
+  ///
   /// `stoppedForBackground` is emitted *before* this opens, so the app still
   /// learns why the session ended.
   @MainActor
-  func beginBackgroundStopSuppression(timeout: Duration = .seconds(5)) {
+  func beginBackgroundStopSuppression(timeout: Duration = .seconds(15)) {
     isStoppingForBackground = true
     suppressionExpiry?.cancel()
     suppressionExpiry = Task { @MainActor [weak self] in
