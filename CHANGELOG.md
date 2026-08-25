@@ -18,7 +18,6 @@ Contains contributions by [@kelvinharron](https://github.com/kelvinharron) — t
 
 * **`stopStreamSession()` now ends the whole device session, on both platforms.** The glasses' stream-ended tone hangs off the session lifecycle, so the previous stream-only stop never chimed — the glasses only signalled when the app was backgrounded or killed. This matches Meta's CameraAccess sample and the 0.9.0 background path. **Trade-off:** the next `startStreamSession()` is a full session reconnect rather than a fast capability re-attach, so restart takes noticeably longer. The future also resolves only after the stop handshake completes (normally quick; bounded by backstops for a dead device).
 * **iOS: the background-streaming keep-alive no longer requests Bluetooth HFP.** `.allowBluetoothHFP` exists for glasses-mic capture only; requesting it from the keep-alive dropped all glasses audio to 8 kHz mono and opened a SCO link that contended with the video stream for bandwidth. Glasses audio stays on A2DP; apps that want the glasses microphone configure HFP themselves.
-* Example: the codec picker is platform-aware. iOS offers both codecs (`raw` remains the default); Android shows only `raw`. On iOS the background-streaming toggle animates out when `raw` is selected, and selecting `raw` also releases the keep-alive.
 * `CameraPermissionException.toString()` now includes the `details` map when present.
 
 ## 0.9.0
