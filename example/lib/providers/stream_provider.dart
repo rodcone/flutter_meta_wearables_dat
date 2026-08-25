@@ -432,11 +432,19 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   void setVideoCodec(VideoCodec codec) {
+    if (codec == VideoCodec.hvc1 && !supportsHvc1) return;
+
     HapticFeedback.lightImpact();
 
     if (_videoCodec != codec) {
       _videoCodec = codec;
       notifyListeners();
+      // On iOS the background toggle animates out for raw. Releasing the
+      // keep-alive with it means a hidden control can't leave the audio
+      // session running underneath a raw stream.
+      if (codec == VideoCodec.raw && supportsHvc1) {
+        unawaited(setBackgroundStreamingEnabled(false));
+      }
     }
   }
 
