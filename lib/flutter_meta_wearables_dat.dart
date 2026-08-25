@@ -544,7 +544,9 @@ class CameraPermissionException implements Exception {
   bool get isInternalError => code == 'INTERNAL_ERROR';
 
   @override
-  String toString() => 'CameraPermissionException($code): $message';
+  String toString() => details == null
+      ? 'CameraPermissionException($code): $message'
+      : 'CameraPermissionException($code): $message $details';
 }
 
 /// Represents a photo captured from a Meta Wearables device.
@@ -678,7 +680,14 @@ class VideoFrame {
 
   /// Always `true` for [VideoCodec.raw]. For [VideoCodec.hvc1] indicates
   /// whether this frame carries parameter sets and can be decoded without
-  /// prior frames.
+  /// prior frames — safe to use as the first frame of a recording or a
+  /// decode burst.
+  ///
+  /// A frame qualifies when it opens on an IRAP picture (or the SDK flags it
+  /// as a keyframe) *and* the VPS/SPS/PPS trio either travels with it or was
+  /// prepended by the plugin. An IRAP that could not be made self-decodable —
+  /// no parameter sets have been observed yet on this session — reports
+  /// `false` rather than pointing a recorder at an undecodable segment start.
   final bool isKeyframe;
 
   /// Number of bytes per row for [VideoCodec.raw] frames on iOS — may be

@@ -64,6 +64,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // actually reach `.stopped` before releasing its references. See the comment
   // there: letting go early cancels the SDK's stop cascade mid-flight.
   private let streamStopTimeout: TimeInterval = 3.0
+  private let deviceSessionStopTimeout: TimeInterval = 10.0
   // After a pin change the shared selector is rebuilt and resolves its active
   // device asynchronously; `createSession` against an unresolved selector
   // returns `noEligibleDevice`. Bound how long we wait for the pinned device
@@ -320,21 +321,31 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - Background streaming
 
   private func enableBackgroundStreaming(result: @escaping FlutterResult) {
-    do {
-      try backgroundController.enable()
-      result(nil)
-    } catch {
-      result(FlutterError(
-        code: "BACKGROUND_STREAMING_ERROR",
-        message: "Failed to enable background streaming: \(error.localizedDescription). Verify the host app's Info.plist declares the 'audio' UIBackgroundMode.",
-        details: nil
-      ))
+    // The controller does its AVAudioSession work off the main thread, so the
+    // result is delivered from its completion — hopped back to main because
+    // FlutterResult must be called there.
+    backgroundController.enable { error in
+      DispatchQueue.main.async {
+        guard let error else {
+          result(nil)
+          return
+        }
+        result(FlutterError(
+          code: "BACKGROUND_STREAMING_ERROR",
+          message: "Failed to enable background streaming: \(error.localizedDescription). Verify the host app's Info.plist declares the 'audio' UIBackgroundMode.",
+          details: nil
+        ))
+      }
     }
   }
 
   private func disableBackgroundStreaming(result: @escaping FlutterResult) {
-    backgroundController.disable()
-    result(nil)
+    // Resolved from the completion rather than immediately: the deactivation
+    // runs on the controller's queue, and answering Dart before it lands lets
+    // the app background and be suspended with the session still active.
+    backgroundController.disable {
+      DispatchQueue.main.async { result(nil) }
+    }
   }
 
   // MARK: - Permissions
@@ -901,16 +912,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // unregister a live texture and orphan a running stream with no reference
     // left to stop it.
     if let stoppingStream {
-      let deadline = Date().addingTimeInterval(streamStopTimeout)
-      // `abortStopWait` lets an expiring background assertion cut the wait
-      // short. Continuing to poll after the OS has told us we are out of time
-      // just burns the last of the budget on a wait that cannot complete.
-      while stoppingStream.state != .stopped, Date() < deadline, !abortStopWait {
-        try? await Task.sleep(nanoseconds: 50_000_000)
-      }
-      if stoppingStream.state != .stopped {
-        NSLog("[MWDAT] stream did not reach .stopped (state: \(stoppingStream.state), aborted: \(abortStopWait))")
-      }
+      await awaitStreamStopped(stoppingStream)
     }
 
     if camera === stoppingCamera { camera = nil }
@@ -940,6 +942,60 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     videoStreamSizeHandler.reset()
   }
 
+  /// Suspends until `stream` reaches `.stopped`, with `streamStopTimeout` as a
+  /// backstop and `abortStopWait` as an early out when the background stop
+  /// assertion expires. Event-driven on `statePublisher`, mirroring Meta's
+  /// CameraAccess sample, which releases its stream references only on the
+  /// observed `.stopped` — the SDK's stop cascade holds the `Stream` weakly,
+  /// so the caller's strong reference must outlive the whole handshake or the
+  /// glasses never receive the capability removal. The listener is attached
+  /// before the state is checked so a transition can't slip between the two.
+  @MainActor
+  private func awaitStreamStopped(_ stream: MWDATCamera.Stream) async {
+    var listenerToken: (any MWDATCore.AnyListenerToken)?
+    let states = AsyncStream<StreamState> { continuation in
+      listenerToken = stream.statePublisher.listen { state in
+        continuation.yield(state)
+      }
+    }
+
+    if stream.state != .stopped {
+      let stopped = await withTaskGroup(of: Bool.self) { group in
+        group.addTask {
+          for await state in states where state == .stopped {
+            return true
+          }
+          return false
+        }
+        group.addTask { [timeout = streamStopTimeout] in
+          try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+          return false
+        }
+        // `abortStopWait` lets an expiring background assertion cut the wait
+        // short: once the OS says the budget is gone, a wait that cannot
+        // complete only burns what little remains.
+        group.addTask { @MainActor [weak self] in
+          while !Task.isCancelled {
+            guard let self, !self.abortStopWait else { return false }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+          }
+          return false
+        }
+        let first = await group.next() ?? false
+        group.cancelAll()
+        return first
+      }
+      if !stopped, stream.state != .stopped {
+        NSLog(
+          "[MWDAT] stream did not reach .stopped within \(streamStopTimeout)s (state: \(stream.state), aborted: \(abortStopWait)) — releasing anyway; the glasses may keep a stale capability")
+      }
+    }
+
+    if let listenerToken {
+      await listenerToken.cancel()
+    }
+  }
+
   /// Tears down both stream and DeviceSession. Used when the device
   /// disconnects, when mock devices are disabled, or when a new mock
   /// config is applied.
@@ -951,8 +1007,52 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceSessionErrorTask?.cancel()
     deviceSessionErrorTask = nil
     if let session = deviceSession {
-      session.stop()
+      // Capture the state stream BEFORE stop() so the transition can't be
+      // missed, then hold the strong reference until the session actually
+      // reaches `.stopped` — same weak-executor hazard as the stream's stop
+      // cascade: releasing early can cancel the SDK's session-end handshake
+      // before the glasses hear about it, which also mutes the stream-ended
+      // tone the glasses play on session end.
+      let stateStream = session.stateStream()
       deviceSession = nil
+      session.stop()
+      await awaitDeviceSessionStopped(session, stateStream: stateStream)
+    }
+  }
+
+  /// Suspends until `session` reaches `.stopped`, with
+  /// `deviceSessionStopTimeout` as a backstop for a dead device or wedged SDK
+  /// and `abortStopWait` as an early out when the background stop assertion
+  /// expires.
+  @MainActor
+  private func awaitDeviceSessionStopped(
+    _ session: DeviceSession,
+    stateStream: AsyncStream<DeviceSessionState>
+  ) async {
+    if session.state == .stopped { return }
+    let stopped = await withTaskGroup(of: Bool.self) { group in
+      group.addTask {
+        for await state in stateStream where state == .stopped { return true }
+        return false
+      }
+      group.addTask { [timeout = deviceSessionStopTimeout] in
+        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        return false
+      }
+      group.addTask { @MainActor [weak self] in
+        while !Task.isCancelled {
+          guard let self, !self.abortStopWait else { return false }
+          try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return false
+      }
+      let first = await group.next() ?? false
+      group.cancelAll()
+      return first
+    }
+    if !stopped, session.state != .stopped {
+      NSLog(
+        "[MWDAT] device session did not reach .stopped within \(deviceSessionStopTimeout)s (state: \(session.state), aborted: \(abortStopWait)) — releasing anyway")
     }
   }
 
@@ -1034,9 +1134,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       }
       // The whole DeviceSession, not just the stream — matching Meta's
       // CameraAccess sample. Stopping only the stream leaves the plugin as the
-      // last strong owner of the `Stream`, which is why that path needs a
-      // 3s poll before releasing (see `performTeardownStreamOnly`). Suspension
-      // mid-poll would then strand a live capability on the glasses and break
+      // last strong owner of the `Stream`, which is why that path holds it
+      // through `awaitStreamStopped` before releasing. Suspension
+      // mid-wait would then strand a live capability on the glasses and break
       // the *next* start. Stopping the session makes that unreachable: the SDK
       // owns it, and the capability goes away with it either way.
       await teardownDeviceSession()
@@ -1078,6 +1178,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func handleWillEnterForeground() {
     isInBackground = false
+    // An expired background assertion sets `abortStopWait` and nothing else
+    // clears it, so without this reset one expiry would poison every later
+    // stop-wait: the abort poll in `awaitStreamStopped` /
+    // `awaitDeviceSessionStopped` would bail on its first check and release
+    // the stream or session mid-cascade — the muted-chime / stale-capability
+    // failure those waits exist to prevent.
+    abortStopWait = false
     NSLog("[MWDAT] App entering foreground — HEVC decoder will be recreated on next frame")
     // Deliberately nothing else. With background streaming off the session is
     // stopped and stays stopped: the plugin never reactivates the glasses
@@ -1431,7 +1538,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let session = addedCamera.stream
 
       // 4. Wire listeners. Stream errors are forwarded to Dart by
-      // `streamErrorHandler` once its `session` is set below.
+      // `streamErrorHandler` once its `session` is set below. The frame
+      // handler outlives the session, so drop any parameter sets cached from
+      // a previous stream before the first frame of this one arrives.
+      videoFrameHandler.resetParameterSetCache()
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         self.processAndSendFrame(videoFrame)
@@ -1466,13 +1576,24 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   func stopStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
     Task { @MainActor in
       guard streamSession != nil else {
+        // No stream, but a failed start can leave a started DeviceSession
+        // cached — end it anyway so the glasses aren't left mid-session
+        // (which would also mute the next start's tone).
+        if deviceSession != nil {
+          await teardownDeviceSession()
+        }
         result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
         return
       }
 
-      // Tear down the stream only — keep the DeviceSession alive so the next
-      // startStreamSession is a fast `addCamera` rather than a full reconnect.
-      await teardownStreamOnly()
+      // End the DeviceSession too, not just the stream. The glasses'
+      // stream-ended tone hangs off the session lifecycle — Meta's
+      // CameraAccess sample ends its session as the user-visible stop and
+      // chimes; keeping the session cached here (the old behaviour, for fast
+      // restarts) meant the glasses only chimed when the app was backgrounded
+      // or killed. Trade-off: the next startStreamSession is a full session
+      // reconnect rather than a fast addCamera.
+      await teardownDeviceSession()
       result(true)
     }
   }

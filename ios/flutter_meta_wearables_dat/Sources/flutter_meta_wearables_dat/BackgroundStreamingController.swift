@@ -9,26 +9,113 @@ import UIKit
 /// suspending the process, which in turn keeps the BLE / External Accessory
 /// link to the glasses alive.
 final class BackgroundStreamingController {
-  /// When true, the AVAudioSession keep-alive is active so the SDK keeps
-  /// delivering frames to the plugin while the app is backgrounded. The
-  /// plugin still invalidates the HEVC decoder on background (iOS forbids
-  /// GPU access while backgrounded) and forwards raw hvc1 NAL bytes to
-  /// `videoFramesStream()` for recording; the texture pauses until
-  /// foreground. Flipped from the plugin when enable/disable is called
-  /// from Dart.
-  private(set) var isEnabled: Bool = false
+  /// Guards `_isEnabled`, which is read from the main thread
+  /// (`handleDidEnterBackground`, `mustNotStreamNow`, the method channel),
+  /// from the SDK's frame-delivery thread (`processAndSendFrame`), and from
+  /// whichever thread AVAudioSession posts its notifications on.
+  private let stateLock = NSLock()
+
+  /// True once the AVAudioSession keep-alive has been established, until it is
+  /// torn down or an attempt to restore it fails.
+  ///
+  /// `sessionQueue` owns this: every write happens there, and every decision
+  /// that depends on it is made there too, so the queue's serial order is the
+  /// state machine. That is why no separate record of "what was last
+  /// requested" is needed — an `enable` and a `disable` run in call order and
+  /// each sees what the previous one left.
+  ///
+  /// A transient OS interruption (phone call, Siri) deactivates the session
+  /// underneath us without clearing this, which is deliberate: it is what lets
+  /// the `.ended` handler know the keep-alive is ours to restore. So this is
+  /// "the keep-alive is established", not "audio is flowing this instant".
+  ///
+  /// Deliberately *not* set optimistically ahead of activation. The plugin
+  /// reads it as authority to skip the background teardown
+  /// (`handleDidEnterBackground`) and to allow a stream start while
+  /// backgrounded (`mustNotStreamNow`); claiming a keep-alive that has not
+  /// been established yet would let the app suspend with a live
+  /// `DeviceSession` and a texture nothing will release. While activation is
+  /// in flight this reads `false`, so both call sites take the safe branch.
+  private var _isEnabled = false
+
+  /// Whether the AVAudioSession keep-alive is currently active. Reads from
+  /// off the queue are a snapshot; the authoritative checks are the ones
+  /// inside the queued blocks.
+  var isEnabled: Bool {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return _isEnabled
+  }
+
+  /// AVAudioSession activation and deactivation block for hundreds of
+  /// milliseconds while the media server negotiates, and the method channel
+  /// delivers calls on the main thread — doing the work inline froze the UI
+  /// on every stream start and stop (AVAudioSession_iOS.mm warns about
+  /// exactly this). All session work runs on this serial queue instead.
+  private let sessionQueue = DispatchQueue(
+    label: "com.rodcone.mwdat.audio-session",
+    qos: .userInitiated
+  )
 
   private var didRegisterObservers = false
 
   init() {}
 
-  /// Activates the AVAudioSession and starts listening for interruptions.
-  /// Throws the underlying AVAudioSession error if activation fails —
-  /// callers should forward this to the Flutter result as a platform error
-  /// so developers can diagnose Info.plist misconfiguration.
-  func enable() throws {
-    if isEnabled { return }
+  /// Configures and activates the AVAudioSession on the session queue and
+  /// starts listening for interruptions. Reports the underlying
+  /// AVAudioSession error if activation fails — callers should forward this
+  /// to the Flutter result as a platform error so developers can diagnose
+  /// Info.plist misconfiguration. The completion is invoked on the session
+  /// queue, and always reflects the real outcome of the work: a second
+  /// `enable()` issued while the first is still in flight waits behind it on
+  /// the serial queue rather than being told it already succeeded.
+  func enable(completion: @escaping (Error?) -> Void) {
+    registerObserversIfNeeded()
+    sessionQueue.async { [weak self] in
+      // Nothing to do, and nothing to report: the controller is gone, or the
+      // session is already active.
+      guard let self, !self.isEnabled else {
+        completion(nil)
+        return
+      }
+      do {
+        try Self.activateSession()
+        self.setEnabled(true)
+        NSLog("[MWDAT] Background streaming enabled — AVAudioSession active")
+        completion(nil)
+      } catch {
+        self.setEnabled(false)
+        completion(error)
+      }
+    }
+  }
 
+  /// Deactivates the audio session on the session queue. Safe to call when
+  /// already disabled. The completion is invoked on the session queue once
+  /// the deactivation has actually run — the Dart future awaits it, which
+  /// keeps the common "stop streaming, then leave the app" sequence from
+  /// being suspended with the session still active.
+  func disable(completion: @escaping () -> Void = {}) {
+    sessionQueue.async { [weak self] in
+      // Same as `enable`, inverted: the controller is gone, or the session is
+      // already inactive.
+      guard let self, self.isEnabled else {
+        completion()
+        return
+      }
+      self.setEnabled(false)
+      // Pass `.notifyOthersOnDeactivation` so other apps (e.g. music) can
+      // resume immediately instead of waiting for their next routing event.
+      try? AVAudioSession.sharedInstance().setActive(
+        false,
+        options: [.notifyOthersOnDeactivation]
+      )
+      NSLog("[MWDAT] Background streaming disabled — AVAudioSession released")
+      completion()
+    }
+  }
+
+  private static func activateSession() throws {
     let session = AVAudioSession.sharedInstance()
     try session.setCategory(
       .playAndRecord,
@@ -36,23 +123,12 @@ final class BackgroundStreamingController {
       options: [.allowBluetoothHFP, .mixWithOthers]
     )
     try session.setActive(true)
-
-    registerObserversIfNeeded()
-    isEnabled = true
-    NSLog("[MWDAT] Background streaming enabled — AVAudioSession active")
   }
 
-  /// Deactivates the audio session. Safe to call when already disabled.
-  func disable() {
-    guard isEnabled else { return }
-    isEnabled = false
-    // Pass `.notifyOthersOnDeactivation` so other apps (e.g. music) can
-    // resume immediately instead of waiting for their next routing event.
-    try? AVAudioSession.sharedInstance().setActive(
-      false,
-      options: [.notifyOthersOnDeactivation]
-    )
-    NSLog("[MWDAT] Background streaming disabled — AVAudioSession released")
+  private func setEnabled(_ value: Bool) {
+    stateLock.lock()
+    _isEnabled = value
+    stateLock.unlock()
   }
 
   private func registerObserversIfNeeded() {
@@ -86,8 +162,20 @@ final class BackgroundStreamingController {
       NSLog("[MWDAT] Audio interruption began")
     case .ended:
       // Re-activate so the keep-alive survives a phone call / Siri / etc.
-      try? AVAudioSession.sharedInstance().setActive(true)
-      NSLog("[MWDAT] Audio interruption ended — session re-activated")
+      // Re-checked on the queue: a `disable()` can land between the guard
+      // above and this block, and the serial queue would otherwise order the
+      // re-activation *after* the deactivation and leave the session live.
+      sessionQueue.async { [weak self] in
+        guard let self, self.isEnabled else { return }
+        do {
+          try AVAudioSession.sharedInstance().setActive(true)
+          self.setEnabled(true)
+          NSLog("[MWDAT] Audio interruption ended — session re-activated")
+        } catch {
+          self.setEnabled(false)
+          NSLog("[MWDAT] Failed to re-activate AVAudioSession after interruption: \(error)")
+        }
+      }
     @unknown default:
       break
     }
@@ -98,16 +186,15 @@ final class BackgroundStreamingController {
     // keeping the session alive.
     guard isEnabled else { return }
     NSLog("[MWDAT] AVAudioSession media services were reset — re-activating")
-    do {
-      let session = AVAudioSession.sharedInstance()
-      try session.setCategory(
-        .playAndRecord,
-        mode: .videoRecording,
-        options: [.allowBluetoothHFP, .mixWithOthers]
-      )
-      try session.setActive(true)
-    } catch {
-      NSLog("[MWDAT] Failed to re-activate AVAudioSession after reset: \(error)")
+    sessionQueue.async { [weak self] in
+      guard let self, self.isEnabled else { return }
+      do {
+        try Self.activateSession()
+        self.setEnabled(true)
+      } catch {
+        self.setEnabled(false)
+        NSLog("[MWDAT] Failed to re-activate AVAudioSession after reset: \(error)")
+      }
     }
   }
 
