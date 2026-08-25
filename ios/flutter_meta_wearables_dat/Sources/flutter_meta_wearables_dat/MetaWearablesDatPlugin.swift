@@ -599,7 +599,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     guard pendingAvailabilityTeardown == nil else { return }
     let grace = deviceAvailabilityGrace
     pendingAvailabilityTeardown = Task { [weak self] in
-      try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
+      try? await Task.sleep(for: .milliseconds(grace * 1000))
       guard let self, !Task.isCancelled else { return }
       self.pendingAvailabilityTeardown = nil
       // Re-check rather than trust the emission that armed us: the device may
@@ -698,7 +698,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // The rewarm above can run a teardown + selector rebuild; re-check the
       // deadline before sleeping so a late iteration doesn't overshoot it.
       if Date() >= deadline { return }
-      try? await Task.sleep(nanoseconds: 200_000_000)
+      try? await Task.sleep(for: .milliseconds(200))
     }
   }
 
@@ -771,7 +771,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return .streamEnded
       }
       group.addTask {
-        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        try? await Task.sleep(for: .milliseconds(timeout * 1000))
         return .timedOut
       }
       let first = await group.next() ?? .streamEnded
@@ -968,7 +968,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           return false
         }
         group.addTask { [timeout = streamStopTimeout] in
-          try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+          try? await Task.sleep(for: .milliseconds(timeout * 1000))
           return false
         }
         // `abortStopWait` lets an expiring background assertion cut the wait
@@ -977,7 +977,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         group.addTask { @MainActor [weak self] in
           while !Task.isCancelled {
             guard let self, !self.abortStopWait else { return false }
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            try? await Task.sleep(for: .milliseconds(100))
           }
           return false
         }
@@ -1036,13 +1036,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return false
       }
       group.addTask { [timeout = deviceSessionStopTimeout] in
-        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        try? await Task.sleep(for: .milliseconds(timeout * 1000))
         return false
       }
       group.addTask { @MainActor [weak self] in
         while !Task.isCancelled {
           guard let self, !self.abortStopWait else { return false }
-          try? await Task.sleep(nanoseconds: 100_000_000)
+          try? await Task.sleep(for: .milliseconds(100))
         }
         return false
       }
@@ -1474,7 +1474,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       if pinChanged, requestedDeviceId != nil {
         let deadline = Date().addingTimeInterval(selectorResolveTimeout)
         while deviceSelector.activeDevice == nil, Date() < deadline {
-          try? await Task.sleep(nanoseconds: 150_000_000)
+          try? await Task.sleep(for: .milliseconds(150))
         }
       }
 
@@ -1680,7 +1680,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // unresolved forever.
       let timeoutSeconds = 15.0
       Task { @MainActor in
-        try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+        try? await Task.sleep(for: .milliseconds(timeoutSeconds * 1000))
         respond(FlutterError(
           code: "CAPTURE_PHOTO_FAILED",
           message: "Photo capture timed out.",
