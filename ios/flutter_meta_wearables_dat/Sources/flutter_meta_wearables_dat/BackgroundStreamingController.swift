@@ -123,6 +123,21 @@ final class BackgroundStreamingController {
       options: [.mixWithOthers]
     )
     try session.setActive(true)
+    logCurrentRoute("after activation")
+  }
+
+  /// Logs the current audio route. Kept in production on purpose: the
+  /// keep-alive shares the Bluetooth radio with the camera transport, and the
+  /// one time this class of bug was chased (0.9.1: `.allowBluetoothHFP` was
+  /// silently routing both audio directions onto the glasses over SCO and
+  /// starving the video link), the route dump was what identified it. One line
+  /// per activation and per route change is cheap; a field report containing
+  /// these lines is diagnosable without a repro.
+  static func logCurrentRoute(_ context: String) {
+    let route = AVAudioSession.sharedInstance().currentRoute
+    let inputs = route.inputs.map { "\($0.portType.rawValue):\($0.portName)" }.joined(separator: ",")
+    let outputs = route.outputs.map { "\($0.portType.rawValue):\($0.portName)" }.joined(separator: ",")
+    NSLog("[MWDAT-ROUTE] \(context) — in=[\(inputs)] out=[\(outputs)]")
   }
 
   private func setEnabled(_ value: Bool) {
@@ -136,6 +151,16 @@ final class BackgroundStreamingController {
     didRegisterObservers = true
 
     let nc = NotificationCenter.default
+    nc.addObserver(
+      forName: AVAudioSession.routeChangeNotification,
+      object: nil,
+      queue: nil
+    ) { note in
+      let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt)
+        .flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+      NSLog("[MWDAT-ROUTE] route changed, reason=\(reason.map(String.init(describing:)) ?? "?")")
+      Self.logCurrentRoute("post-change")
+    }
     nc.addObserver(
       self,
       selector: #selector(handleInterruption(_:)),

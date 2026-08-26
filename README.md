@@ -557,6 +557,8 @@ For full background streaming (app backgrounded, phone locked, or both) on **eit
 
 This covers all three "not visible" states: the app sent to background, the screen locked while the app is in front, and both combined.
 
+**Bluetooth Classic cost (iOS).** The keep-alive audio session shares the Bluetooth radio with the camera transport. On the Bluetooth Classic transport, expect reduced frame rates the whole time background streaming is enabled — foreground included (measured: a 24 fps medium stream averages ~14 fps), and under marginal radio conditions high-fps streams can stall. Prefer 15 fps or lower while enabled, or the Wi-Fi transport, which does not share the Bluetooth radio. Android is unaffected. The plugin logs the audio route on activation and on route changes (`[MWDAT-ROUTE]`) so this is diagnosable from console logs.
+
 **What counts as backgrounded.** Only a genuine background transition. These do **not** stop a stream: Control Center, the notification shade, the app-switcher preview, an incoming-call banner, Face ID and system alerts on iOS; rotation, split-screen and multi-window on Android. Lingering in Android's Recents *does*, because the Activity genuinely stops — a platform difference with no equivalent on iOS.
 
 **You must handle the terminal `stopped`.** Subscribe to `streamSessionStateStream()` and clear your texture id when it arrives:

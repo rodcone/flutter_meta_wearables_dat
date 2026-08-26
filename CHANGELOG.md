@@ -13,6 +13,7 @@ Contains contributions by [@kelvinharron](https://github.com/kelvinharron) — t
 * Example: `flutter build apk` no longer fails on the current Flutter SDK (a `lintVitalRelease` false positive on `MainActivity`, now disabled with rationale).
 * Android: the `AppForegroundTracker` logged under a different tag (`MWDAT`) than every other component (`MetaWearablesDat`), so the obvious logcat filter silently dropped the lifecycle lines.
 * The background-stop error-suppression window now tracks the teardown's real worst case (15s, was 5s); it still closes early the moment teardown completes.
+* **iOS: the keep-alive logs its audio route** on activation and on every route change (`[MWDAT-ROUTE]`). This is what identified the HFP/SCO contention above, and it makes transport-contention reports diagnosable from logs alone. Documented alongside it: on the Bluetooth Classic transport the keep-alive shares the radio with video, so expect reduced frame rates while background streaming is enabled and prefer 15 fps or lower there.
 
 **Changed**
 

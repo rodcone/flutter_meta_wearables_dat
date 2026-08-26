@@ -974,7 +974,19 @@ class MetaWearablesDat {
   ///
   /// Cannot be enabled *while* already backgrounded: iOS refuses to activate an
   /// audio session and Android forbids starting a foreground service from the
-  /// background on API 31+. Call it before you background. Safe to call again to reconfigure the Android
+  /// background on API 31+. Call it before you background.
+  ///
+  /// **Bluetooth Classic cost (iOS).** The keep-alive audio session shares the
+  /// Bluetooth radio with the camera transport, so on the Bluetooth Classic
+  /// transport expect reduced frame rates the whole time it is enabled —
+  /// foreground included. Measured on hardware: a 24 fps medium-quality stream
+  /// averages roughly 14 fps with the keep-alive active, and under marginal
+  /// radio conditions high-fps streams can stall outright. Prefer 15 fps or
+  /// lower while enabled, or the Wi-Fi camera transport, which does not share
+  /// the Bluetooth radio. Android is unaffected — its keep-alive is a
+  /// foreground service with no radio cost. The plugin logs the audio route on
+  /// activation and on every route change (`[MWDAT-ROUTE]` in the console) so
+  /// contention like this is diagnosable from logs alone. Safe to call again to reconfigure the Android
   /// notification; safe to call after [startStreamSession] too — the
   /// keep-alive mechanism engages immediately.
   ///
