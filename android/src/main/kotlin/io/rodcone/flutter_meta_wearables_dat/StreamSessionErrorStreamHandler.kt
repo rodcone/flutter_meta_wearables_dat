@@ -122,11 +122,13 @@ internal class StreamSessionErrorStreamHandler : EventChannel.StreamHandler {
         private const val TAG = "MetaWearablesDat"
 
         /**
-         * Upper bound on the background-stop suppression window. Long enough to
-         * cover a normal teardown, short enough that a stalled one cannot hide
-         * unrelated errors for meaningfully long. Matches iOS.
+         * Upper bound on the background-stop suppression window. Matches iOS,
+         * whose bound tracks its teardown worst case (3s stream + 10s session
+         * backstops, plus slack). On Android teardown is synchronous and the
+         * window is closed explicitly right after it, so this timer is a pure
+         * backstop that should never fire.
          */
-        const val DEFAULT_SUPPRESSION_TIMEOUT_MS = 5_000L
+        const val DEFAULT_SUPPRESSION_TIMEOUT_MS = 15_000L
 
         // String-pattern matching against `error.toString()` keeps us
         // forward-compatible: new error cases that aren't explicitly listed

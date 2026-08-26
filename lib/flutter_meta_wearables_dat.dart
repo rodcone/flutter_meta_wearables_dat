@@ -544,7 +544,9 @@ class CameraPermissionException implements Exception {
   bool get isInternalError => code == 'INTERNAL_ERROR';
 
   @override
-  String toString() => 'CameraPermissionException($code): $message';
+  String toString() => details == null
+      ? 'CameraPermissionException($code): $message'
+      : 'CameraPermissionException($code): $message $details';
 }
 
 /// Represents a photo captured from a Meta Wearables device.
@@ -678,7 +680,14 @@ class VideoFrame {
 
   /// Always `true` for [VideoCodec.raw]. For [VideoCodec.hvc1] indicates
   /// whether this frame carries parameter sets and can be decoded without
-  /// prior frames.
+  /// prior frames — safe to use as the first frame of a recording or a
+  /// decode burst.
+  ///
+  /// A frame qualifies when it opens on an IRAP picture (or the SDK flags it
+  /// as a keyframe) *and* the VPS/SPS/PPS trio either travels with it or was
+  /// prepended by the plugin. An IRAP that could not be made self-decodable —
+  /// no parameter sets have been observed yet on this session — reports
+  /// `false` rather than pointing a recorder at an undecodable segment start.
   final bool isKeyframe;
 
   /// Number of bytes per row for [VideoCodec.raw] frames on iOS — may be
@@ -762,6 +771,18 @@ class MetaWearablesDat {
 
   /// Stops the active stream session. [deviceId] is accepted for call symmetry
   /// but isn't required — there is a single active session.
+  ///
+  /// Since 0.9.1 this ends the whole device session, not just the stream, on
+  /// both platforms — the glasses play their stream-ended tone, which they
+  /// previously only did when the app was backgrounded or killed. The
+  /// trade-off is that the next [startStreamSession] is a full session
+  /// reconnect rather than a fast capability re-attach, so restarting takes
+  /// noticeably longer than it did on 0.9.0.
+  ///
+  /// The returned future resolves once the stop handshake with the glasses has
+  /// completed. That is normally quick, but is bounded by backstops of a few
+  /// seconds each for a dead device or wedged SDK — do not assume it resolves
+  /// instantly.
   static Future<bool> stopStreamSession(String? deviceId) {
     return MetaWearablesDatPlatform.instance.stopStreamSession(deviceId);
   }
@@ -953,7 +974,19 @@ class MetaWearablesDat {
   ///
   /// Cannot be enabled *while* already backgrounded: iOS refuses to activate an
   /// audio session and Android forbids starting a foreground service from the
-  /// background on API 31+. Call it before you background. Safe to call again to reconfigure the Android
+  /// background on API 31+. Call it before you background.
+  ///
+  /// **Bluetooth Classic cost (iOS).** The keep-alive audio session shares the
+  /// Bluetooth radio with the camera transport, so on the Bluetooth Classic
+  /// transport expect reduced frame rates the whole time it is enabled —
+  /// foreground included. Measured on hardware: a 24 fps medium-quality stream
+  /// averages roughly 14 fps with the keep-alive active, and under marginal
+  /// radio conditions high-fps streams can stall outright. Prefer 15 fps or
+  /// lower while enabled, or the Wi-Fi camera transport, which does not share
+  /// the Bluetooth radio. Android is unaffected — its keep-alive is a
+  /// foreground service with no radio cost. The plugin logs the audio route on
+  /// activation and on every route change (`[MWDAT-ROUTE]` in the console) so
+  /// contention like this is diagnosable from logs alone. Safe to call again to reconfigure the Android
   /// notification; safe to call after [startStreamSession] too — the
   /// keep-alive mechanism engages immediately.
   ///
@@ -986,6 +1019,11 @@ class MetaWearablesDat {
   /// service / releases the wake lock on Android. Safe to call multiple
   /// times. Does NOT stop the active stream session; use
   /// [stopStreamSession] for that.
+  ///
+  /// Since 0.9.1 the returned future resolves only once the deactivation has
+  /// actually landed (it runs off the main thread on iOS). Await it before
+  /// letting the app background if you are relying on the keep-alive being
+  /// gone.
   ///
   /// Worth calling when you observe a terminal [StreamSessionState.stopped] and
   /// do not intend to restart: the keep-alive is not tied to the stream, so an

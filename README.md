@@ -74,7 +74,7 @@ Future<int?> completeRegistration(Uri callbackUri) async {
 }
 ```
 
-Render the returned ID with `Texture(textureId: textureId)`, and stop the session with `await MetaWearablesDat.stopStreamSession(null)` when finished.
+Render the returned ID with `Texture(textureId: textureId)`, and stop the session with `await MetaWearablesDat.stopStreamSession(null)` when finished. Since 0.9.1, stopping ends the whole device session — the glasses play their stream-ended tone, and the next start is a full reconnect rather than an instant re-attach.
 
 For a complete implementation, see the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example), which ports Meta's native Camera Access sample to Flutter.
 
@@ -556,6 +556,8 @@ For full background streaming (app backgrounded, phone locked, or both) on **eit
 | **called** | Session stays alive. The preview resumes on foreground (brief keyframe-wait stall on `hvc1`). |
 
 This covers all three "not visible" states: the app sent to background, the screen locked while the app is in front, and both combined.
+
+**Bluetooth Classic cost (iOS).** The keep-alive audio session shares the Bluetooth radio with the camera transport. On the Bluetooth Classic transport, expect reduced frame rates the whole time background streaming is enabled — foreground included (measured: a 24 fps medium stream averages ~14 fps), and under marginal radio conditions high-fps streams can stall. Prefer 15 fps or lower while enabled, or the Wi-Fi transport, which does not share the Bluetooth radio. Android is unaffected. The plugin logs the audio route on activation and on route changes (`[MWDAT-ROUTE]`) so this is diagnosable from console logs.
 
 **What counts as backgrounded.** Only a genuine background transition. These do **not** stop a stream: Control Center, the notification shade, the app-switcher preview, an incoming-call banner, Face ID and system alerts on iOS; rotation, split-screen and multi-window on Android. Lingering in Android's Recents *does*, because the Activity genuinely stops — a platform difference with no equivalent on iOS.
 

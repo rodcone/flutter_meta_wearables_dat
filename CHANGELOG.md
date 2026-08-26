@@ -1,3 +1,16 @@
+## 0.9.1
+
+Contains contributions by [@kelvinharron](https://github.com/kelvinharron).
+
+* **`stopStreamSession()` now ends the whole device session, on both platforms.** The glasses' stream-ended tone hangs off the session lifecycle, so the previous stream-only stop never chimed. Matches Meta's CameraAccess sample and the 0.9.0 background path. Trade-off: the next `startStreamSession()` is a full reconnect rather than a fast re-attach, and the future resolves only once the stop handshake completes.
+* **iOS: `enableBackgroundStreaming()` / `disableBackgroundStreaming()` no longer freeze the UI.** AVAudioSession activation/deactivation block for hundreds of milliseconds and ran inline on the platform thread; all session work now runs on a serial queue, and both futures resolve when the work has actually landed.
+* **iOS: fixed a 0.9.0 defect that could strand the glasses after a background-stop timeout.** One expired background assertion latched a flag that made every later teardown release the stream mid-cascade, so the next start was rejected. Reset on foreground.
+* **iOS `hvc1`: fixed green/corrupted frames and preview freezes.** Recording keyframes are keyed off a NAL scan for true IRAP pictures, with parameter sets prepended only where genuinely missing — `isKeyframe` now means "self-decodable as shipped". The decoder rebuilds itself from in-band parameter sets when the glasses switch quality mid-stream, and the FPS throttle no longer drops frames ahead of the decoder (only the texture push is throttled).
+* **iOS: the background-streaming keep-alive no longer requests Bluetooth HFP.** It routed glasses audio onto an 8 kHz SCO link that contended with the video transport for the Bluetooth radio. Note the active keep-alive still shares the Bluetooth Classic radio with video — prefer 15 fps or lower while enabled there, or the Wi-Fi transport. The audio route is now logged on activation and on route changes (`[MWDAT-ROUTE]`).
+* iOS: stream and session stop-waits are event-driven instead of 50 ms polls, and the background-stop error-suppression window now tracks the teardown's real worst case (15 s, was 5 s).
+* Android: `AppForegroundTracker` now logs under the same tag as every other component, so `adb logcat -s MetaWearablesDat` no longer drops the lifecycle lines.
+* `CameraPermissionException.toString()` now includes the `details` map; example app: `flutter build apk` no longer fails on a `lintVitalRelease` false positive.
+
 ## 0.9.0
 
 **BREAKING CHANGES**

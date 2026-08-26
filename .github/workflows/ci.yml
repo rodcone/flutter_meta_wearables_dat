@@ -154,9 +154,16 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      # `BackgroundStreamingController.swift` uses iOS-18+ AVAudioSession APIs
-      # (`.allowBluetoothHFP`) so the build needs the matching SDK. The default
-      # Xcode on `macos-latest` images lags real releases — pin to latest-stable.
+      # Pin to latest-stable: the default Xcode on `macos-latest` lags real
+      # releases, and the vendored xcframeworks want a current toolchain.
+      #
+      # Until 0.9.1 this pin was justified by `.allowBluetoothHFP`, an iOS-18
+      # AVAudioSession option. That option was dropped (it forced the glasses
+      # off A2DP onto an 8 kHz SCO link that contended with the video
+      # transport), and no iOS-18-only API remains — the deployment floor is
+      # 17.2. So the pin is now toolchain hygiene rather than a hard
+      # requirement; it stays because an image-default Xcode regression should
+      # not be the thing that breaks a release build.
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
