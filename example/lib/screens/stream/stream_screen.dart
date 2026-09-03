@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
+import 'package:flutter_meta_wearables_dat_example/providers/audio_route.dart';
+import 'package:flutter_meta_wearables_dat_example/providers/background_frame_monitor.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart'
@@ -192,6 +194,25 @@ class _StreamScreenState extends State<StreamScreen> {
                   ),
                 ),
               ),
+            // Diagnostics overlay (top-right) while the frame counter is on.
+            // Shows live frame rate and the iOS audio route — the two numbers
+            // needed to characterise the Bluetooth Classic keep-alive cost, and
+            // both otherwise only reachable through a console that recent iOS
+            // no longer forwards for third-party apps.
+            if (streamProvider.isStreaming &&
+                streamProvider.frameCountingEnabled)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: _DiagnosticsChip(
+                      monitor: streamProvider.frameMonitor,
+                    ),
+                  ),
+                ),
+              ),
             // Controls overlay at the bottom
             Positioned(
               bottom: 24,
@@ -346,6 +367,112 @@ String _sessionStateLabel(StreamSessionState state) {
     StreamSessionState.paused => 'Paused',
     _ => '',
   };
+}
+
+/// Live frame rate and iOS audio route, shown while the frame counter is on.
+///
+/// The route is polled rather than pushed: it changes only when something
+/// reconfigures the audio session, and a 2 s poll is far simpler than a second
+/// event channel for a diagnostic.
+class _DiagnosticsChip extends StatefulWidget {
+  final BackgroundFrameMonitor monitor;
+
+  const _DiagnosticsChip({required this.monitor});
+
+  @override
+  State<_DiagnosticsChip> createState() => _DiagnosticsChipState();
+}
+
+class _DiagnosticsChipState extends State<_DiagnosticsChip> {
+  AudioRoute? _route;
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refreshRoute());
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(_refreshRoute()),
+    );
+  }
+
+  Future<void> _refreshRoute() async {
+    final route = await AudioRoute.read();
+    if (!mounted) return;
+    setState(() => _route = route);
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.monitor,
+      builder: (context, _) {
+        final fps = widget.monitor.liveFps;
+        final route = _route;
+        final stalled = fps < 1;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.65),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                stalled ? 'STALLED' : '${fps.toStringAsFixed(1)} fps',
+                style: TextStyle(
+                  color: stalled ? Colors.redAccent : Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              Text(
+                '${widget.monitor.totalFrames} frames',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.6),
+                  fontSize: 10,
+                ),
+              ),
+              if (route != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  route.summary,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    // A Bluetooth port here means the keep-alive is on the same
+                    // radio as the video transport — the thing under test.
+                    color: route.usesBluetooth
+                        ? Colors.orangeAccent
+                        : Colors.white.withOpacity(0.6),
+                    fontSize: 9,
+                  ),
+                ),
+                if (route.usesBluetooth)
+                  const Text(
+                    'BLUETOOTH ROUTE',
+                    style: TextStyle(
+                      color: Colors.orangeAccent,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 /// Compact thermal-level indicator shown while streaming. Color escalates
