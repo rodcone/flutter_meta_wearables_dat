@@ -557,7 +557,7 @@ For full background streaming (app backgrounded, phone locked, or both) on **eit
 
 This covers all three "not visible" states: the app sent to background, the screen locked while the app is in front, and both combined.
 
-**Bluetooth Classic cost (iOS).** The keep-alive audio session shares the Bluetooth radio with the camera transport. On the Bluetooth Classic transport, expect reduced frame rates the whole time background streaming is enabled — foreground included (measured: a 24 fps medium stream averages ~14 fps), and under marginal radio conditions high-fps streams can stall. Prefer 15 fps or lower while enabled, or the Wi-Fi transport, which does not share the Bluetooth radio. Android is unaffected. The plugin logs the audio route on activation and on route changes (`[MWDAT-ROUTE]`) so this is diagnosable from console logs.
+**Bluetooth Classic cost (iOS).** On the Bluetooth Classic transport, expect reduced frame rates the whole time background streaming is enabled — foreground included (measured: a 24 fps medium stream averages ~14 fps), and under marginal radio conditions high-fps streams can stall. Prefer 15 fps or lower while enabled, or the Wi-Fi transport, which does not carry this cost. Android is unaffected. The frame-rate cost is measured; the mechanism is not settled — radio contention is the leading explanation, but the session no longer requests Bluetooth HFP and should not be claiming a Bluetooth route at all. See [Diagnosing the audio route](#diagnosing-the-audio-route-ios) to check what your app's session actually claims.
 
 **What counts as backgrounded.** Only a genuine background transition. These do **not** stop a stream: Control Center, the notification shade, the app-switcher preview, an incoming-call banner, Face ID and system alerts on iOS; rotation, split-screen and multi-window on Android. Lingering in Android's Recents *does*, because the Activity genuinely stops — a platform difference with no equivalent on iOS.
 
@@ -609,9 +609,16 @@ await MetaWearablesDat.disableBackgroundStreaming();
 </array>
 ```
 
+Also add `NSMicrophoneUsageDescription` if your app doesn't already declare it. The keep-alive session uses the `.playAndRecord` category, so iOS treats the app as microphone-capable and terminates it on activation without a usage string — even though the plugin records no audio and engages no input:
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>Keeps the connection to your glasses alive while the app is in the background.</string>
+```
+
 **Android — no manual manifest changes needed.** The plugin's manifest auto-merges the required permissions (`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`) and declares the internal foreground service. On Android 13+ (API 33+), the first call to `enableBackgroundStreaming()` prompts the user for `POST_NOTIFICATIONS` — if denied, the foreground service still runs (so the stream survives), but its notification is suppressed by the OS until the user enables notifications for your app in system settings.
 
-**How it works.** On iOS the plugin activates an `AVAudioSession` configured for Bluetooth HFP + mixing, which keeps the process scheduled in background. The HEVC hardware decoder is invalidated on background entry (iOS forbids GPU access from backgrounded apps) and lazily recreated on the first frame after foreground — you'll see a brief stall while the decoder waits for the next keyframe, then streaming resumes cleanly. While backgrounded, the raw hvc1 NAL bytes still reach `videoFramesStream()` for recording. On Android the plugin starts a foreground service of type `connectedDevice` with your notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
+**How it works.** On iOS the plugin activates an `AVAudioSession` (`.playAndRecord` / `.videoRecording` + `.mixWithOthers`), which keeps the process scheduled in background. Bluetooth HFP is deliberately **not** requested: it exists for glasses-mic capture and would flip the glasses from A2DP to an 8 kHz SCO link that contends with the video transport. Configure HFP yourself if your app needs the glasses microphone. The HEVC hardware decoder is invalidated on background entry (iOS forbids GPU access from backgrounded apps) and lazily recreated on the first frame after foreground — you'll see a brief stall while the decoder waits for the next keyframe, then streaming resumes cleanly. While backgrounded, the raw hvc1 NAL bytes still reach `videoFramesStream()` for recording. On Android the plugin starts a foreground service of type `connectedDevice` with your notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
 
 **Accessing frames while backgrounded.** The normal `Texture` widget can't render in background (no GPU access), but the plugin exposes every decoded frame to Dart via `videoFramesStream()`, in both foreground and background. Useful for recording to disk, running ML, or re-muxing:
 
@@ -753,6 +760,21 @@ If you run into issues, try these steps first:
 Common issues:
 - **Wi‑Fi never prompts, or one transport streams unreliably** — see [Migrating or switching camera transport](#migrating-or-switching-camera-transport); switching between Wi‑Fi and Bluetooth Classic is a config-only change, no code required.
 - **Registration deep link not returning** — If registration opens the Meta AI app but the callback does not return to your app, verify that your URL scheme matches the one registered in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter). On iOS, ensure `CFBundleURLSchemes` in `Info.plist` (and `AppLinkURLScheme` in the `MWDAT` dict) use the same scheme. On Android, ensure the `data android:scheme` in your activity's intent-filter matches that scheme.
+
+### Diagnosing the audio route (iOS)
+
+Relevant when background streaming is enabled and frame rates drop on the Bluetooth Classic transport. The keep-alive `AVAudioSession` logs its route on activation and on every route change, so you can see what your app's session actually claims without a reproduction:
+
+```
+[MWDAT-ROUTE] after activation — in=[MicrophoneBuiltIn:iPhone Microphone] out=[Receiver:Receiver]
+```
+
+Filter the device console for `[MWDAT-ROUTE]`. What to look for:
+
+- **Only built-in ports**, as above — the session is not on the Bluetooth link. Frame-rate loss here is *not* audio-route contention; report it with the log attached.
+- **Any `Bluetooth…` port** in `in=` or `out=` — the session has claimed the Bluetooth radio the video transport needs. This is what a misconfigured category looks like; the plugin itself no longer requests HFP, so the usual cause is the host app configuring its own `AVAudioSession` elsewhere.
+
+If your app manages its own audio session, it is the last writer that wins — the plugin sets the category once at activation and does not reassert it.
 
 **Still having issues?** — Open a [GitHub issue](https://github.com/rodcone/flutter_meta_wearables_dat/issues) with all the details you can provide. This helps us pinpoint the problem and assist you more efficiently.
 

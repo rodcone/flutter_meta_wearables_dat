@@ -3,11 +3,27 @@ import Foundation
 import UIKit
 
 /// Owns the AVAudioSession keep-alive that lets the plugin's stream session
-/// survive backgrounding, screen lock, and app switches. Follows Meta's
-/// official BackgroundStreamingGuide: an active `.playAndRecord` audio
-/// session paired with the `audio` UIBackgroundMode prevents iOS from
-/// suspending the process, which in turn keeps the BLE / External Accessory
-/// link to the glasses alive.
+/// survive backgrounding, screen lock, and app switches: an active
+/// `.playAndRecord` session paired with the `audio` UIBackgroundMode prevents
+/// iOS from suspending the process, which in turn keeps the BLE / External
+/// Accessory link to the glasses alive.
+///
+/// Attribution, stated precisely because an earlier version of this comment
+/// cited a "Meta official BackgroundStreamingGuide" that does not exist:
+///
+/// - The *category configuration* matches Meta's CameraAccess sample
+///   (`AudioInputHandler.setCategory(.playAndRecord, mode: .videoRecording)`),
+///   and their sample app declares `audio` in `UIBackgroundModes`. Only the
+///   `.allowBluetoothHFP` option is deliberately dropped — see
+///   `logCurrentRoute` below for why.
+/// - Using it as a *keep-alive* is ours, not theirs. Meta's sample tears the
+///   session down unconditionally on background entry, and their 0.9.0 notes
+///   say they stopped "attempting to preserve the session across app
+///   switches". There is no upstream design to defer to here.
+///
+/// Note the session engages no audio I/O at all — no engine, no recorder, no
+/// input tap. It is an active session with a background-capable category and
+/// nothing flowing through it.
 final class BackgroundStreamingController {
   /// Guards `_isEnabled`, which is read from the main thread
   /// (`handleDidEnterBackground`, `mustNotStreamNow`, the method channel),

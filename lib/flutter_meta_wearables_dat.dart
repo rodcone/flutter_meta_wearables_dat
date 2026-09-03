@@ -976,19 +976,26 @@ class MetaWearablesDat {
   /// audio session and Android forbids starting a foreground service from the
   /// background on API 31+. Call it before you background.
   ///
-  /// **Bluetooth Classic cost (iOS).** The keep-alive audio session shares the
-  /// Bluetooth radio with the camera transport, so on the Bluetooth Classic
-  /// transport expect reduced frame rates the whole time it is enabled —
+  /// **Bluetooth Classic cost (iOS).** On the Bluetooth Classic camera
+  /// transport, expect reduced frame rates the whole time this is enabled —
   /// foreground included. Measured on hardware: a 24 fps medium-quality stream
   /// averages roughly 14 fps with the keep-alive active, and under marginal
   /// radio conditions high-fps streams can stall outright. Prefer 15 fps or
-  /// lower while enabled, or the Wi-Fi camera transport, which does not share
-  /// the Bluetooth radio. Android is unaffected — its keep-alive is a
-  /// foreground service with no radio cost. The plugin logs the audio route on
-  /// activation and on every route change (`[MWDAT-ROUTE]` in the console) so
-  /// contention like this is diagnosable from logs alone. Safe to call again to reconfigure the Android
-  /// notification; safe to call after [startStreamSession] too — the
-  /// keep-alive mechanism engages immediately.
+  /// lower while enabled, or the Wi-Fi camera transport, which does not carry
+  /// this cost. Android is unaffected — its keep-alive is a foreground service
+  /// with no radio cost.
+  ///
+  /// The frame-rate cost is measured; the *mechanism* is not settled. Radio
+  /// contention between the audio session and the camera transport is the
+  /// leading explanation, but the session no longer requests Bluetooth HFP and
+  /// should not be claiming a Bluetooth route at all. The plugin logs the audio
+  /// route on activation and on every route change (`[MWDAT-ROUTE]` in the
+  /// console), which is the fastest way to check what your host app's session
+  /// actually claims.
+  ///
+  /// Safe to call again to reconfigure the Android notification; safe to call
+  /// after [startStreamSession] too — the keep-alive mechanism engages
+  /// immediately.
   ///
   /// **iOS** — activates an `AVAudioSession` in `.playAndRecord` /
   /// `.videoRecording` mode to keep the process scheduled while backgrounded.
