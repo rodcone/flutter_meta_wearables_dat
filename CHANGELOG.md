@@ -1,3 +1,12 @@
+## 0.9.2
+
+* **Correction: background streaming does not cost frame rate.** 0.9.1 said the active keep-alive shares the Bluetooth Classic radio with video and advised staying at or below 15 fps while enabled. An A/B against a *disabled* keep-alive found no measurable difference (Ray-Ban Display, medium, 24 fps target): 14.6 fps enabled vs 15.7 fps disabled, well inside this link's noise. The decisive number is the control — with no keep-alive at all, a 24 fps request still delivers ~15.7 fps, so the shortfall is the transport's. The 15 fps ceiling on Bluetooth Classic at medium quality is real and applies either way; use the Wi-Fi transport if you need the full rate. The 0.9.1 HFP removal was a genuine fix, but its explanation outlived it and was never re-tested.
+* **iOS: `NSMicrophoneUsageDescription` is now documented as required.** The keep-alive uses the `.playAndRecord` category, so iOS treats the app as microphone-capable and can terminate it on activation without a usage string. The setup section listed only `UIBackgroundModes`, so an app following it verbatim could ship a crash. The example carries the key for the mock device, which is why this never surfaced in testing.
+* iOS: documented that the keep-alive adopts the glasses as a Bluetooth A2DP **output** while active, so audio your app plays may route to them. Real, but costs no throughput.
+* Docs: corrected a stale claim that the keep-alive is "configured for Bluetooth HFP" (removed in 0.9.1), and a source comment citing a Meta "BackgroundStreamingGuide" that does not exist — the category matches Meta's CameraAccess sample, but using it as a keep-alive is this plugin's own design; their sample stops the session on background instead.
+* Docs: `[MWDAT-ROUTE]` now has its own troubleshooting section explaining how to read it, instead of being mentioned only in passing.
+* Example: optional on-screen diagnostics — live frame rate and the current audio route — behind a settings toggle. Off by default, since subscribing to frames is not free. Added because recent iOS no longer forwards a third-party app's `NSLog` over the syslog relay, making the plugin's own diagnostics unreadable in the field.
+
 ## 0.9.1
 
 Contains contributions by [@kelvinharron](https://github.com/kelvinharron).

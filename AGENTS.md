@@ -528,8 +528,8 @@ Develop and test without physical Meta glasses. Mock support lives in the option
 ```yaml
 # pubspec.yaml — add only in dev/staging configs
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.0
-  flutter_meta_wearables_dat_mock_device: ^0.9.0
+  flutter_meta_wearables_dat: ^0.9.2
+  flutter_meta_wearables_dat_mock_device: ^0.9.2
 ```
 
 ```dart

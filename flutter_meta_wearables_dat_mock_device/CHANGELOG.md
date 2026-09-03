@@ -1,3 +1,7 @@
+## 0.9.2
+
+* Align version with core package's 0.9.2 release. No API changes. The core release is documentation-only: notably, its previous claim that background streaming costs frame rate on Bluetooth Classic was measured and retracted.
+
 ## 0.9.1
 
 * Align version with core package's 0.9.1 release. No API changes. Note the core release changes `stopStreamSession()` to end the whole device session (glasses chime; next start is a full reconnect) — mock-backed streams follow the same path.
