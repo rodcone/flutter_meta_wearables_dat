@@ -133,35 +133,9 @@ final class BackgroundStreamingController {
 
   private static func activateSession() throws {
     let session = AVAudioSession.sharedInstance()
-    // `.record`, not `.playAndRecord`, and the difference is the whole point.
-    //
-    // Measured on hardware (Ray-Ban Display, Bluetooth Classic, 24 fps): with
-    // `.playAndRecord` the route came up as
-    //   in=[MicrophoneBuiltIn] out=[BluetoothA2DPOutput:Meta RB Display]
-    // — the keep-alive was routing its output to the glasses over A2DP, a
-    // Bluetooth Classic profile sharing the radio the video transport needs.
-    // Frame rate started near target and collapsed to ~14 fps average against
-    // a 24 fps target, with dips to 7.
-    //
-    // This is the same failure as the 0.9.1 `.allowBluetoothHFP` removal, one
-    // profile over: dropping HFP moved the glasses off SCO and onto A2DP
-    // rather than off the radio altogether, which is why that fix helped
-    // without curing it.
-    //
-    // `.record` has no output route at all, so there is nothing for iOS to
-    // route to the glasses. Deliberately not `.playback`: for every category
-    // except `.playAndRecord`, `.multiRoute` and `.record`, A2DP is implicitly
-    // permitted and cannot be turned off, so `.playback` would reintroduce the
-    // same claim with no opt-out. An `overrideOutputAudioPort(.speaker)` on
-    // `.playAndRecord` would also work, but it is a runtime override that a
-    // later route change can undo; having no output route is structural.
-    //
-    // The session still engages no audio I/O — nothing is recorded. `.record`
-    // is a background-capable category, so the `audio` UIBackgroundMode
-    // keep-alive is unaffected.
     try session.setCategory(
-      .record,
-      mode: .default,
+      .playAndRecord,
+      mode: .videoRecording,
       options: [.mixWithOthers]
     )
     try session.setActive(true)
