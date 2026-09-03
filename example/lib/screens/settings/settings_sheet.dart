@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
+import 'package:flutter_meta_wearables_dat_example/providers/background_frame_monitor.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart'
     as stream_providers;
@@ -96,6 +97,12 @@ class _StreamSettingsSection extends StatelessWidget {
               value: sp.backgroundStreamingEnabled,
               onChanged: sp.setBackgroundStreamingEnabled,
             ),
+            const SizedBox(height: 16),
+            _FrameCountingToggle(
+              value: sp.frameCountingEnabled,
+              onChanged: sp.setFrameCountingEnabled,
+              lastWindow: sp.frameMonitor.lastWindow,
+            ),
           ],
         );
       },
@@ -153,6 +160,121 @@ class _BackgroundStreamingToggle extends StatelessWidget {
               onChanged(v);
             },
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Diagnostic toggle for the background frame counter.
+///
+/// Off by default and deliberately not enabled implicitly: subscribing to
+/// `videoFramesStream()` makes the plugin copy every frame across the event
+/// channel, so leaving it on would distort the very frame rate a tester is
+/// trying to measure.
+class _FrameCountingToggle extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final BackgroundWindow? lastWindow;
+
+  const _FrameCountingToggle({
+    required this.value,
+    required this.onChanged,
+    required this.lastWindow,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final window = lastWindow;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.speed_outlined,
+                size: 18,
+                color: theme.colorScheme.onSurface.withOpacity(0.65),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Count background frames',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurface.withOpacity(0.85),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Diagnostic. Counts frames that arrive while the app is backgrounded, when the preview cannot render. Costs frame rate while on — turn it off before measuring foreground fps.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurface.withOpacity(0.55),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: value,
+                onChanged: (v) {
+                  HapticFeedback.selectionClick();
+                  onChanged(v);
+                },
+              ),
+            ],
+          ),
+          if (value && window != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest.withOpacity(
+                  0.5,
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Last background window',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurface.withOpacity(0.55),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    window.summary,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: window.deliveredFrames
+                          ? theme.colorScheme.onSurface
+                          : theme.colorScheme.error,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${window.codec?.name ?? 'unknown'} · keep-alive '
+                    '${window.backgroundStreamingEnabled ? 'on' : 'off'}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurface.withOpacity(0.55),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

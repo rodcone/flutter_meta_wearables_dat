@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
+import 'package:flutter_meta_wearables_dat_example/providers/background_frame_monitor.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
 import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
@@ -133,6 +134,9 @@ class StreamSessionProvider extends ChangeNotifier {
     mockDeviceProvider.addListener(_onMockDeviceChanged);
     _initializeActiveDeviceMonitoring();
     _initializeDeviceStateMonitoring();
+    // The monitor notifies only on background-window boundaries, so forwarding
+    // its notifications costs one rebuild per background round trip.
+    frameMonitor.addListener(notifyListeners);
   }
 
   bool get hasActiveDevice => _hasActiveDevice;
@@ -390,6 +394,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _recoveryBackoffTimer?.cancel();
     _recoveryWatchdogTimer?.cancel();
     _pendingUserActionTimer?.cancel();
+    frameMonitor.dispose();
     super.dispose();
   }
 
@@ -812,10 +817,41 @@ class StreamSessionProvider extends ChangeNotifier {
         await MetaWearablesDat.disableBackgroundStreaming();
       }
       _backgroundStreamingEnabled = enabled;
+      frameMonitor.backgroundStreamingEnabled = enabled;
       notifyListeners();
     } catch (e) {
       debugPrint('[MetaWearablesDAT] Background streaming toggle failed: $e');
     }
+  }
+
+  // --- Frame counting (diagnostic, opt-in) --------------------------------
+  // Deliberately off by default and never enabled implicitly.
+  //
+  // Native frame emission is gated on `hasListener`, so subscribing is not
+  // free: it makes the plugin copy every frame across the event channel. The
+  // instrument perturbs what it measures, which means foreground frame-rate
+  // comparisons must be taken with this OFF (read the native
+  // "[MWDAT] N frames, target: X, actual: Y FPS" log instead). Turn it on to
+  // answer the one question the native log cannot: whether frames still arrive
+  // while the app is backgrounded and the Texture cannot render.
+  final BackgroundFrameMonitor frameMonitor = BackgroundFrameMonitor();
+  bool _frameCountingEnabled = false;
+
+  bool get frameCountingEnabled => _frameCountingEnabled;
+
+  void setFrameCountingEnabled(bool enabled) {
+    if (_frameCountingEnabled == enabled) return;
+    _frameCountingEnabled = enabled;
+    if (enabled) {
+      frameMonitor
+        ..backgroundStreamingEnabled = _backgroundStreamingEnabled
+        ..start();
+    } else {
+      frameMonitor
+        ..stop()
+        ..reset();
+    }
+    notifyListeners();
   }
 
   Future<CapturedPhoto?> capturePhoto() async {
