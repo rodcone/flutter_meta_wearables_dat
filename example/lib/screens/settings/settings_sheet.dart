@@ -145,7 +145,7 @@ class _BackgroundStreamingToggle extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Stream stays alive when the app is backgrounded or the phone is locked. On Bluetooth Classic, prefer 15 fps or lower while enabled.',
+                  'Stream stays alive when the app is backgrounded or the phone is locked. No frame-rate cost — Bluetooth Classic caps out around 15 fps at medium either way.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurface.withOpacity(0.55),
                   ),

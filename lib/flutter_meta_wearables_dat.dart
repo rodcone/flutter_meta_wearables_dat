@@ -976,22 +976,34 @@ class MetaWearablesDat {
   /// audio session and Android forbids starting a foreground service from the
   /// background on API 31+. Call it before you background.
   ///
-  /// **Bluetooth Classic cost (iOS).** On the Bluetooth Classic camera
-  /// transport, expect reduced frame rates the whole time this is enabled —
-  /// foreground included. Measured on hardware: a 24 fps medium-quality stream
-  /// averages roughly 14 fps with the keep-alive active, and under marginal
-  /// radio conditions high-fps streams can stall outright. Prefer 15 fps or
-  /// lower while enabled, or the Wi-Fi camera transport, which does not carry
-  /// this cost. Android is unaffected — its keep-alive is a foreground service
-  /// with no radio cost.
+  /// **Frame rate on Bluetooth Classic (iOS).** Enabling this has *no
+  /// measurable effect on frame rate.* Earlier releases of this plugin said it
+  /// did; that was wrong, and the correction matters because it changes what
+  /// you should do about slow streams.
   ///
-  /// The frame-rate cost is measured; the *mechanism* is not settled. Radio
-  /// contention between the audio session and the camera transport is the
-  /// leading explanation, but the session no longer requests Bluetooth HFP and
-  /// should not be claiming a Bluetooth route at all. The plugin logs the audio
-  /// route on activation and on every route change (`[MWDAT-ROUTE]` in the
-  /// console), which is the fastest way to check what your host app's session
-  /// actually claims.
+  /// Measured on hardware (Ray-Ban Display, Bluetooth Classic, medium quality,
+  /// 24 fps target), mean of ~15 samples per condition:
+  ///
+  /// | condition | mean |
+  /// | --- | --- |
+  /// | keep-alive enabled | 14.6 fps |
+  /// | keep-alive disabled | 15.7 fps |
+  ///
+  /// The difference is well inside the run-to-run noise on this link. The real
+  /// finding is the second row: **with no keep-alive at all, a 24 fps request
+  /// still delivers about 15 fps.** The shortfall belongs to the Bluetooth
+  /// Classic transport, not to this API.
+  ///
+  /// So asking for more than ~15 fps on Bluetooth Classic at medium quality
+  /// does not get you more than ~15 fps, whether or not background streaming is
+  /// on. Use the Wi-Fi camera transport if you need the full rate. Android is
+  /// unaffected either way — its keep-alive is a foreground service.
+  ///
+  /// One real side effect does remain, and it is not about throughput: on iOS
+  /// the keep-alive session adopts the glasses as a Bluetooth A2DP *output*
+  /// while it is active, so audio your app plays may route to the glasses. The
+  /// plugin logs the route on activation and on every change
+  /// (`[MWDAT-ROUTE]`); see the README's troubleshooting section.
   ///
   /// Safe to call again to reconfigure the Android notification; safe to call
   /// after [startStreamSession] too — the keep-alive mechanism engages

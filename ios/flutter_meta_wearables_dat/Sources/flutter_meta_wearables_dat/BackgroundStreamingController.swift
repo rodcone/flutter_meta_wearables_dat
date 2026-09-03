@@ -142,13 +142,22 @@ final class BackgroundStreamingController {
     logCurrentRoute("after activation")
   }
 
-  /// Logs the current audio route. Kept in production on purpose: the
-  /// keep-alive shares the Bluetooth radio with the camera transport, and the
-  /// one time this class of bug was chased (0.9.1: `.allowBluetoothHFP` was
-  /// silently routing both audio directions onto the glasses over SCO and
-  /// starving the video link), the route dump was what identified it. One line
-  /// per activation and per route change is cheap; a field report containing
-  /// these lines is diagnosable without a repro.
+  /// Logs the current audio route. Kept in production on purpose: it has now
+  /// twice been the thing that settled an argument about this session.
+  ///
+  /// 0.9.1: `.allowBluetoothHFP` was routing both audio directions onto the
+  /// glasses over SCO and starving the video link. Removing it was a real win.
+  ///
+  /// 0.9.2: the route dump showed the session still adopting the glasses as a
+  /// `BluetoothA2DPOutput`. That looked like the remaining cause of reduced
+  /// frame rates — but an A/B against a disabled keep-alive found no
+  /// difference, and no difference against a `.record` session with no output
+  /// route either. All three sat around 15 fps against a 24 fps target, so the
+  /// shortfall is the Bluetooth Classic transport's, not this session's. The
+  /// A2DP claim is real but costs no throughput.
+  ///
+  /// One line per activation and per route change is cheap; a field report
+  /// containing these lines is diagnosable without a repro.
   static func logCurrentRoute(_ context: String) {
     let route = AVAudioSession.sharedInstance().currentRoute
     let inputs = route.inputs.map { "\($0.portType.rawValue):\($0.portName)" }.joined(separator: ",")

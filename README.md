@@ -557,7 +557,20 @@ For full background streaming (app backgrounded, phone locked, or both) on **eit
 
 This covers all three "not visible" states: the app sent to background, the screen locked while the app is in front, and both combined.
 
-**Bluetooth Classic cost (iOS).** On the Bluetooth Classic transport, expect reduced frame rates the whole time background streaming is enabled — foreground included (measured: a 24 fps medium stream averages ~14 fps), and under marginal radio conditions high-fps streams can stall. Prefer 15 fps or lower while enabled, or the Wi-Fi transport, which does not carry this cost. Android is unaffected. The frame-rate cost is measured; the mechanism is not settled — radio contention is the leading explanation, but the session no longer requests Bluetooth HFP and should not be claiming a Bluetooth route at all. See [Diagnosing the audio route](#diagnosing-the-audio-route-ios) to check what your app's session actually claims.
+**Frame rate on Bluetooth Classic (iOS).** Background streaming has **no measurable effect on frame rate**. Earlier releases of this plugin said it did — that was wrong.
+
+Measured on hardware (Ray-Ban Display, Bluetooth Classic, medium quality, 24 fps target, ~15 samples per condition):
+
+| condition | mean frame rate |
+| --- | --- |
+| Background streaming enabled | 14.6 fps |
+| Background streaming disabled | 15.7 fps |
+
+The gap is well inside this link's run-to-run noise. The finding that matters is the second row: **with no keep-alive at all, a 24 fps request still delivers ~15 fps.** That shortfall belongs to the Bluetooth Classic transport, not to `enableBackgroundStreaming()`.
+
+Practically: asking for more than ~15 fps on Bluetooth Classic at medium quality does not get you more than ~15 fps either way. Use the [Wi-Fi transport](#migrating-or-switching-camera-transport) if you need the full rate. Android is unaffected — its keep-alive is a foreground service.
+
+One real side effect does remain, unrelated to throughput: while the keep-alive is active the audio session adopts the glasses as a Bluetooth A2DP **output**, so audio your app plays may route to the glasses. See [Diagnosing the audio route](#diagnosing-the-audio-route-ios).
 
 **What counts as backgrounded.** Only a genuine background transition. These do **not** stop a stream: Control Center, the notification shade, the app-switcher preview, an incoming-call banner, Face ID and system alerts on iOS; rotation, split-screen and multi-window on Android. Lingering in Android's Recents *does*, because the Activity genuinely stops — a platform difference with no equivalent on iOS.
 
