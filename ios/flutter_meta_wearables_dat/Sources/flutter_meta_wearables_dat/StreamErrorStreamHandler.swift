@@ -97,7 +97,7 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     guard let events = eventSink else { return }
     Task { @MainActor in
       guard bypassSuppression || !self.isStoppingForBackground else {
-        NSLog("[MWDAT] suppressed '\(code)' during background stop")
+        MWDATLog.log("suppressed '\(code)' during background stop")
         return
       }
       events(["code": code, "message": message])
@@ -124,7 +124,7 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
         // path that produced "Video streaming encountered an error" right after
         // a deliberate background stop.
         guard !self.isStoppingForBackground else {
-          NSLog("[MWDAT] suppressed stream error during background stop")
+          MWDATLog.log("suppressed stream error during background stop")
           return
         }
         // `errorToMap` returns nil for errors that are deliberately not part of

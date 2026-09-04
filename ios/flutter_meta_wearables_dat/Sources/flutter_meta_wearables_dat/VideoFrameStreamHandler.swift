@@ -297,8 +297,8 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         )
         guard countStatus == noErr, paramSetCount > 0 else { return Data() }
         if nalUnitHeaderLength != Int32(nalLengthSize) {
-            NSLog(
-                "[MWDAT] HEVC NAL length prefix is \(nalUnitHeaderLength) bytes, not \(nalLengthSize) — parameter-set framing may not match the sample data")
+            MWDATLog.log(
+                "HEVC NAL length prefix is \(nalUnitHeaderLength) bytes, not \(nalLengthSize) — parameter-set framing may not match the sample data")
         }
 
         var output = Data()

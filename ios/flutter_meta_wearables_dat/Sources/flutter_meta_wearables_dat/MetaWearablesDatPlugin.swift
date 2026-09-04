@@ -879,7 +879,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   @MainActor
   private func performTeardownStreamOnly() async {
-    NSLog("[MWDAT] teardownStreamOnly — stopping camera, awaiting stop cascade")
+    MWDATLog.log("teardownStreamOnly — stopping camera, awaiting stop cascade")
 
     // Capture identities and stop BEFORE the first suspension below. While this
     // method is suspended the stream must already be `.stopping`: otherwise a
@@ -942,7 +942,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // replaced it while we waited.
     if let texId = stoppingTextureId {
       textureRegistry?.unregisterTexture(texId)
-      NSLog("[MWDAT] Unregistered texture \(texId)")
+      MWDATLog.log("Unregistered texture \(texId)")
       if textureId == stoppingTextureId {
         textureId = nil
         pixelBufferTexture = nil
@@ -1006,8 +1006,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return first
       }
       if !stopped, stream.state != .stopped {
-        NSLog(
-          "[MWDAT] stream did not reach .stopped within \(streamStopTimeout)s (state: \(stream.state), aborted: \(abortStopWait)) — releasing anyway; the glasses may keep a stale capability")
+        MWDATLog.log(
+          "stream did not reach .stopped within \(streamStopTimeout)s (state: \(stream.state), aborted: \(abortStopWait)) — releasing anyway; the glasses may keep a stale capability")
       }
     }
 
@@ -1071,8 +1071,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return first
     }
     if !stopped, session.state != .stopped {
-      NSLog(
-        "[MWDAT] device session did not reach .stopped within \(deviceSessionStopTimeout)s (state: \(session.state), aborted: \(abortStopWait)) — releasing anyway")
+      MWDATLog.log(
+        "device session did not reach .stopped within \(deviceSessionStopTimeout)s (state: \(session.state), aborted: \(abortStopWait)) — releasing anyway")
     }
   }
 
@@ -1120,7 +1120,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
       sessionParameterSets = []
-      NSLog("[MWDAT] VTDecompressionSession invalidated (app entered background)")
+      MWDATLog.log("VTDecompressionSession invalidated (app entered background)")
     }
 
     // Background streaming ON is the whole point of the opt-in: keep everything
@@ -1131,7 +1131,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // subscribed to the state channel.
     guard streamSession != nil || deviceSession != nil else { return }
 
-    NSLog("[MWDAT] lifecycle: stopping session (background streaming off)")
+    MWDATLog.log("lifecycle: stopping session (background streaming off)")
     // Tell Dart *why* before the terminal `stopped` lands, so consumers can
     // tell a deliberate stop from a fault and skip their retry logic. Emitted
     // first because `teardownStreamOnly()` detaches the error handler.
@@ -1161,7 +1161,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // the *next* start. Stopping the session makes that unreachable: the SDK
       // owns it, and the capability goes away with it either way.
       await teardownDeviceSession()
-      NSLog("[MWDAT] lifecycle: session stopped for background")
+      MWDATLog.log("lifecycle: session stopped for background")
     }
   }
 
@@ -1183,7 +1183,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       MainActor.assumeIsolated {
         guard let self else { return }
         self.abortStopWait = true
-        NSLog("[MWDAT] background stop assertion expired — abandoning stop confirmation")
+        MWDATLog.log("background stop assertion expired — abandoning stop confirmation")
         self.endBackgroundStopAssertion()
       }
     }
@@ -1206,7 +1206,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // the stream or session mid-cascade — the muted-chime / stale-capability
     // failure those waits exist to prevent.
     abortStopWait = false
-    NSLog("[MWDAT] App entering foreground — HEVC decoder will be recreated on next frame")
+    MWDATLog.log("App entering foreground — HEVC decoder will be recreated on next frame")
     // Deliberately nothing else. With background streaming off the session is
     // stopped and stays stopped: the plugin never reactivates the glasses
     // camera on its own. Do not add a resume here.
@@ -1271,7 +1271,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
 
     guard let pixelBuffer else {
-      NSLog("[MWDAT] Could not obtain pixel buffer from video frame")
+      MWDATLog.log("Could not obtain pixel buffer from video frame")
       return
     }
 
@@ -1298,7 +1298,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
     if frameCounter % 30 == 0 && timeSinceLastFrame > 0 {
       let actualFPS = 1.0 / timeSinceLastFrame
-      NSLog("[MWDAT] \(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
+      MWDATLog.log("\(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
     }
 
     guard let texture = pixelBufferTexture,
@@ -1340,10 +1340,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if status == noErr, let session {
       decompressionSession = session
       sessionFormatDescription = formatDescription
-      NSLog("[MWDAT] Created VTDecompressionSession for HEVC decoding (hardware)")
+      MWDATLog.log("Created VTDecompressionSession for HEVC decoding (hardware)")
     } else {
       sessionFormatDescription = nil
-      NSLog("[MWDAT] Failed to create VTDecompressionSession: \(status)")
+      MWDATLog.log("Failed to create VTDecompressionSession: \(status)")
     }
   }
 
@@ -1373,7 +1373,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       sampleBufferOut: &newBuffer
     )
     guard status == noErr else {
-      NSLog("[MWDAT] Failed to rewrap sample buffer with session format description: \(status)")
+      MWDATLog.log("Failed to rewrap sample buffer with session format description: \(status)")
       return nil
     }
     return newBuffer
@@ -1398,7 +1398,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if let last = lastFormatDescription, last !== formatDescription {
       if let existing = decompressionSession,
          !VTDecompressionSessionCanAcceptFormatDescription(existing, formatDescription: formatDescription) {
-        NSLog("[MWDAT] HEVC format description changed mid-stream — recreating decompression session")
+        MWDATLog.log("HEVC format description changed mid-stream — recreating decompression session")
         VTDecompressionSessionInvalidate(existing)
         decompressionSession = nil
         sessionParameterSets = []
@@ -1421,7 +1421,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let inBandSets = Self.inBandParameterSets(of: sampleBuffer)
     if !inBandSets.isEmpty, inBandSets != sessionParameterSets {
       if let existing = decompressionSession {
-        NSLog("[MWDAT] in-band HEVC parameter sets changed — recreating decompression session")
+        MWDATLog.log("in-band HEVC parameter sets changed — recreating decompression session")
         VTDecompressionSessionInvalidate(existing)
         decompressionSession = nil
       }
@@ -1477,7 +1477,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if outputBuffer == nil {
       logDecodeFailure(sampleBuffer, status: failedStatus)
     } else if consecutiveDecodeFailures > 0 {
-      NSLog("[MWDAT] decode recovered after \(consecutiveDecodeFailures) failures — nals: \(Self.nalTypes(of: sampleBuffer))")
+      MWDATLog.log("decode recovered after \(consecutiveDecodeFailures) failures — nals: \(Self.nalTypes(of: sampleBuffer))")
       consecutiveDecodeFailures = 0
     }
 
@@ -1497,7 +1497,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let types = Self.nalTypes(of: sampleBuffer)
     let hasParamsOrIrap = types.contains { $0 >= 16 && $0 <= 34 }
     guard n <= 10 || n % 30 == 0 || hasParamsOrIrap else { return }
-    NSLog("[MWDAT] decode failure #\(n) — status: \(status), nals: \(types)")
+    MWDATLog.log("decode failure #\(n) — status: \(status), nals: \(types)")
   }
 
   /// Copies the sample buffer's HVCC-framed payload out of its CMBlockBuffer.
@@ -1614,7 +1614,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       )
     }
     guard status == noErr, let formatDescription else {
-      NSLog("[MWDAT] Failed to build format description from in-band parameter sets: \(status)")
+      MWDATLog.log("Failed to build format description from in-band parameter sets: \(status)")
       return nil
     }
     return formatDescription
@@ -1777,7 +1777,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       currentVideoCodec = videoCodec
       frameCounter = 0
       lastFrameSendTime = nil
-      NSLog("[MWDAT] Registered texture \(texId)")
+      MWDATLog.log("Registered texture \(texId)")
 
       // 3. Add a Camera capability. DAT 0.9.0 replaced `addStream` with
       // `addCamera`; the returned `Camera` owns the stream.
@@ -1827,7 +1827,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // install a live stream in a backgrounded app that nothing is going to
       // stop — the one outcome worse than the freeze this all replaces.
       if mustNotStreamNow {
-        NSLog("[MWDAT] app backgrounded during start — abandoning")
+        MWDATLog.log("app backgrounded during start — abandoning")
         await teardownStreamOnly()
         result(FlutterError(
           code: "APP_BACKGROUNDED",

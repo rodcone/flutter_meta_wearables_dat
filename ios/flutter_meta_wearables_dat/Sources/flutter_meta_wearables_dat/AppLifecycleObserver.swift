@@ -108,14 +108,14 @@ final class AppLifecycleObserver {
   func noteDidEnterBackground() {
     guard !isBackgrounded else { return }
     isBackgrounded = true
-    NSLog("[MWDAT] lifecycle: app entered background")
+    MWDATLog.log("lifecycle: app entered background")
     onDidEnterBackground?()
   }
 
   func noteWillEnterForeground() {
     guard isBackgrounded else { return }
     isBackgrounded = false
-    NSLog("[MWDAT] lifecycle: app entering foreground")
+    MWDATLog.log("lifecycle: app entering foreground")
     onWillEnterForeground?()
   }
 

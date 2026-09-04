@@ -97,7 +97,7 @@ final class BackgroundStreamingController {
       do {
         try Self.activateSession()
         self.setEnabled(true)
-        NSLog("[MWDAT] Background streaming enabled — AVAudioSession active")
+        MWDATLog.log("Background streaming enabled — AVAudioSession active")
         completion(nil)
       } catch {
         self.setEnabled(false)
@@ -126,7 +126,7 @@ final class BackgroundStreamingController {
         false,
         options: [.notifyOthersOnDeactivation]
       )
-      NSLog("[MWDAT] Background streaming disabled — AVAudioSession released")
+      MWDATLog.log("Background streaming disabled — AVAudioSession released")
       completion()
     }
   }
@@ -162,7 +162,7 @@ final class BackgroundStreamingController {
     let route = AVAudioSession.sharedInstance().currentRoute
     let inputs = route.inputs.map { "\($0.portType.rawValue):\($0.portName)" }.joined(separator: ",")
     let outputs = route.outputs.map { "\($0.portType.rawValue):\($0.portName)" }.joined(separator: ",")
-    NSLog("[MWDAT-ROUTE] \(context) — in=[\(inputs)] out=[\(outputs)]")
+    MWDATLog.route("\(context) — in=[\(inputs)] out=[\(outputs)]")
   }
 
   private func setEnabled(_ value: Bool) {
@@ -183,7 +183,7 @@ final class BackgroundStreamingController {
     ) { note in
       let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt)
         .flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
-      NSLog("[MWDAT-ROUTE] route changed, reason=\(reason.map(String.init(describing:)) ?? "?")")
+      MWDATLog.route("route changed, reason=\(reason.map(String.init(describing:)) ?? "?")")
       Self.logCurrentRoute("post-change")
     }
     nc.addObserver(
@@ -209,7 +209,7 @@ final class BackgroundStreamingController {
 
     switch type {
     case .began:
-      NSLog("[MWDAT] Audio interruption began")
+      MWDATLog.log("Audio interruption began")
     case .ended:
       // Re-activate so the keep-alive survives a phone call / Siri / etc.
       // Re-checked on the queue: a `disable()` can land between the guard
@@ -220,10 +220,10 @@ final class BackgroundStreamingController {
         do {
           try AVAudioSession.sharedInstance().setActive(true)
           self.setEnabled(true)
-          NSLog("[MWDAT] Audio interruption ended — session re-activated")
+          MWDATLog.log("Audio interruption ended — session re-activated")
         } catch {
           self.setEnabled(false)
-          NSLog("[MWDAT] Failed to re-activate AVAudioSession after interruption: \(error)")
+          MWDATLog.log("Failed to re-activate AVAudioSession after interruption: \(error)")
         }
       }
     @unknown default:
@@ -235,7 +235,7 @@ final class BackgroundStreamingController {
     // Rare but documented — whole audio stack reset. Re-activate if we were
     // keeping the session alive.
     guard isEnabled else { return }
-    NSLog("[MWDAT] AVAudioSession media services were reset — re-activating")
+    MWDATLog.log("AVAudioSession media services were reset — re-activating")
     sessionQueue.async { [weak self] in
       guard let self, self.isEnabled else { return }
       do {
@@ -243,7 +243,7 @@ final class BackgroundStreamingController {
         self.setEnabled(true)
       } catch {
         self.setEnabled(false)
-        NSLog("[MWDAT] Failed to re-activate AVAudioSession after reset: \(error)")
+        MWDATLog.log("Failed to re-activate AVAudioSession after reset: \(error)")
       }
     }
   }
