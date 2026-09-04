@@ -587,6 +587,13 @@ Stream not starting?
 
 iOS: Wi-Fi never prompts, or one transport streams unreliably?
 └── Switch transports — see "Migrating or switching camera transport" (config-only, no code change)
+
+Can't see the plugin's native [MWDAT] logs?
+├── Android: they're already in `flutter run` (logcat). Narrow with `adb logcat -s MetaWearablesDat`
+├── iOS debug: they're in `flutter run` and Xcode (plugin logs via print in debug for exactly this reason)
+├── iOS release/profile: plugin logs via NSLog → unified log, NOT stdout. Use Console.app (filter MWDAT)
+│   or `log collect --device-name "<device>" --last 5m --output mwdat.logarchive`
+└── Won't work: `log stream` has no --device flag; idevicesyslog omits third-party NSLog
 ```
 
 ## Links

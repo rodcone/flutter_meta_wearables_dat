@@ -789,6 +789,31 @@ Filter the device console for `[MWDAT-ROUTE]`. What to look for:
 
 If your app manages its own audio session, it is the last writer that wins — the plugin sets the category once at activation and does not reassert it.
 
+### Reading the plugin's native logs
+
+The plugin logs diagnostics natively, tagged `[MWDAT]` and `[MWDAT-ROUTE]`. Where they show up differs by platform and build mode.
+
+**Android** — they reach `flutter run` directly, via logcat. Nothing to do. To narrow to the plugin: `adb logcat -s MetaWearablesDat`.
+
+**iOS, debug builds** — they reach `flutter run` and Xcode's console. The plugin logs via `print` in debug builds specifically so they survive: `flutter_tools` filters out anything carrying a timestamp/process prefix, which is exactly the format `NSLog` produces, so `NSLog` output is silently discarded before it reaches your console.
+
+**iOS, release and profile builds** — the plugin switches to `NSLog`, so logs go to the unified log rather than stdout, and `flutter run` will not show them. Two ways to read them:
+
+*Console.app*, live, and it keeps hot reload working since `flutter run` still owns the app:
+
+1. Open Console.app, and select your device under Devices in the sidebar.
+2. Press Start if streaming is paused.
+3. Filter on `MWDAT`.
+
+*`log collect`*, for capturing after the fact — this is the one to attach to a bug report:
+
+```bash
+log collect --device-name "<your device>" --last 5m --output mwdat.logarchive
+log show mwdat.logarchive --predicate 'eventMessage CONTAINS "MWDAT"'
+```
+
+Two things that do **not** work, so you don't lose time to them: `log stream` has no `--device` flag (only `log collect` does), so there is no live CLI tail from a device; and `idevicesyslog` connects and streams system daemons but does not carry a third-party app's `NSLog`.
+
 **Still having issues?** — Open a [GitHub issue](https://github.com/rodcone/flutter_meta_wearables_dat/issues) with all the details you can provide. This helps us pinpoint the problem and assist you more efficiently.
 
 ## Example app
