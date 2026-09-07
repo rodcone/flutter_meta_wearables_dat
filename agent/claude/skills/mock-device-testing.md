@@ -84,7 +84,7 @@ Streaming, photo capture, registration state, etc. all go through the **core** `
 ```dart
 final textureId = await MetaWearablesDat.startStreamSession(
   deviceUUID,
-  fps: 24,
+  frameRate: StreamFrameRate.fps24,
   streamQuality: StreamQuality.low,
 );
 ```

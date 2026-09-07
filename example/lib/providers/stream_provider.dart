@@ -22,7 +22,7 @@ class StreamSessionProvider extends ChangeNotifier {
   VideoStreamSize? _videoStreamSize;
   bool _hasActiveDevice = false;
   bool _isStreaming = false;
-  double _fps = 30;
+  StreamFrameRate _frameRate = StreamFrameRate.fps30;
   StreamQuality _streamQuality = StreamQuality.medium;
   VideoCodec _videoCodec = VideoCodec.raw;
   StreamSessionState? _sessionState;
@@ -137,7 +137,7 @@ class StreamSessionProvider extends ChangeNotifier {
 
   bool get hasActiveDevice => _hasActiveDevice;
   bool get isStreaming => _isStreaming;
-  double get fps => _fps;
+  StreamFrameRate get frameRate => _frameRate;
   StreamQuality get streamQuality => _streamQuality;
   VideoCodec get videoCodec => _videoCodec;
   StreamSessionState? get sessionState => _sessionState;
@@ -413,11 +413,11 @@ class StreamSessionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setFps(double fps) {
+  void setFrameRate(StreamFrameRate frameRate) {
     HapticFeedback.lightImpact();
 
-    if (_fps != fps) {
-      _fps = fps;
+    if (_frameRate != frameRate) {
+      _frameRate = frameRate;
       notifyListeners();
     }
   }
@@ -700,7 +700,7 @@ class StreamSessionProvider extends ChangeNotifier {
       // Returns a texture ID for zero-copy rendering via the Flutter Texture widget.
       final textureId = await MetaWearablesDat.startStreamSession(
         _selectedDeviceId,
-        fps: _fps,
+        frameRate: _frameRate,
         streamQuality: _streamQuality,
         videoCodec: _videoCodec,
       );

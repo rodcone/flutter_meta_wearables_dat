@@ -12,7 +12,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 2. `startRegistration()` → user confirms in Meta AI → `handleUrl(url)` deep link callback
 3. `restartActiveDeviceMonitoring()` — call after registration (critical on Android)
 4. `requestCameraPermission()` — Meta AI permission bottom sheet
-5. `startStreamSession(deviceId, fps:, streamQuality:, videoCodec:)` → returns `textureId` — pass a `WearableDevice.id` from `getDevices()` to pin a specific pair, or `null` to auto-select
+5. `startStreamSession(deviceId, frameRate:, streamQuality:, videoCodec:)` → returns `textureId` — pass a `WearableDevice.id` from `getDevices()` to pin a specific pair, or `null` to auto-select
 6. Render: `Texture(textureId: textureId)` — zero-copy GPU rendering
 
 ### Key methods
