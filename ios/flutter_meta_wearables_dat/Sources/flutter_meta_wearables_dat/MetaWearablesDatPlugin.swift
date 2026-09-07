@@ -1664,7 +1664,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    let fps = (args["fps"] as? Double) ?? 30.0
+    let fps = (args["fps"] as? Int) ?? 30
     let streamQuality = Self.parseStreamQuality(args["streamQuality"] as? String)
     let videoCodecStr = args["videoCodec"] as? String ?? "raw"
     let videoCodec: MWDATCamera.VideoCodec = (videoCodecStr == "hvc1") ? .hvc1 : .raw
@@ -1773,7 +1773,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let texId = registry.register(texture)
       pixelBufferTexture = texture
       textureId = texId
-      currentTargetFPS = fps
+      currentTargetFPS = Double(fps)
       currentVideoCodec = videoCodec
       frameCounter = 0
       lastFrameSendTime = nil
@@ -1781,11 +1781,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
       // 3. Add a Camera capability. DAT 0.9.0 replaced `addStream` with
       // `addCamera`; the returned `Camera` owns the stream.
-      let fpsValue = UInt(max(1, Int(fps.rounded())))
       let streamConfig = StreamConfiguration(
         videoCodec: videoCodec,
         resolution: Self.resolution(for: streamQuality),
-        frameRate: fpsValue
+        frameRate: UInt(fps)
       )
 
       let newCamera: MWDATCamera.Camera?

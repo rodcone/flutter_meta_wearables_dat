@@ -1,3 +1,12 @@
+## 0.10.0
+
+Contains contributions by [@kelvinharron](https://github.com/kelvinharron).
+
+**BREAKING CHANGES**
+
+* **`startStreamSession(fps: double)` is now `startStreamSession(frameRate: StreamFrameRate)`.** The DAT SDK accepts exactly five frame rates on both platforms (2, 7, 15, 24, 30) and its behaviour with any other value is undefined; the old `double` let callers request anything. `StreamFrameRate` makes the legal set the type, mirroring `StreamQuality`. Migration: `fps: 24` becomes `frameRate: StreamFrameRate.fps24`; the default is unchanged at 30. Closes [#34](https://github.com/rodcone/flutter_meta_wearables_dat/issues/34).
+* Example app: the frame-rate slider is now a five-way picker driven by `StreamFrameRate.values`.
+
 ## 0.9.1
 
 Contains contributions by [@kelvinharron](https://github.com/kelvinharron).

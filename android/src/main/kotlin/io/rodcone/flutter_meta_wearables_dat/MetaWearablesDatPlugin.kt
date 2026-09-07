@@ -1150,7 +1150,7 @@ class MetaWearablesDatPlugin :
         }
 
         val args = call.arguments as? Map<*, *>
-        val fps = (args?.get("fps") as? Double) ?: 30.0
+        val fps = (args?.get("fps") as? Int) ?: 30
         val streamQuality = parseStreamQuality(args?.get("streamQuality") as? String)
         val videoCodec = args?.get("videoCodec") as? String
         val deviceId = args?.get("deviceId") as? String
@@ -1249,7 +1249,7 @@ class MetaWearablesDatPlugin :
                 }
 
                 sessionKey = key
-                frameProcessor.configure(fps)
+                frameProcessor.configure(fps.toDouble())
 
                 // Register a Flutter texture for zero-copy rendering
                 val registry = textureRegistry
@@ -1284,7 +1284,7 @@ class MetaWearablesDatPlugin :
                 // `Camera` owns the stream.
                 var addedCamera: Camera? = null
                 activeSession
-                        .addCamera(StreamConfiguration(videoQuality = streamQuality, fps.toInt()))
+                        .addCamera(StreamConfiguration(videoQuality = streamQuality, fps))
                         .onSuccess { addedCamera = it }
                         .onFailure { error, _ ->
                             val code =

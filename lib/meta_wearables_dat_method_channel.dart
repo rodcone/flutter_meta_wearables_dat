@@ -123,12 +123,12 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   @override
   Future<int> startStreamSession(
     String? deviceId, {
-    double fps = 30.0,
+    StreamFrameRate frameRate = StreamFrameRate.fps30,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
   }) async {
     final args = <String, dynamic>{
-      'fps': fps,
+      'fps': frameRate.value,
       'streamQuality': streamQuality.value,
       'videoCodec': videoCodec.value,
     };

@@ -75,9 +75,9 @@ class _StreamSettingsSection extends StatelessWidget {
           children: [
             const _SectionTitle(title: 'Stream', icon: Icons.videocam_outlined),
             const SizedBox(height: 16),
-            _FpsSlider(
-              fps: sp.fps,
-              onChanged: locked ? null : sp.setFps,
+            _FrameRatePicker(
+              frameRate: sp.frameRate,
+              onChanged: locked ? null : sp.setFrameRate,
             ),
             const SizedBox(height: 8),
             _ResolutionPicker(
@@ -159,90 +159,43 @@ class _BackgroundStreamingToggle extends StatelessWidget {
   }
 }
 
-class _FpsSlider extends StatelessWidget {
-  final double fps;
-  final ValueChanged<double>? onChanged;
+class _FrameRatePicker extends StatelessWidget {
+  final StreamFrameRate frameRate;
+  final ValueChanged<StreamFrameRate>? onChanged;
 
-  const _FpsSlider({required this.fps, this.onChanged});
-
-  static const List<double> _stops = [2, 7, 15, 24, 30];
-
-  int _closestIndex() {
-    var best = 0;
-    var bestDiff = (fps - _stops[0]).abs();
-    for (var i = 1; i < _stops.length; i++) {
-      final diff = (fps - _stops[i]).abs();
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        best = i;
-      }
-    }
-    return best;
-  }
+  const _FrameRatePicker({required this.frameRate, this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     final enabled = onChanged != null;
     final theme = Theme.of(context);
-    final idx = _closestIndex();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SettingLabel(
           label: 'Frame rate',
-          value: '${_stops[idx].toInt()} fps',
+          value: '${frameRate.value} fps',
           enabled: enabled,
         ),
-        const SizedBox(height: 4),
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            trackHeight: 4,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
-            tickMarkShape: const RoundSliderTickMarkShape(tickMarkRadius: 3),
-            activeTrackColor: enabled
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurface.withOpacity(0.12),
-            inactiveTrackColor: theme.colorScheme.onSurface.withOpacity(0.08),
-            thumbColor: enabled
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurface.withOpacity(0.3),
-            activeTickMarkColor: theme.colorScheme.onPrimary,
-            inactiveTickMarkColor: theme.colorScheme.onSurface.withOpacity(0.2),
-          ),
-          child: Slider(
-            value: idx.toDouble(),
-            max: (_stops.length - 1).toDouble(),
-            divisions: _stops.length - 1,
-            onChanged: enabled
-                ? (v) {
-                    HapticFeedback.selectionClick();
-                    onChanged!(_stops[v.round()]);
-                  }
-                : null,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: _stops.map((s) {
-              final isSelected = s == _stops[idx];
-              return Text(
-                '${s.toInt()}',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  color: enabled
-                      ? (isSelected
-                            ? theme.colorScheme.primary
-                            : theme.colorScheme.onSurface.withOpacity(0.45))
-                      : theme.colorScheme.onSurface.withOpacity(0.25),
+        const SizedBox(height: 8),
+        Row(
+          children: StreamFrameRate.values.map((rate) {
+            final isLast = rate == StreamFrameRate.values.last;
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(right: isLast ? 0 : 8),
+                child: _ResolutionChip(
+                  label: '${rate.value}',
+                  subtitle: 'fps',
+                  selected: rate == frameRate,
+                  enabled: enabled,
+                  onTap: enabled ? () => onChanged!(rate) : null,
+                  theme: theme,
                 ),
-              );
-            }).toList(),
-          ),
+              ),
+            );
+          }).toList(),
         ),
       ],
     );

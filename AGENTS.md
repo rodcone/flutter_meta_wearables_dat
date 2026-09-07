@@ -115,7 +115,7 @@ static Future<bool> restartActiveDeviceMonitoring()  // No-op on iOS
 // Streaming
 static Future<int> startStreamSession(
   String? deviceId, { // WearableDevice.id (getDevices) pins a pair; null = auto-select
-  double fps = 30.0,
+  StreamFrameRate frameRate = StreamFrameRate.fps30,
   StreamQuality streamQuality = StreamQuality.high,
   VideoCodec videoCodec = VideoCodec.raw,
 })  // Returns textureId. Throws PlatformException 'STREAM_ACTIVE' if a different device is already streaming
@@ -405,7 +405,7 @@ MetaWearablesDat.activeDeviceStream().listen((hasDevice) {
 // Start streaming — returns texture ID for zero-copy rendering
 final textureId = await MetaWearablesDat.startStreamSession(
   null, // null = AutoDeviceSelector (recommended)
-  fps: 24,
+  frameRate: StreamFrameRate.fps24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw,
 );
