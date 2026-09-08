@@ -130,11 +130,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // Paired devices — only worth surfacing when more than one
-                    // device is connected, since the sheet exists to switch
-                    // between active pairs. Stays reachable while streaming.
-                    if (deviceProvider.isRegistered &&
-                        streamProvider.connectedDeviceCount > 1)
+                    // Paired devices. Always reachable once registered, streaming
+                    // included, so the list and link states can be inspected even
+                    // when only one pair is connected.
+                    if (deviceProvider.isRegistered)
                       Padding(
                         padding: const EdgeInsets.only(right: 5),
                         child: FloatingActionButton.small(
