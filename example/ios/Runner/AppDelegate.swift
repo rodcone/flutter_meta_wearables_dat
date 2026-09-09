@@ -56,12 +56,12 @@ import UIKit
 /// Debug builds only, and only the example app: consumers see nothing of this.
 private enum NativeLogForwarder {
   static func install() {
-    var fds: [Int32] = [0, 0]
-    guard pipe(&fds) == 0 else { return }
+    var pipeEnds: [Int32] = [0, 0]
+    guard pipe(&pipeEnds) == 0 else { return }
+    let (readEnd, writeEnd) = (pipeEnds[0], pipeEnds[1])
     let originalStderr = dup(STDERR_FILENO)
-    dup2(fds[1], STDERR_FILENO)
-    close(fds[1])
-    let readEnd = fds[0]
+    dup2(writeEnd, STDERR_FILENO)
+    close(writeEnd)
     Thread.detachNewThread {
       var pending = Data()
       var buffer = [UInt8](repeating: 0, count: 4096)
