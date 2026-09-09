@@ -476,7 +476,7 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 // getDevices() to stream from a specific pair.
 final textureId = await MetaWearablesDat.startStreamSession(
   null,
-  frameRate: StreamFrameRate.fps24,
+  frameRate: .fps24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw, // or VideoCodec.hvc1 (iOS only, supports background streaming)
 );

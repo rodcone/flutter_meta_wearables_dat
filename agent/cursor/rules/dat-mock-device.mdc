@@ -40,7 +40,7 @@ await MetaWearablesDatMockDevice.setCapturedImage(uuid, imagePath);
 ## Stream with mock device
 Streaming + capture still go through the core API. Pass the specific `deviceUUID` (not null):
 ```dart
-final textureId = await MetaWearablesDat.startStreamSession(uuid, frameRate: StreamFrameRate.fps24);
+final textureId = await MetaWearablesDat.startStreamSession(uuid, frameRate: .fps24);
 ```
 
 ## Cleanup

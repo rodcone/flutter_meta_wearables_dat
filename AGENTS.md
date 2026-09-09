@@ -405,7 +405,7 @@ MetaWearablesDat.activeDeviceStream().listen((hasDevice) {
 // Start streaming — returns texture ID for zero-copy rendering
 final textureId = await MetaWearablesDat.startStreamSession(
   null, // null = AutoDeviceSelector (recommended)
-  frameRate: StreamFrameRate.fps24,
+  frameRate: .fps24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw,
 );

@@ -29,7 +29,7 @@ final errorSub = MetaWearablesDat.streamSessionErrorStream().listen((error) {
 // Start streaming — returns texture ID
 final textureId = await MetaWearablesDat.startStreamSession(
   null, // null = auto-select; or a WearableDevice.id from getDevices() to pin a pair
-  frameRate: StreamFrameRate.fps24,
+  frameRate: .fps24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw,
 );
