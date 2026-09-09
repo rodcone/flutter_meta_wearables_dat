@@ -2,4 +2,6 @@
 // Meta DAT secrets - copy Secrets.template.xcconfig to Secrets.xcconfig
 META_APP_ID = YOUR_APP_ID
 META_CLIENT_TOKEN = YOUR_CLIENT_TOKEN
+APP_BUNDLE_ID = io.rodcone.flutterMetaWearablesDatExample
+APP_LINK_SCHEME = myexampleapp
 #include? "Secrets.xcconfig"

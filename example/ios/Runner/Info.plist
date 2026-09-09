@@ -77,9 +77,9 @@
  	<dict>
  		<key>AppLinkURLScheme</key>
  		<!-- Must match CFBundleURLSchemes below so Meta AI redirects to a URL this app handles -->
- 		<string>myexampleapp://</string>
+ 		<string>$(APP_LINK_SCHEME)://</string>
  		<key>MetaAppID</key>
- 		<!-- Without Developer Mode, set META_APP_ID in ios/Flutter/Secrets.xcconfig -->
+ 		<!-- Set META_APP_ID and META_CLIENT_TOKEN in ios/Flutter/Secrets.xcconfig; APP_BUNDLE_ID and APP_LINK_SCHEME can be overridden there too -->
  		<string>$(META_APP_ID)</string>
 		<key>ClientToken</key>
 		<string>$(META_CLIENT_TOKEN)</string>
@@ -113,7 +113,7 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>myexampleapp</string>
+				<string>$(APP_LINK_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
