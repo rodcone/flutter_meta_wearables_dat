@@ -1249,7 +1249,7 @@ class MetaWearablesDatPlugin :
                 }
 
                 sessionKey = key
-                frameProcessor.configure(fps.toDouble())
+                frameProcessor.configure(fps)
 
                 // Register a Flutter texture for zero-copy rendering
                 val registry = textureRegistry

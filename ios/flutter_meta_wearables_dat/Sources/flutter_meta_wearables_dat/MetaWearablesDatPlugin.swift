@@ -119,7 +119,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var teardownTask: Task<Void, Never>?
   private var teardownSeq = 0
   private var frameCounter: Int = 0
-  private var currentTargetFPS: Double = 30.0
+  private var currentTargetFPS: Int = 30
   private var lastFrameSendTime: Date?
   private var pixelBufferTexture: PixelBufferTexture?
   private var textureId: Int64?
@@ -1280,7 +1280,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     videoStreamSizeHandler.send(width: width, height: height)
 
     let now = Date()
-    let minInterval = 1.0 / currentTargetFPS
+    let minInterval = 1.0 / Double(currentTargetFPS)
 
     let timeSinceLastFrame: TimeInterval
     if let lastSendTime = lastFrameSendTime {
@@ -1773,7 +1773,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let texId = registry.register(texture)
       pixelBufferTexture = texture
       textureId = texId
-      currentTargetFPS = Double(fps)
+      currentTargetFPS = fps
       currentVideoCodec = videoCodec
       frameCounter = 0
       lastFrameSendTime = nil
