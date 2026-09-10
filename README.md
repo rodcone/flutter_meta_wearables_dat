@@ -632,6 +632,16 @@ Frame bytes are codec-dependent:
 
 Subscribing to `videoFramesStream()` is zero-cost when there are no listeners — the plugin won't encode or emit anything until the first subscriber attaches. Always subscribe *before* calling `startStreamSession()` if you want to capture the opening keyframe.
 
+**Native frame consumers.** Sibling native plugins that need sustained raw-frame
+processing can register directly with
+`MetaWearablesDatNativeVideoFrameConsumers` on iOS or
+`NativeVideoFrameConsumers` on Android. The synchronous callback receives the
+original `CMSampleBuffer` (iOS) or a read-only I420 buffer view (Android), so
+pixels do not cross a Flutter platform channel. Consumers must unregister on
+shutdown and must not retain the supplied buffer after the callback returns.
+Only `VideoCodec.raw` sessions are dispatched through this native extension
+point.
+
 **Notes and limitations:**
 
 - **On-device muxing.** The plugin gives you raw frame bytes — muxing into mp4/mov is the host app's responsibility. For hvc1 on iOS this is usually a one-liner with `ffmpeg_kit_flutter`; for raw you'll want to transcode first.

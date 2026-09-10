@@ -1223,6 +1223,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
+    if currentVideoCodec == .raw {
+      MetaWearablesDatNativeVideoFrameConsumers.dispatch(videoFrame.sampleBuffer)
+    }
+
     let pts = CMSampleBufferGetPresentationTimeStamp(videoFrame.sampleBuffer)
     let ptsUs: Int64 = pts.isValid ? Int64(CMTimeGetSeconds(pts) * 1_000_000) : 0
 
