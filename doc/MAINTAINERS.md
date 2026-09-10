@@ -195,15 +195,21 @@ Before tagging, confirm:
    - `ios/flutter_meta_wearables_dat.podspec` (`s.version`)
    - `flutter_meta_wearables_dat_mock_device/pubspec.yaml`
    - `flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device.podspec` (`s.version`)
-2. **If this release bumps the DAT SDK:** all three iOS xcframeworks are updated (`MWDATCore` + `MWDATCamera` in the core plugin **and** `MWDATMockDevice` in the mock add-on), `./scripts/thin-xcframeworks.sh` has been run, and both Android `ext.mwdat_version` values match.
-3. **Both `CHANGELOG.md` files have a `## <new-version>` entry.** The publish workflow's `github-release` job extracts these for the GitHub release notes — missing entries produce an empty release body.
-4. **Both packages are clean locally:**
+2. **The install snippets admit the new version.** `README.md`, `AGENTS.md`,
+   `flutter_meta_wearables_dat_mock_device/README.md` and the `agent/` rule
+   files all carry `flutter_meta_wearables_dat: ^<x>.<y>.0` blocks. A caret on
+   a `0.x` version excludes the next minor, so a minor bump must update them or
+   the docs install a release without the new API. Patch bumps need no change.
+   The `versions-in-sync` CI job enforces this.
+3. **If this release bumps the DAT SDK:** all three iOS xcframeworks are updated (`MWDATCore` + `MWDATCamera` in the core plugin **and** `MWDATMockDevice` in the mock add-on), `./scripts/thin-xcframeworks.sh` has been run, and both Android `ext.mwdat_version` values match.
+4. **Both `CHANGELOG.md` files have a `## <new-version>` entry.** The publish workflow's `github-release` job extracts these for the GitHub release notes — missing entries produce an empty release body.
+5. **Both packages are clean locally:**
    ```bash
    dart analyze && (cd flutter_meta_wearables_dat_mock_device && dart analyze)
    dart pub publish --dry-run && (cd flutter_meta_wearables_dat_mock_device && dart pub publish --dry-run)
    ```
-5. **The example app still builds** — `cd example && flutter build ios --release --no-codesign` and `flutter build apk --release`.
-6. **You're tagging from `main` with no uncommitted changes.** Tags are not branch-scoped on push; whatever commit you tag is what gets published.
+6. **The example app still builds** — `cd example && flutter build ios --release --no-codesign` and `flutter build apk --release`.
+7. **You're tagging from `main` with no uncommitted changes.** Tags are not branch-scoped on push; whatever commit you tag is what gets published.
 
 ### Steps
 
