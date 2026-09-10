@@ -126,9 +126,10 @@ jobs:
       # The install snippets in README / AGENTS / the agent rule files are a
       # fifth version location, and until now nothing read them. `^0.9.0`
       # resolves to >=0.9.0 <0.10.0, so a *minor* bump silently leaves every
-      # snippet pinning users to a release without the new API — 0.10.0 reached
-      # review that way, with the README telling users to install a version its
-      # own streaming example could not compile against.
+      # snippet pinning users to a release without the new API. The
+      # StreamFrameRate work reached review that way, with the README telling
+      # users to install a version its own streaming example could not compile
+      # against.
       #
       # The rule is caret containment, not equality: `^0.9.0` legitimately
       # admits 0.9.1, so patch releases need no doc churn. Docs are discovered

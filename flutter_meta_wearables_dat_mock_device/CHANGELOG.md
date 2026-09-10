@@ -1,6 +1,6 @@
-## 0.10.0
+## 0.9.2
 
-* Align version with core package's 0.10.0 release. No API changes in this package. Note the core release replaces `startStreamSession(fps: double)` with `frameRate: StreamFrameRate`, which also applies to mock-backed streams.
+* Align version with core package's 0.9.2 release. No API changes in this package. Note the core release replaces `startStreamSession(fps: double)` with `frameRate: StreamFrameRate`, which also applies to mock-backed streams.
 
 ## 0.9.1
 
