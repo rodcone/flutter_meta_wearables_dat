@@ -1,0 +1,97 @@
+# THROWAWAY DIAGNOSTIC — delete this branch once the question is answered.
+#
+# The v0.9.2 publish fails at its first `flutter pub get`:
+#
+#   Because flutter_tools depends on test 1.31.1 which doesn't match any
+#   versions, version solving failed.
+#
+# ci.yml resolves the same commit fine. Reproducing publish.yml's exact
+# August SDK versions (Dart 3.13.2 + Flutter 3.47.1) still fails, so the
+# workflow's SDK pins are not the variable. The remaining difference is
+# `dart-lang/setup-dart`: the standalone Dart it puts on PATH, and the
+# PUB_TOKEN it exports for pub.dev OIDC.
+#
+# This isolates those two, and never publishes anything.
+name: Diagnose pub resolution
+
+on:
+  push:
+    branches: [diag/pub-resolution]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # so setup-dart behaves as it does in publish.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Control: what ci.yml does, which works.
+          - id: A-flutter-only
+            setup_dart: none
+            clear_token: false
+          # What publish.yml does today, which fails.
+          - id: B-dart-before
+            setup_dart: before
+            clear_token: false
+          # Same, but with PUB_TOKEN removed. Separates "standalone Dart on
+          # PATH" from "PUB_TOKEN is set" — the two things setup-dart changes.
+          - id: C-dart-before-no-token
+            setup_dart: before
+            clear_token: true
+          # The proposed fix: resolve first, bring setup-dart in only for the
+          # publish step.
+          - id: D-dart-after
+            setup_dart: after
+            clear_token: false
+    name: ${{ matrix.id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup-dart (before)
+        if: matrix.setup_dart == 'before'
+        uses: dart-lang/setup-dart@v1
+
+      - name: Clear PUB_TOKEN
+        if: matrix.clear_token
+        run: echo "PUB_TOKEN=" >> "$GITHUB_ENV"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Environment
+        run: |
+          echo "flutter: $(flutter --version | head -1)"
+          echo "dart on PATH: $(dart --version 2>&1)"
+          echo "which dart: $(which dart)"
+          echo "DART_HOME: ${DART_HOME:-<unset>}"
+          echo "PUB_TOKEN set: ${PUB_TOKEN:+yes}${PUB_TOKEN:-no}"
+
+      # The actual probe. continue-on-error so every variant reports instead
+      # of the matrix stopping at the first red.
+      - name: PROBE flutter pub get
+        id: probe
+        continue-on-error: true
+        run: flutter pub get
+
+      - name: setup-dart (after)
+        if: matrix.setup_dart == 'after'
+        uses: dart-lang/setup-dart@v1
+
+      # Read-only: --dry-run never uploads. Confirms the publish path still
+      # works in the D ordering.
+      - name: PROBE dart pub publish --dry-run
+        id: dryrun
+        continue-on-error: true
+        run: dart pub publish --dry-run
+
+      - name: RESULT
+        run: |
+          echo "::notice title=${{ matrix.id }}::pub_get=${{ steps.probe.outcome }} dry_run=${{ steps.dryrun.outcome }}"
+          echo "### ${{ matrix.id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- flutter pub get: **${{ steps.probe.outcome }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- dart pub publish --dry-run: **${{ steps.dryrun.outcome }}**" >> "$GITHUB_STEP_SUMMARY"
