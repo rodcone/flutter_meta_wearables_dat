@@ -1664,10 +1664,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    // Clamped because the channel stays a public boundary even though the Dart
-    // API is now an enum: a negative value would trap in `UInt(_:)` below, and
-    // zero would stall the frame throttle at an infinite interval.
-    let fps = max(1, (args["fps"] as? Int) ?? 30)
+    // The channel stays a boundary the plugin does not control even though the
+    // Dart API is now an enum: a negative value would trap in `UInt(_:)` below,
+    // and zero would stall the frame throttle at an infinite interval. A
+    // non-positive value falls back to the documented default rather than
+    // clamping to 1, which is not one of the rates Meta documents. Values that
+    // are positive but outside that set are passed through: `StreamConfiguration`
+    // takes a plain integer, so the legal set lives in `StreamFrameRate` on the
+    // Dart side and is not duplicated here where nothing keeps it in sync.
+    let fps = (args["fps"] as? Int).flatMap { $0 > 0 ? $0 : nil } ?? 30
     let streamQuality = Self.parseStreamQuality(args["streamQuality"] as? String)
     let videoCodecStr = args["videoCodec"] as? String ?? "raw"
     let videoCodec: MWDATCamera.VideoCodec = (videoCodecStr == "hvc1") ? .hvc1 : .raw
