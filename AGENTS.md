@@ -42,6 +42,7 @@ Communication:
 | `RegistrationState` | `unavailable(0)`, `available(1)`, `registering(2)`, `registered(3)` |
 | `VideoCodec` | `raw('raw')`, `hvc1('hvc1')` |
 | `StreamQuality` | `high('high')`, `medium('medium')`, `low('low')` |
+| `StreamFrameRate` | `fps2(2)`, `fps7(7)`, `fps15(15)`, `fps24(24)`, `fps30(30)` |
 | `StreamSessionState` | `stopping(0)`, `stopped(1)`, `waitingForDevice(2)`, `starting(3)`, `streaming(4)`, `paused(5)` |
 | `PhotoCaptureFormat` | `heic('heic')`, `jpeg('jpeg')` |
 | `FrameFormat` | `rawRgba`, `rawStraightRgba`, `png` |
