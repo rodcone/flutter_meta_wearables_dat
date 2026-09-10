@@ -1,3 +1,8 @@
+## Unreleased
+
+- Add vendor-neutral native video-frame consumer registries on iOS and Android
+  for sibling plugins that need sustained processing without Dart byte copies.
+
 ## 0.9.2
 
 **BREAKING CHANGES** — note these ship in a *patch* release. A constraint of

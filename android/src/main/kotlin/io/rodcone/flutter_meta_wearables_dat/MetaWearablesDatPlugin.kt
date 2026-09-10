@@ -1320,6 +1320,7 @@ class MetaWearablesDatPlugin :
                 videoJob =
                         scope.launch(Dispatchers.Default) {
                             newStream.videoStream.collect { videoFrame ->
+                                NativeVideoFrameConsumers.dispatch(videoFrame)
                                 if (frameProcessor.needsBufferSizeUpdate(
                                                 videoFrame.width,
                                                 videoFrame.height,
