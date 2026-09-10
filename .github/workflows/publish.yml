@@ -15,27 +15,35 @@ jobs:
     environment: pub.dev
     steps:
       - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
-      # Flutter is PINNED here, unlike ci.yml which floats on `stable`.
+      # BOTH SDKs are pinned, unlike ci.yml which floats on `stable`.
       #
-      # On Flutter 3.47.3 this job's first `flutter pub get` fails, three runs
-      # for three, with:
+      # setup-dart is required here — it supplies the PUB_TOKEN that
+      # `dart pub publish` uses for pub.dev OIDC, so it cannot simply be
+      # dropped. But the standalone Dart it puts on PATH takes part in
+      # `flutter pub get`, and Dart 3.13.3 breaks that resolution:
       #
       #   Because flutter_tools depends on test 1.31.1 which doesn't match any
       #   versions, version solving failed.
       #
-      # `test 1.31.1` is published and not retracted, and the same commit
-      # resolves fine in ci.yml on the very same Flutter 3.47.3 with a cold
-      # SDK — the difference is that this job also runs setup-dart. The
-      # interaction is not understood; what is established is that Flutter
-      # 3.47.1 + setup-dart published this repo successfully (v0.9.1,
-      # 2026-08-26, same workflow otherwise unchanged), so this pins the
-      # configuration with direct evidence rather than guessing at a cause.
+      # Every observation fits "standalone Dart 3.13.3 on PATH breaks it",
+      # and nothing else does:
       #
-      # Publishing is irreversible, so a deterministic Flutter here is a
-      # feature, not just a workaround. Revisit when a later stable resolves
-      # cleanly alongside setup-dart; verify by re-running this workflow on a
-      # throwaway tag before bumping.
+      #   Flutter 3.47.1 + standalone 3.13.2         -> published v0.9.1
+      #   Flutter 3.47.1 + standalone 3.13.3         -> fails
+      #   Flutter 3.47.3 + standalone 3.13.3         -> fails (x3)
+      #   Flutter 3.47.3, no standalone Dart (ci.yml)-> resolves fine
+      #
+      # Note the last row: Flutter's *bundled* 3.13.3 is fine. It is the
+      # standalone SDK that is the problem, not the version in the abstract,
+      # which is why matching setup-dart to Flutter's bundled Dart is not the
+      # fix either. This pins the exact pair proven to publish this repo.
+      #
+      # Publishing is irreversible, so determinism here is a feature. Revisit
+      # when a later Dart resolves cleanly next to flutter pub get; verify on a
+      # throwaway tag before bumping either pin.
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.2
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
