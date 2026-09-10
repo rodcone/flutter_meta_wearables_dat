@@ -9,7 +9,7 @@ globs: "**/*stream*.dart,**/*video*.dart,**/*camera*.dart,**/*texture*.dart"
 ```dart
 final textureId = await MetaWearablesDat.startStreamSession(
   null, // null = auto-select; or a WearableDevice.id (getDevices()) to pin a pair
-  fps: 24,
+  frameRate: StreamFrameRate.fps24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw,
 );

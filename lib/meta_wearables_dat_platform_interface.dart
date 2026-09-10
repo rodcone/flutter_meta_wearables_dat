@@ -61,7 +61,7 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
   /// via the Flutter `Texture` widget (zero-copy path).
   Future<int> startStreamSession(
     String? deviceId, {
-    double fps = 30.0,
+    StreamFrameRate frameRate = StreamFrameRate.fps30,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
   }) {

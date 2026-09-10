@@ -11,8 +11,8 @@ Since `flutter_meta_wearables_dat` 0.4.0 the mock APIs live in a separate option
 ```yaml
 # pubspec.yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.0
-  flutter_meta_wearables_dat_mock_device: ^0.9.0
+  flutter_meta_wearables_dat: ^0.10.0
+  flutter_meta_wearables_dat_mock_device: ^0.10.0
 ```
 
 ```dart
@@ -84,7 +84,7 @@ Streaming, photo capture, registration state, etc. all go through the **core** `
 ```dart
 final textureId = await MetaWearablesDat.startStreamSession(
   deviceUUID,
-  fps: 24,
+  frameRate: StreamFrameRate.fps24,
   streamQuality: StreamQuality.low,
 );
 ```

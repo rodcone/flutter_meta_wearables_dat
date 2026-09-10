@@ -37,7 +37,7 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.0
+  flutter_meta_wearables_dat: ^0.10.0
 ```
 
 ### 2. Configure iOS or Android
@@ -476,7 +476,7 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 // getDevices() to stream from a specific pair.
 final textureId = await MetaWearablesDat.startStreamSession(
   null,
-  fps: 24,
+  frameRate: StreamFrameRate.fps24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw, // or VideoCodec.hvc1 (iOS only, supports background streaming)
 );
@@ -692,8 +692,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.0
-  flutter_meta_wearables_dat_mock_device: ^0.9.0
+  flutter_meta_wearables_dat: ^0.10.0
+  flutter_meta_wearables_dat_mock_device: ^0.10.0
 ```
 
 ```dart

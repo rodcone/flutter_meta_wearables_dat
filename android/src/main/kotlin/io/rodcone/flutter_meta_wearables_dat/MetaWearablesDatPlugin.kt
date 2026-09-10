@@ -1150,7 +1150,15 @@ class MetaWearablesDatPlugin :
         }
 
         val args = call.arguments as? Map<*, *>
-        val fps = (args?.get("fps") as? Double) ?: 30.0
+        // The channel stays a boundary the plugin does not control even though
+        // the Dart API is now an enum: zero would throw from the frame
+        // throttle's integer division in FrameProcessor. A non-positive value
+        // falls back to the documented default rather than clamping to 1, which
+        // is not one of the rates Meta documents. Values that are positive but
+        // outside that set are passed through: StreamConfiguration takes a plain
+        // integer, so the legal set lives in StreamFrameRate on the Dart side
+        // and is not duplicated here where nothing keeps it in sync.
+        val fps = (args?.get("fps") as? Int)?.takeIf { it > 0 } ?: 30
         val streamQuality = parseStreamQuality(args?.get("streamQuality") as? String)
         val videoCodec = args?.get("videoCodec") as? String
         val deviceId = args?.get("deviceId") as? String
@@ -1284,7 +1292,7 @@ class MetaWearablesDatPlugin :
                 // `Camera` owns the stream.
                 var addedCamera: Camera? = null
                 activeSession
-                        .addCamera(StreamConfiguration(videoQuality = streamQuality, fps.toInt()))
+                        .addCamera(StreamConfiguration(videoQuality = streamQuality, fps))
                         .onSuccess { addedCamera = it }
                         .onFailure { error, _ ->
                             val code =

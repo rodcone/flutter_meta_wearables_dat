@@ -42,6 +42,7 @@ Communication:
 | `RegistrationState` | `unavailable(0)`, `available(1)`, `registering(2)`, `registered(3)` |
 | `VideoCodec` | `raw('raw')`, `hvc1('hvc1')` |
 | `StreamQuality` | `high('high')`, `medium('medium')`, `low('low')` |
+| `StreamFrameRate` | `fps2(2)`, `fps7(7)`, `fps15(15)`, `fps24(24)`, `fps30(30)` |
 | `StreamSessionState` | `stopping(0)`, `stopped(1)`, `waitingForDevice(2)`, `starting(3)`, `streaming(4)`, `paused(5)` |
 | `PhotoCaptureFormat` | `heic('heic')`, `jpeg('jpeg')` |
 | `FrameFormat` | `rawRgba`, `rawStraightRgba`, `png` |
@@ -115,7 +116,7 @@ static Future<bool> restartActiveDeviceMonitoring()  // No-op on iOS
 // Streaming
 static Future<int> startStreamSession(
   String? deviceId, { // WearableDevice.id (getDevices) pins a pair; null = auto-select
-  double fps = 30.0,
+  StreamFrameRate frameRate = StreamFrameRate.fps30,
   StreamQuality streamQuality = StreamQuality.high,
   VideoCodec videoCodec = VideoCodec.raw,
 })  // Returns textureId. Throws PlatformException 'STREAM_ACTIVE' if a different device is already streaming
@@ -405,7 +406,7 @@ MetaWearablesDat.activeDeviceStream().listen((hasDevice) {
 // Start streaming — returns texture ID for zero-copy rendering
 final textureId = await MetaWearablesDat.startStreamSession(
   null, // null = AutoDeviceSelector (recommended)
-  fps: 24,
+  frameRate: StreamFrameRate.fps24,
   streamQuality: StreamQuality.low,
   videoCodec: VideoCodec.raw,
 );
@@ -528,8 +529,8 @@ Develop and test without physical Meta glasses. Mock support lives in the option
 ```yaml
 # pubspec.yaml — add only in dev/staging configs
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.0
-  flutter_meta_wearables_dat_mock_device: ^0.9.0
+  flutter_meta_wearables_dat: ^0.10.0
+  flutter_meta_wearables_dat_mock_device: ^0.10.0
 ```
 
 ```dart

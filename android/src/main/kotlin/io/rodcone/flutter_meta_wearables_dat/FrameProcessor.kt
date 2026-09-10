@@ -18,7 +18,7 @@ internal class FrameProcessor {
         private const val TAG = "MetaWearablesDat"
     }
 
-    private var targetFPS: Double = 30.0
+    private var targetFPS: Int = 30
     private var lastFrameSendTime: Long? = null
     private var frameCount: Int = 0
     private var reusableBitmap: Bitmap? = null
@@ -39,7 +39,7 @@ internal class FrameProcessor {
     @Volatile private var released: Boolean = false
     private val lock = Any()
 
-    fun configure(fps: Double) {
+    fun configure(fps: Int) {
         targetFPS = fps
         frameCount = 0
         lastFrameSendTime = null
@@ -75,7 +75,7 @@ internal class FrameProcessor {
         if (released) return
 
         // FPS throttling
-        val minIntervalNanos = (1_000_000_000.0 / targetFPS).toLong()
+        val minIntervalNanos = 1_000_000_000L / targetFPS
         val now = System.nanoTime()
         val lastTime = lastFrameSendTime
         if (lastTime != null && (now - lastTime) < minIntervalNanos) {

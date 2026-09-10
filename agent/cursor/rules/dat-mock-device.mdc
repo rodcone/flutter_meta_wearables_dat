@@ -10,8 +10,8 @@ Mock APIs live in the optional add-on `flutter_meta_wearables_dat_mock_device` (
 ## Add the dev-only dependency
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.0
-  flutter_meta_wearables_dat_mock_device: ^0.9.0
+  flutter_meta_wearables_dat: ^0.10.0
+  flutter_meta_wearables_dat_mock_device: ^0.10.0
 ```
 
 ```dart
@@ -40,7 +40,7 @@ await MetaWearablesDatMockDevice.setCapturedImage(uuid, imagePath);
 ## Stream with mock device
 Streaming + capture still go through the core API. Pass the specific `deviceUUID` (not null):
 ```dart
-final textureId = await MetaWearablesDat.startStreamSession(uuid, fps: 24);
+final textureId = await MetaWearablesDat.startStreamSession(uuid, frameRate: StreamFrameRate.fps24);
 ```
 
 ## Cleanup

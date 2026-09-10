@@ -119,7 +119,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var teardownTask: Task<Void, Never>?
   private var teardownSeq = 0
   private var frameCounter: Int = 0
-  private var currentTargetFPS: Double = 30.0
+  private var currentTargetFPS: Int = 30
   private var lastFrameSendTime: Date?
   private var pixelBufferTexture: PixelBufferTexture?
   private var textureId: Int64?
@@ -1280,7 +1280,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     videoStreamSizeHandler.send(width: width, height: height)
 
     let now = Date()
-    let minInterval = 1.0 / currentTargetFPS
+    let minInterval = 1.0 / Double(currentTargetFPS)
 
     let timeSinceLastFrame: TimeInterval
     if let lastSendTime = lastFrameSendTime {
@@ -1664,7 +1664,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    let fps = (args["fps"] as? Double) ?? 30.0
+    // The channel stays a boundary the plugin does not control even though the
+    // Dart API is now an enum: a negative value would trap in `UInt(_:)` below,
+    // and zero would stall the frame throttle at an infinite interval. A
+    // non-positive value falls back to the documented default rather than
+    // clamping to 1, which is not one of the rates Meta documents. Values that
+    // are positive but outside that set are passed through: `StreamConfiguration`
+    // takes a plain integer, so the legal set lives in `StreamFrameRate` on the
+    // Dart side and is not duplicated here where nothing keeps it in sync.
+    let fps = (args["fps"] as? Int).flatMap { $0 > 0 ? $0 : nil } ?? 30
     let streamQuality = Self.parseStreamQuality(args["streamQuality"] as? String)
     let videoCodecStr = args["videoCodec"] as? String ?? "raw"
     let videoCodec: MWDATCamera.VideoCodec = (videoCodecStr == "hvc1") ? .hvc1 : .raw
@@ -1781,11 +1789,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
       // 3. Add a Camera capability. DAT 0.9.0 replaced `addStream` with
       // `addCamera`; the returned `Camera` owns the stream.
-      let fpsValue = UInt(max(1, Int(fps.rounded())))
       let streamConfig = StreamConfiguration(
         videoCodec: videoCodec,
         resolution: Self.resolution(for: streamQuality),
-        frameRate: fpsValue
+        frameRate: UInt(fps)
       )
 
       let newCamera: MWDATCamera.Camera?

@@ -1,3 +1,7 @@
+## 0.10.0
+
+* Align version with core package's 0.10.0 release. No API changes in this package. Note the core release replaces `startStreamSession(fps: double)` with `frameRate: StreamFrameRate`, which also applies to mock-backed streams.
+
 ## 0.9.1
 
 * Align version with core package's 0.9.1 release. No API changes. Note the core release changes `stopStreamSession()` to end the whole device session (glasses chime; next start is a full reconnect) — mock-backed streams follow the same path.

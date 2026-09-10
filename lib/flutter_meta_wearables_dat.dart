@@ -71,6 +71,25 @@ enum StreamQuality {
   final String value;
 }
 
+/// Frame rates the DAT SDK accepts for a camera stream.
+///
+/// Meta documents exactly these five values for both platforms; the SDK's
+/// behaviour with any other value is undefined. Under constrained Bluetooth
+/// bandwidth the SDK steps the rate down on its own (30 to 24) but never
+/// below 15.
+enum StreamFrameRate {
+  fps2(2),
+  fps7(7),
+  fps15(15),
+  fps24(24),
+  fps30(30);
+
+  const StreamFrameRate(this.value);
+
+  /// Frames per second sent over the platform channel.
+  final int value;
+}
+
 /// Represents the current state of a stream session.
 enum StreamSessionState {
   /// The session is in the process of stopping.
@@ -752,18 +771,18 @@ class MetaWearablesDat {
   /// already running on a *different* device — stop it first, then start.
   static Future<int> startStreamSession(
     String? deviceId, {
-    double fps = 30.0,
+    StreamFrameRate frameRate = StreamFrameRate.fps30,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
   }) {
     if (kDebugMode) {
       debugPrint(
-        '[MetaWearablesDAT] Starting stream session with deviceId: $deviceId, FPS: $fps, Stream quality: $streamQuality, Video codec: $videoCodec',
+        '[MetaWearablesDAT] Starting stream session with deviceId: $deviceId, FPS: ${frameRate.value}, Stream quality: $streamQuality, Video codec: $videoCodec',
       );
     }
     return MetaWearablesDatPlatform.instance.startStreamSession(
       deviceId,
-      fps: fps,
+      frameRate: frameRate,
       streamQuality: streamQuality,
       videoCodec: videoCodec,
     );

@@ -12,7 +12,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 2. `startRegistration()` → user confirms in Meta AI → `handleUrl(url)` deep link callback
 3. `restartActiveDeviceMonitoring()` — call after registration (critical on Android)
 4. `requestCameraPermission()` — Meta AI permission bottom sheet
-5. `startStreamSession(deviceId, fps:, streamQuality:, videoCodec:)` → returns `textureId` — pass a `WearableDevice.id` from `getDevices()` to pin a specific pair, or `null` to auto-select
+5. `startStreamSession(deviceId, frameRate:, streamQuality:, videoCodec:)` → returns `textureId` — pass a `WearableDevice.id` from `getDevices()` to pin a specific pair, or `null` to auto-select
 6. Render: `Texture(textureId: textureId)` — zero-copy GPU rendering
 
 ### Key methods
@@ -38,7 +38,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 
 Mock support lives in the optional add-on `flutter_meta_wearables_dat_mock_device` (since 0.4.0). Production builds that omit it skip `MWDATMockDevice` linkage and don't need `NSCameraUsageDescription` / `CAMERA`.
 
-- Add `flutter_meta_wearables_dat_mock_device: ^0.9.0` to dev/staging `pubspec.yaml`.
+- Add `flutter_meta_wearables_dat_mock_device: ^0.10.0` to dev/staging `pubspec.yaml`.
 - Import: `import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';`
 - Optional bypass for registration/permission flows: `MetaWearablesDatMockDevice.configure(initiallyRegistered: true, initialPermissionsGranted: true)`
 - Lifecycle: `MetaWearablesDatMockDevice.pairGlasses({model})` → UUID (`model` defaults to `GlassesModel.rayBanMeta`; other values: `oakleyMetaHSTN`, `oakleyMetaVanguard`, `rayBanMetaOptics`, `metaGlasses`), then `.powerOn(uuid)` + `.don(uuid)`, optionally `.setCameraFacing(uuid, CameraFacing.back)`
