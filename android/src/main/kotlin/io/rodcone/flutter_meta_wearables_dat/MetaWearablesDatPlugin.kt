@@ -1150,7 +1150,10 @@ class MetaWearablesDatPlugin :
         }
 
         val args = call.arguments as? Map<*, *>
-        val fps = (args?.get("fps") as? Int) ?: 30
+        // Clamped because the channel stays a public boundary even though the
+        // Dart API is now an enum: zero would throw from the frame throttle's
+        // integer division in FrameProcessor.
+        val fps = ((args?.get("fps") as? Int) ?: 30).coerceAtLeast(1)
         val streamQuality = parseStreamQuality(args?.get("streamQuality") as? String)
         val videoCodec = args?.get("videoCodec") as? String
         val deviceId = args?.get("deviceId") as? String

@@ -1664,7 +1664,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    let fps = (args["fps"] as? Int) ?? 30
+    // Clamped because the channel stays a public boundary even though the Dart
+    // API is now an enum: a negative value would trap in `UInt(_:)` below, and
+    // zero would stall the frame throttle at an infinite interval.
+    let fps = max(1, (args["fps"] as? Int) ?? 30)
     let streamQuality = Self.parseStreamQuality(args["streamQuality"] as? String)
     let videoCodecStr = args["videoCodec"] as? String ?? "raw"
     let videoCodec: MWDATCamera.VideoCodec = (videoCodecStr == "hvc1") ? .hvc1 : .raw
