@@ -123,6 +123,96 @@ jobs:
           fi
           echo "OK: all four version locations are at $CORE_PUBSPEC"
 
+      # The install snippets in README / AGENTS / the agent rule files are a
+      # fifth version location, and until now nothing read them. `^0.9.0`
+      # resolves to >=0.9.0 <0.10.0, so a *minor* bump silently leaves every
+      # snippet pinning users to a release without the new API — 0.10.0 reached
+      # review that way, with the README telling users to install a version its
+      # own streaming example could not compile against.
+      #
+      # The rule is caret containment, not equality: `^0.9.0` legitimately
+      # admits 0.9.1, so patch releases need no doc churn. Docs are discovered
+      # by glob rather than a fixed list, so a newly added agent file is covered
+      # automatically; changelogs are skipped because their historical entries
+      # legitimately quote old constraints.
+      - name: Verify doc install snippets admit the current version
+        run: |
+          python3 - <<'CHECK_SNIPPETS'
+          import re, sys, pathlib
+
+          PKGS = {
+              'flutter_meta_wearables_dat': 'pubspec.yaml',
+              'flutter_meta_wearables_dat_mock_device':
+                  'flutter_meta_wearables_dat_mock_device/pubspec.yaml',
+          }
+
+          def core(v, where):
+              m = re.match(r'(\d+)\.(\d+)\.(\d+)', v)
+              if not m:
+                  sys.exit(f'::error::unparseable version {v!r} in {where}')
+              return tuple(int(g) for g in m.groups())
+
+          def caret_upper(v):
+              """Upper bound of pub's `^v`, matching dart.dev/tools/pub/dependencies."""
+              x, y, z = v
+              if x > 0:
+                  return (x + 1, 0, 0)
+              if y > 0:
+                  return (0, y + 1, 0)
+              return (0, 0, z + 1)
+
+          versions = {}
+          for pkg, path in PKGS.items():
+              txt = pathlib.Path(path).read_text()
+              versions[pkg] = core(re.search(r'^version:\s*(\S+)', txt, re.M).group(1), path)
+
+          # Scan every doc rather than a hardcoded file list, so a newly added agent
+          # file is covered automatically. Changelogs are excluded: their historical
+          # entries legitimately quote old constraints.
+          files = [
+              p for p in sorted([*pathlib.Path('.').rglob('*.md'), *pathlib.Path('.').rglob('*.mdc')])
+              if 'CHANGELOG' not in p.name
+              and not any(part in ('build', '.dart_tool', '.git') for part in p.parts)
+          ]
+
+          pattern = re.compile(
+              r'\b(flutter_meta_wearables_dat(?:_mock_device)?)\b\s*:\s*\^(\d+\.\d+\.\d+)')
+
+          stale, checked = [], 0
+          for p in files:
+              for lineno, line in enumerate(p.read_text().splitlines(), 1):
+                  for m in pattern.finditer(line):
+                      pkg, snippet = m.group(1), m.group(2)
+                      if pkg not in versions:
+                          continue
+                      checked += 1
+                      lo = core(snippet, p)
+                      hi = caret_upper(lo)
+                      actual = versions[pkg]
+                      if not (lo <= actual < hi):
+                          stale.append(
+                              f'{p}:{lineno}: ^{snippet} does not admit '
+                              f'{".".join(map(str, actual))} ({pkg})')
+
+          for pkg, v in versions.items():
+              print(f'  {pkg}: {".".join(map(str, v))}')
+          print(f'  checked {checked} constraint(s) across {len(files)} doc file(s)')
+
+          # A pattern that matches nothing must fail, not pass silently: a docs reformat
+          # would otherwise leave this job green while covering zero constraints.
+          if checked == 0:
+              sys.exit('::error::no install snippets matched — the pattern has drifted')
+
+          if stale:
+              print('\nStale install snippets (a user following these installs a release '
+                    'without the current API):')
+              for s in stale:
+                  print(f'::error::{s}')
+              sys.exit(1)
+
+          print('OK: every install snippet admits the current version')
+          CHECK_SNIPPETS
+
   # Gate on a perfect pub.dev score for both packages. pana is the analyzer
   # behind pub.dev's "pub points"; --exit-code-threshold 0 fails the job when
   # any points are lost (max - granted > 0), so every release stays at
