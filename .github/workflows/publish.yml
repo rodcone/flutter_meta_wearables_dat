@@ -16,9 +16,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
+      # Flutter is PINNED here, unlike ci.yml which floats on `stable`.
+      #
+      # On Flutter 3.47.3 this job's first `flutter pub get` fails, three runs
+      # for three, with:
+      #
+      #   Because flutter_tools depends on test 1.31.1 which doesn't match any
+      #   versions, version solving failed.
+      #
+      # `test 1.31.1` is published and not retracted, and the same commit
+      # resolves fine in ci.yml on the very same Flutter 3.47.3 with a cold
+      # SDK — the difference is that this job also runs setup-dart. The
+      # interaction is not understood; what is established is that Flutter
+      # 3.47.1 + setup-dart published this repo successfully (v0.9.1,
+      # 2026-08-26, same workflow otherwise unchanged), so this pins the
+      # configuration with direct evidence rather than guessing at a cause.
+      #
+      # Publishing is irreversible, so a deterministic Flutter here is a
+      # feature, not just a workaround. Revisit when a later stable resolves
+      # cleanly alongside setup-dart; verify by re-running this workflow on a
+      # throwaway tag before bumping.
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.47.1
 
       # Both packages publish in lockstep — verify the tag matches *both*
       # pubspecs before doing anything destructive.
