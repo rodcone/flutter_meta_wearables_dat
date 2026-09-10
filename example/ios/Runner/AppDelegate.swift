@@ -7,10 +7,6 @@ import UIKit
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        #if DEBUG
-            NativeLogForwarder.install()
-        #endif
-
         GeneratedPluginRegistrant.register(with: self)
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
@@ -42,52 +38,3 @@ import UIKit
         return super.application(app, open: url, options: options)
     }
 }
-
-#if DEBUG
-    /// Makes the plugin's `[MWDAT]` NSLog lines visible in `flutter run`.
-    private enum NativeLogForwarder {
-        static func install() {
-            var pipeEnds: [Int32] = [0, 0]
-            guard pipe(&pipeEnds) == 0 else {
-                return
-            }
-            let (readEnd, writeEnd) = (pipeEnds[0], pipeEnds[1])
-            let originalStderr = dup(STDERR_FILENO)
-            dup2(writeEnd, STDERR_FILENO)
-            close(writeEnd)
-            Thread.detachNewThread {
-                var pending = Data()
-                var buffer = [UInt8](repeating: 0, count: 4096)
-
-                while true {
-                    let count = read(readEnd, &buffer, buffer.count)
-                    if count <= 0 {
-                        return
-                    }
-                    pending.append(buffer, count: count)
-
-                    while let newline = pending.firstIndex(of: 0x0A) {
-                        let line = pending.subdata(in: pending.startIndex ... newline)
-                        pending.removeSubrange(pending.startIndex ... newline)
-                        emit(line, to: originalStderr)
-
-                        guard let text = String(data: line, encoding: .utf8),
-                              let tag = text.range(of: "[MWDAT")
-                        else {
-                            continue
-                        }
-
-                        emit(Data(text[tag.lowerBound...].utf8), to: STDOUT_FILENO)
-                    }
-                }
-            }
-        }
-
-        private static func emit(_ data: Data, to fd: Int32) {
-            data.withUnsafeBytes { raw in
-                guard let base = raw.baseAddress else { return }
-                _ = write(fd, base, raw.count)
-            }
-        }
-    }
-#endif
