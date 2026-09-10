@@ -5,6 +5,13 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
 
+# A tag re-push starts a second run for the same tag, and pub.dev versions are
+# immutable, so two concurrent publishes would race to upload the same version.
+# Queue instead of cancelling: never interrupt a run that may be mid-publish.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 # Needed for dart pub publish with OIDC authentication
 permissions:
   id-token: write
@@ -15,39 +22,10 @@ jobs:
     environment: pub.dev
     steps:
       - uses: actions/checkout@v4
-      # BOTH SDKs are pinned, unlike ci.yml which floats on `stable`.
-      #
-      # setup-dart is required here — it supplies the PUB_TOKEN that
-      # `dart pub publish` uses for pub.dev OIDC, so it cannot simply be
-      # dropped. But the standalone Dart it puts on PATH takes part in
-      # `flutter pub get`, and Dart 3.13.3 breaks that resolution:
-      #
-      #   Because flutter_tools depends on test 1.31.1 which doesn't match any
-      #   versions, version solving failed.
-      #
-      # Every observation fits "standalone Dart 3.13.3 on PATH breaks it",
-      # and nothing else does:
-      #
-      #   Flutter 3.47.1 + standalone 3.13.2         -> published v0.9.1
-      #   Flutter 3.47.1 + standalone 3.13.3         -> fails
-      #   Flutter 3.47.3 + standalone 3.13.3         -> fails (x3)
-      #   Flutter 3.47.3, no standalone Dart (ci.yml)-> resolves fine
-      #
-      # Note the last row: Flutter's *bundled* 3.13.3 is fine. It is the
-      # standalone SDK that is the problem, not the version in the abstract,
-      # which is why matching setup-dart to Flutter's bundled Dart is not the
-      # fix either. This pins the exact pair proven to publish this repo.
-      #
-      # Publishing is irreversible, so determinism here is a feature. Revisit
-      # when a later Dart resolves cleanly next to flutter pub get; verify on a
-      # throwaway tag before bumping either pin.
       - uses: dart-lang/setup-dart@v1
-        with:
-          sdk: 3.13.2
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.47.1
 
       # Both packages publish in lockstep — verify the tag matches *both*
       # pubspecs before doing anything destructive.
