@@ -1,15 +1,11 @@
 ## 0.10.0
 
-Contains contributions by [@kelvinharron](https://github.com/kelvinharron).
-
 **BREAKING CHANGES**
 
 * **`startStreamSession(fps: double)` is now `startStreamSession(frameRate: StreamFrameRate)`.** The DAT SDK accepts exactly five frame rates on both platforms (2, 7, 15, 24, 30) and its behaviour with any other value is undefined; the old `double` let callers request anything. `StreamFrameRate` makes the legal set the type, mirroring `StreamQuality`. Migration: `fps: 24` becomes `frameRate: StreamFrameRate.fps24`; the default is unchanged at 30. Closes [#34](https://github.com/rodcone/flutter_meta_wearables_dat/issues/34).
 * Example app: the frame-rate slider is now a five-way picker driven by `StreamFrameRate.values`.
 
 ## 0.9.1
-
-Contains contributions by [@kelvinharron](https://github.com/kelvinharron).
 
 * **`stopStreamSession()` now ends the whole device session, on both platforms.** The glasses' stream-ended tone hangs off the session lifecycle, so the previous stream-only stop never chimed. Matches Meta's CameraAccess sample and the 0.9.0 background path. Trade-off: the next `startStreamSession()` is a full reconnect rather than a fast re-attach, and the future resolves only once the stop handshake completes.
 * **iOS: `enableBackgroundStreaming()` / `disableBackgroundStreaming()` no longer freeze the UI.** AVAudioSession activation/deactivation block for hundreds of milliseconds and ran inline on the platform thread; all session work now runs on a serial queue, and both futures resolve when the work has actually landed.
