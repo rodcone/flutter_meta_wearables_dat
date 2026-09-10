@@ -44,16 +44,57 @@ jobs:
       # Scope analyze to lib/ so the root invocation doesn't recurse into the
       # sibling mock package (whose .dart_tool isn't populated for the root
       # working directory).
+      # Dependency resolution against pub.dev fails intermittently in this job
+      # with an existing, non-retracted version reported as missing, e.g.
+      #
+      #   Because flutter_tools depends on test 1.31.1 which doesn't match any
+      #   versions, version solving failed.
+      #
+      # A byte-identical step in a throwaway workflow — same environment,
+      # setup-dart, PUB_TOKEN, tag ref, cold SDK — resolves reliably, and every
+      # structural difference was eliminated one at a time (SDK versions, the
+      # standalone Dart on PATH, PUB_TOKEN, `environment: pub.dev`, tag vs
+      # branch ref, fresh trigger vs re-run). So this does not claim a cause:
+      # it makes the transient survivable, which is what a release path needs.
+      #
+      # The cache clean from the second attempt onward is deliberate: the
+      # symptom is pub believing a published version does not exist, which is
+      # what stale or partial cached metadata looks like.
+      - name: Install retry helper
+        run: |
+          cat > "$RUNNER_TEMP/retry.sh" <<'SH'
+          # 5 attempts, sleeping 20/40/80/160s between them: about 5 minutes of
+          # cover, which comfortably exceeds the windows observed so far.
+          retry() {
+            local n max=5 delay=20
+            for n in $(seq 1 "$max"); do
+              if "$@"; then
+                return 0
+              fi
+              if [ "$n" -lt "$max" ]; then
+                echo "::warning::'$*' failed (attempt $n/$max); cleaning pub cache, retrying in ${delay}s"
+                dart pub cache clean --force >/dev/null 2>&1 || true
+                sleep "$delay"
+                delay=$((delay * 2))
+              fi
+            done
+            echo "::error::'$*' failed after $max attempts"
+            return 1
+          }
+          SH
+
       - name: Analyze core
         run: |
-          flutter pub get
+          . "$RUNNER_TEMP/retry.sh"
+          retry flutter pub get
           dart analyze --fatal-infos lib/
           if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
 
       - name: Analyze mock add-on
         working-directory: flutter_meta_wearables_dat_mock_device
         run: |
-          flutter pub get
+          . "$RUNNER_TEMP/retry.sh"
+          retry flutter pub get
           dart analyze --fatal-infos lib/
           if [ -d test ]; then flutter test; else echo "No test directory, skipping"; fi
 
@@ -72,6 +113,10 @@ jobs:
       # patch-level after fixing — the core publish is not retried, so a
       # half-publish is recoverable by bumping both packages to the next
       # patch and re-running.
+      # NOT retried, deliberately. pub.dev versions are immutable, so a retried
+      # publish can only either fail as a duplicate or mask a real error. If a
+      # publish step fails, read the log and follow the half-publish recovery in
+      # doc/MAINTAINERS.md.
       - name: Publish core to pub.dev
         run: dart pub publish --force
 
