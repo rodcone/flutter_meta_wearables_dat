@@ -35,7 +35,7 @@ class MockDeviceSheet extends StatelessWidget {
       widthFactor: 1,
       alignment: Alignment.topCenter,
       child: Padding(
-        padding: const EdgeInsets.only(left: 25, right: 25, bottom: 100),
+        padding: const EdgeInsets.only(left: 25, right: 25),
         child:
             Consumer2<
               MockDeviceProvider,
@@ -43,6 +43,9 @@ class MockDeviceSheet extends StatelessWidget {
             >(
               builder: (context, mockDeviceProvider, streamProvider, child) {
                 return SingleChildScrollView(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).padding.bottom + 16,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
