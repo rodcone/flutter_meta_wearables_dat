@@ -21,7 +21,14 @@ class PairedDevicesSheet extends StatefulWidget {
   State<PairedDevicesSheet> createState() => _PairedDevicesSheetState();
 }
 
-class _PairedDevicesSheetState extends State<PairedDevicesSheet> {
+class _PairedDevicesSheetState extends State<PairedDevicesSheet>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  );
+  bool _spinning = false;
+
   @override
   void initState() {
     super.initState();
@@ -29,6 +36,25 @@ class _PairedDevicesSheetState extends State<PairedDevicesSheet> {
       if (!mounted) return;
       unawaited(context.read<StreamSessionProvider>().refreshDevices());
     });
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  /// Spins the refresh icon while a device fetch is in flight. On completion
+  /// the current turn is finished rather than cut short, so a fast fetch
+  /// still reads as one full rotation.
+  void _syncSpin({required bool loading}) {
+    if (loading == _spinning) return;
+    _spinning = loading;
+    if (loading) {
+      unawaited(_spin.repeat());
+    } else {
+      unawaited(_spin.forward().then((_) => _spin.reset()));
+    }
   }
 
   @override
@@ -43,6 +69,7 @@ class _PairedDevicesSheetState extends State<PairedDevicesSheet> {
         padding: const EdgeInsets.only(left: 25, right: 25),
         child: Consumer<StreamSessionProvider>(
           builder: (context, sp, _) {
+            _syncSpin(loading: sp.devicesLoading);
             return Column(
               children: [
                 const SheetHandleBar(),
@@ -62,7 +89,10 @@ class _PairedDevicesSheetState extends State<PairedDevicesSheet> {
                         onPressed: sp.devicesLoading
                             ? null
                             : () => unawaited(sp.refreshDevices()),
-                        icon: const Icon(Icons.refresh),
+                        icon: RotationTransition(
+                          turns: _spin,
+                          child: const Icon(Icons.refresh),
+                        ),
                       ),
                     ),
                   ],
