@@ -53,7 +53,7 @@ void main() {
 
   test('pairing a mock leaves the selection on Automatic', () {
     final sp = build()
-      ..syncMockSelection(mockId: 'mock-1', previousMockId: null);
+      ..syncMockSelection(mockIds: {'mock-1'}, previousMockIds: {});
     expect(sp.selectedDeviceId, isNull);
     sp.dispose();
   });
@@ -61,32 +61,41 @@ void main() {
   test('pairing a mock preserves a real-pair selection', () {
     final sp = build()
       ..selectDevice('real-B')
-      ..syncMockSelection(mockId: 'mock-1', previousMockId: null);
+      ..syncMockSelection(mockIds: {'mock-1'}, previousMockIds: {});
     expect(sp.selectedDeviceId, 'real-B');
     sp.dispose();
   });
 
-  test('unpairing the mock preserves a real-pair selection', () {
+  test('unpairing a mock preserves a real-pair selection', () {
     final sp = build()
-      ..syncMockSelection(mockId: 'mock-1', previousMockId: null)
-      ..selectDevice('real-B');
+      ..syncMockSelection(mockIds: {'mock-1'}, previousMockIds: {})
+      ..selectDevice('real-B')
+      ..syncMockSelection(mockIds: {}, previousMockIds: {'mock-1'});
     expect(sp.selectedDeviceId, 'real-B');
-
-    sp.syncMockSelection(mockId: null, previousMockId: 'mock-1');
-    expect(sp.selectedDeviceId, 'real-B');
-
     sp.dispose();
   });
 
-  test('unpairing the mock clears a selection that still points at it', () {
+  test('unpairing a mock clears a selection that still points at it', () {
     final sp = build()
-      ..syncMockSelection(mockId: 'mock-2', previousMockId: null)
+      ..syncMockSelection(mockIds: {'mock-2'}, previousMockIds: {})
       ..selectDevice('mock-2');
     expect(sp.selectedDeviceId, 'mock-2');
 
-    sp.syncMockSelection(mockId: null, previousMockId: 'mock-2');
+    sp.syncMockSelection(mockIds: {}, previousMockIds: {'mock-2'});
     expect(sp.selectedDeviceId, isNull);
 
+    sp.dispose();
+  });
+
+  test('unpairing one mock keeps a selection pinned to another mock', () {
+    final sp = build()
+      ..syncMockSelection(mockIds: {'mock-1', 'mock-2'}, previousMockIds: {})
+      ..selectDevice('mock-2')
+      ..syncMockSelection(
+        mockIds: {'mock-2'},
+        previousMockIds: {'mock-1', 'mock-2'},
+      );
+    expect(sp.selectedDeviceId, 'mock-2');
     sp.dispose();
   });
 

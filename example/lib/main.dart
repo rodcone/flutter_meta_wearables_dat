@@ -216,7 +216,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                           _,
                         ) {
                           // If we have a device and media selected, show stream screen
-                          if (mockDeviceProvider.deviceUUID != null &&
+                          if (mockDeviceProvider.hasDevice &&
                               (streamProvider.selectedVideo != null ||
                                   streamProvider.selectedImage != null)) {
                             return const StreamScreen();

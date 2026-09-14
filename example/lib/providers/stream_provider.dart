@@ -124,12 +124,12 @@ class StreamSessionProvider extends ChangeNotifier {
   // Automatic. Sole source of truth. Pairing a mock never changes it; the
   // SDK's auto-selector picks the mock up on its own in Automatic mode.
   String? _selectedDeviceId;
-  // Tracks the mock's UUID across pair/unpair so a pin to a mock that has
+  // Tracks the mocks' UUIDs across pair/unpair so a pin to a mock that has
   // since been unpaired can be dropped (see [syncMockSelection]).
-  String? _lastMockUUID;
+  Set<String> _lastMockUUIDs = const <String>{};
 
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
-    _lastMockUUID = mockDeviceProvider.deviceUUID;
+    _lastMockUUIDs = mockDeviceProvider.deviceUUIDs;
     mockDeviceProvider.addListener(_onMockDeviceChanged);
     _initializeActiveDeviceMonitoring();
     _initializeDeviceStateMonitoring();
@@ -235,25 +235,35 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   void _onMockDeviceChanged() {
-    final current = mockDeviceProvider.deviceUUID;
-    if (current == _lastMockUUID) return;
-    syncMockSelection(mockId: current, previousMockId: _lastMockUUID);
-    _lastMockUUID = current;
+    final current = mockDeviceProvider.deviceUUIDs;
+    syncMockSelection(mockIds: current, previousMockIds: _lastMockUUIDs);
+    _lastMockUUIDs = current;
   }
 
-  /// Reconciles the selection when the mock device is unpaired. Pairing leaves
-  /// the selection alone so Automatic stays the default and the auto-selector
-  /// is exercised; unpairing clears the selection only when it still points at
-  /// the mock, so a real-pair selection is preserved.
+  /// Reconciles the selection when mock devices are paired or unpaired.
+  /// Pairing leaves the selection alone so Automatic stays the default and the
+  /// auto-selector is exercised; unpairing clears the selection only when it
+  /// points at a mock that just went away, so any other selection is preserved.
   @visibleForTesting
   void syncMockSelection({
-    required String? mockId,
-    required String? previousMockId,
+    required Set<String> mockIds,
+    required Set<String> previousMockIds,
   }) {
-    if (mockId == previousMockId) return;
-    if (mockId == null && _selectedDeviceId == previousMockId) {
+    final selected = _selectedDeviceId;
+    if (selected == null) return;
+    if (previousMockIds.contains(selected) && !mockIds.contains(selected)) {
       selectDevice(null);
     }
+  }
+
+  /// Mocks a media feed applies to on the next start: the pinned mock when the
+  /// selection points at one, otherwise every paired mock, since in Automatic
+  /// mode the SDK decides which of them streams.
+  Iterable<String> _mockFeedTargets() {
+    final mocks = mockDeviceProvider.deviceUUIDs;
+    final selected = _selectedDeviceId;
+    if (selected != null && mocks.contains(selected)) return [selected];
+    return mocks;
   }
 
   /// Current thermal level of the active device, or `null` if no device is
@@ -621,20 +631,17 @@ class StreamSessionProvider extends ChangeNotifier {
     if (!_isRecovering) _recoveryAttempts = 0;
     _streamingIntended = true;
     try {
-      // Set camera feed if video is selected (only for mock devices)
-      if (_selectedVideo != null && mockDeviceProvider.deviceUUID != null) {
-        await MetaWearablesDatMockDevice.setCameraFeed(
-          mockDeviceProvider.deviceUUID!,
-          _selectedVideo,
-        );
-      }
-
-      // Set captured image if image is selected (only for mock devices)
-      if (_selectedImage != null && mockDeviceProvider.deviceUUID != null) {
-        await MetaWearablesDatMockDevice.setCapturedImage(
-          mockDeviceProvider.deviceUUID!,
-          _selectedImage,
-        );
+      // Media feeds only apply to mock devices.
+      for (final uuid in _mockFeedTargets()) {
+        if (_selectedVideo != null) {
+          await MetaWearablesDatMockDevice.setCameraFeed(uuid, _selectedVideo);
+        }
+        if (_selectedImage != null) {
+          await MetaWearablesDatMockDevice.setCapturedImage(
+            uuid,
+            _selectedImage,
+          );
+        }
       }
 
       // Subscribe to session state and error streams

@@ -48,9 +48,10 @@ class MockDeviceSheet extends StatelessWidget {
                     children: [
                       const SheetHandleBar(),
                       _PairingCard(mockDeviceProvider: mockDeviceProvider),
-                      if (mockDeviceProvider.deviceUUID != null)
+                      for (final device in mockDeviceProvider.devices)
                         _DeviceControlsCard(
-                          mockDeviceProvider: mockDeviceProvider,
+                          key: ValueKey(device.uuid),
+                          device: device,
                           streamProvider: streamProvider,
                         ),
                     ],
@@ -70,7 +71,8 @@ class _PairingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final paired = mockDeviceProvider.deviceUUID != null;
+    final count = mockDeviceProvider.devices.length;
+    final canPair = mockDeviceProvider.canPairMore;
     return Card(
       color: Colors.white,
       child: Padding(
@@ -84,9 +86,9 @@ class _PairingCard extends StatelessWidget {
                   'Mock Device Kit',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
-                if (paired)
+                if (count > 0)
                   Text(
-                    'Device paired',
+                    '$count of $maxMockDevices paired',
                     style: Theme.of(
                       context,
                     ).textTheme.bodyMedium!.copyWith(color: Colors.green),
@@ -96,14 +98,14 @@ class _PairingCard extends StatelessWidget {
               ],
             ),
             Text(
-              'Only one mock device can be active at a time. Pair to unlock '
-              'the device controls below.',
+              'Up to $maxMockDevices mock pairs can be paired at once. Power '
+              'on more than one to watch the SDK auto-select between them.',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium!.copyWith(color: Colors.grey),
             ),
             const Divider(),
-            if (!paired)
+            if (canPair)
               Align(
                 alignment: Alignment.centerLeft,
                 child: Row(
@@ -134,7 +136,7 @@ class _PairingCard extends StatelessWidget {
                 ),
               ),
             MetaButton.text(
-              enabled: !paired,
+              enabled: canPair,
               text: 'Pair glasses',
               onPressed: () {
                 context.read<MockDeviceProvider>().pairMockGlasses();
@@ -151,11 +153,12 @@ enum _FeedMode { liveCamera, media }
 
 class _DeviceControlsCard extends StatefulWidget {
   const _DeviceControlsCard({
-    required this.mockDeviceProvider,
+    required this.device,
     required this.streamProvider,
+    super.key,
   });
 
-  final MockDeviceProvider mockDeviceProvider;
+  final MockGlasses device;
   final stream_providers.StreamSessionProvider streamProvider;
 
   @override
@@ -174,10 +177,9 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
   void initState() {
     super.initState();
     final stream = widget.streamProvider;
-    final mock = widget.mockDeviceProvider;
     if (stream.selectedVideo != null || stream.selectedImage != null) {
       _mode = _FeedMode.media;
-    } else if (mock.cameraFacing != null) {
+    } else if (widget.device.cameraFacing != null) {
       _mode = _FeedMode.liveCamera;
     }
   }
@@ -192,16 +194,16 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
         ..setSelectedVideo(null)
         ..setSelectedImage(null);
     } else {
-      mock.clearCameraFacing();
+      mock.clearCameraFacing(widget.device.uuid);
     }
     setState(() => _mode = next);
   }
 
   @override
   Widget build(BuildContext context) {
-    final mockDeviceProvider = widget.mockDeviceProvider;
+    final device = widget.device;
     final streamProvider = widget.streamProvider;
-    final isPoweredOn = mockDeviceProvider.isPoweredOn;
+    final isPoweredOn = device.isPoweredOn;
 
     return Card(
       color: Colors.white,
@@ -219,13 +221,11 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        mockDeviceProvider.pairedModel != null
-                            ? glassesModelLabel(mockDeviceProvider.pairedModel!)
-                            : 'Mock glasses',
+                        glassesModelLabel(device.model),
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       Text(
-                        '${mockDeviceProvider.deviceUUID}',
+                        device.uuid,
                         style: Theme.of(
                           context,
                         ).textTheme.bodySmall!.copyWith(color: Colors.grey),
@@ -246,13 +246,20 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
                       // mock device with a live session races the SDK's
                       // RemoteSessionService on a DataX IO thread and
                       // crashes with ProtocolException(INTERNAL_ERROR).
-                      if (stream.isStreaming) {
+                      // Another mock streaming is left alone; only stop when
+                      // this one is, or when the streaming pair is unknown.
+                      final streamingId = stream.devices
+                          .where((d) => d.isStreamingDevice)
+                          .map((d) => d.id)
+                          .firstOrNull;
+                      if (stream.isStreaming &&
+                          (streamingId == null || streamingId == device.uuid)) {
                         await stream.stopStreamSession();
                       }
-                      if (mock.isPoweredOn) {
-                        await mock.powerOff();
+                      if (device.isPoweredOn) {
+                        await mock.powerOff(device.uuid);
                       }
-                      await mock.unpairMockGlasses();
+                      await mock.unpairMockGlasses(device.uuid);
                     },
                   ),
                 ),
@@ -275,7 +282,7 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
                     color: isPoweredOn ? Colors.green : null,
                     enabled: !isPoweredOn,
                     onPressed: () {
-                      context.read<MockDeviceProvider>().powerOn();
+                      context.read<MockDeviceProvider>().powerOn(device.uuid);
                     },
                   ),
                 ),
@@ -284,7 +291,7 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
                     text: 'Power off',
                     enabled: isPoweredOn,
                     onPressed: () {
-                      context.read<MockDeviceProvider>().powerOff();
+                      context.read<MockDeviceProvider>().powerOff(device.uuid);
                     },
                   ),
                 ),
@@ -303,10 +310,7 @@ class _DeviceControlsCardState extends State<_DeviceControlsCard> {
               _FeedModeSelector(mode: _mode, onChanged: _switchMode),
               const SizedBox(height: 8),
               if (_mode == _FeedMode.liveCamera)
-                _CameraFacingRow(
-                  mockDeviceProvider: mockDeviceProvider,
-                  enabled: true,
-                )
+                _CameraFacingRow(device: device, enabled: true)
               else ...[
                 _VideoPickerRow(streamProvider: streamProvider, enabled: true),
                 _ImagePickerRow(streamProvider: streamProvider, enabled: true),
@@ -349,17 +353,14 @@ class _FeedModeSelector extends StatelessWidget {
 }
 
 class _CameraFacingRow extends StatelessWidget {
-  const _CameraFacingRow({
-    required this.mockDeviceProvider,
-    required this.enabled,
-  });
+  const _CameraFacingRow({required this.device, required this.enabled});
 
-  final MockDeviceProvider mockDeviceProvider;
+  final MockGlasses device;
   final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    final selected = mockDeviceProvider.cameraFacing;
+    final selected = device.cameraFacing;
     return Row(
       children: [
         Expanded(
@@ -369,6 +370,7 @@ class _CameraFacingRow extends StatelessWidget {
             color: selected == CameraFacing.front ? Colors.green : null,
             onPressed: () {
               context.read<MockDeviceProvider>().setCameraFacing(
+                device.uuid,
                 CameraFacing.front,
               );
             },
@@ -381,6 +383,7 @@ class _CameraFacingRow extends StatelessWidget {
             color: selected == CameraFacing.back ? Colors.green : null,
             onPressed: () {
               context.read<MockDeviceProvider>().setCameraFacing(
+                device.uuid,
                 CameraFacing.back,
               );
             },
