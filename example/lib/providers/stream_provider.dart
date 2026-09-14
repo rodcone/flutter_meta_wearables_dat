@@ -121,11 +121,11 @@ class StreamSessionProvider extends ChangeNotifier {
   bool _pendingDevicesRefresh = false;
 
   // Device the user picked to stream from (a WearableDevice.id), or null for
-  // Automatic. Sole source of truth — null is reserved exclusively for
-  // Automatic, so the mock is pinned explicitly (see [syncMockSelection]).
+  // Automatic. Sole source of truth. Pairing a mock never changes it; the
+  // SDK's auto-selector picks the mock up on its own in Automatic mode.
   String? _selectedDeviceId;
-  // Tracks the mock's UUID across pair/unpair so the selection can be
-  // reconciled without clobbering a real-pair choice.
+  // Tracks the mock's UUID across pair/unpair so a pin to a mock that has
+  // since been unpaired can be dropped (see [syncMockSelection]).
   String? _lastMockUUID;
 
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
@@ -241,19 +241,17 @@ class StreamSessionProvider extends ChangeNotifier {
     _lastMockUUID = current;
   }
 
-  /// Reconciles the selection when the mock device is paired/unpaired. Pinning
-  /// the mock explicitly keeps targeting deterministic (`null` stays reserved
-  /// for Automatic); unpairing only clears the selection when it still points
-  /// at the mock, so a real-pair selection made afterward is preserved.
+  /// Reconciles the selection when the mock device is unpaired. Pairing leaves
+  /// the selection alone so Automatic stays the default and the auto-selector
+  /// is exercised; unpairing clears the selection only when it still points at
+  /// the mock, so a real-pair selection is preserved.
   @visibleForTesting
   void syncMockSelection({
     required String? mockId,
     required String? previousMockId,
   }) {
     if (mockId == previousMockId) return;
-    if (mockId != null) {
-      selectDevice(mockId);
-    } else if (_selectedDeviceId == previousMockId) {
+    if (mockId == null && _selectedDeviceId == previousMockId) {
       selectDevice(null);
     }
   }

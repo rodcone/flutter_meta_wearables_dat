@@ -51,42 +51,44 @@ void main() {
     sp.dispose();
   });
 
-  test('pairing a mock pins the mock id explicitly', () {
+  test('pairing a mock leaves the selection on Automatic', () {
     final sp = build()
       ..syncMockSelection(mockId: 'mock-1', previousMockId: null);
-    expect(sp.selectedDeviceId, 'mock-1');
+    expect(sp.selectedDeviceId, isNull);
+    sp.dispose();
+  });
+
+  test('pairing a mock preserves a real-pair selection', () {
+    final sp = build()
+      ..selectDevice('real-B')
+      ..syncMockSelection(mockId: 'mock-1', previousMockId: null);
+    expect(sp.selectedDeviceId, 'real-B');
     sp.dispose();
   });
 
   test('unpairing the mock preserves a real-pair selection', () {
     final sp = build()
-      ..syncMockSelection(mockId: 'mock-1', previousMockId: null);
-    expect(sp.selectedDeviceId, 'mock-1');
-
-    // User then picks a real pair.
-    sp.selectDevice('real-B');
+      ..syncMockSelection(mockId: 'mock-1', previousMockId: null)
+      ..selectDevice('real-B');
     expect(sp.selectedDeviceId, 'real-B');
 
-    // Unpair the mock — selection now points at real-B, so it must stay.
     sp.syncMockSelection(mockId: null, previousMockId: 'mock-1');
     expect(sp.selectedDeviceId, 'real-B');
 
     sp.dispose();
   });
 
-  test(
-    'unpairing the mock clears selection only when it still points there',
-    () {
-      final sp = build()
-        ..syncMockSelection(mockId: 'mock-2', previousMockId: null);
-      expect(sp.selectedDeviceId, 'mock-2');
+  test('unpairing the mock clears a selection that still points at it', () {
+    final sp = build()
+      ..syncMockSelection(mockId: 'mock-2', previousMockId: null)
+      ..selectDevice('mock-2');
+    expect(sp.selectedDeviceId, 'mock-2');
 
-      sp.syncMockSelection(mockId: null, previousMockId: 'mock-2');
-      expect(sp.selectedDeviceId, isNull);
+    sp.syncMockSelection(mockId: null, previousMockId: 'mock-2');
+    expect(sp.selectedDeviceId, isNull);
 
-      sp.dispose();
-    },
-  );
+    sp.dispose();
+  });
 
   test('canStartSelected reflects the selected pair connectivity', () async {
     messenger.setMockMethodCallHandler(
