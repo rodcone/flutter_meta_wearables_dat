@@ -99,7 +99,6 @@ class _PairedDevicesSheetState extends State<PairedDevicesSheet>
                 ),
                 const SizedBox(height: 18),
                 Expanded(child: _buildBody(context, sp)),
-                SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
               ],
             );
           },
@@ -130,7 +129,9 @@ class _PairedDevicesSheetState extends State<PairedDevicesSheet>
       );
     }
     return ListView.separated(
-      padding: EdgeInsets.zero,
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).padding.bottom + 16,
+      ),
       itemCount: provider.devices.length + 1,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
