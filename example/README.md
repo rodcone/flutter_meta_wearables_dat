@@ -20,6 +20,12 @@ Meta AI Glasses. These values are stored in gitignored files.
    with your values from the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter)
 3. Use `0` for `META_APPLICATION_ID` if using Developer Mode
 
+## Validating without glasses
+
+See [doc/MOCK_DEVICE_VALIDATION.md](../doc/MOCK_DEVICE_VALIDATION.md) for the
+manual pass that covers pairing, camera input, device state and auto-selection
+with Mock Device Kit, plus the list of what still needs real hardware.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

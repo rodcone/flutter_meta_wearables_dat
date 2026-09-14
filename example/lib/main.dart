@@ -179,8 +179,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
-                    if (!streamProvider.isStreaming &&
-                        !deviceProvider.isRegistered)
+                    // Mock devices. Stays reachable after registration, since
+                    // enabling Mock Device Kit reports the app as registered
+                    // and the power / feed controls live in this sheet.
+                    if (!streamProvider.isStreaming)
                       FloatingActionButton.small(
                         heroTag: 'mock_device',
                         backgroundColor: Colors.blueAccent,
