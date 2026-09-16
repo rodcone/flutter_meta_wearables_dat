@@ -141,6 +141,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // stall watchdog reads. Lock-guarded, because it is written on `frameQueue`
   // and read from the main actor.
   private let liveness = FrameLivenessTracker()
+  // Plugin-owned buffers for the `raw` path, so the SDK's pool is never held.
+  // See FramePixelBufferPool for why this is not zero-copy any more.
+  private let framePool = FramePixelBufferPool()
   private var pixelBufferTexture: PixelBufferTexture?
   private var textureId: Int64?
   private var currentVideoCodec: MWDATCamera.VideoCodec = .raw
@@ -1071,6 +1074,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       decompressionSession = nil
       sessionParameterSets = []
     }
+    framePool.invalidate()
     liveness.reset(targetFPS: 0)
     videoStreamSizeHandler.reset()
   }
@@ -1404,12 +1408,26 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
     guard liveness.shouldPush() else { return }
 
+    // Hand the texture a buffer we own. For `raw`, `pixelBuffer` is the SDK's
+    // own pooled buffer, and both the texture and the engine hold onto it for
+    // an unbounded time — which starves the SDK's pool and silently stops the
+    // capture pipeline. `hvc1` is already safe: VideoToolbox decoded into its
+    // own buffer and the SDK's was released on the way here. Copying after the
+    // throttle rather than before means only rendered frames pay for it.
+    let renderBuffer: CVPixelBuffer
+    if currentVideoCodec == .raw {
+      guard let owned = framePool.copy(pixelBuffer) else { return }
+      renderBuffer = owned
+    } else {
+      renderBuffer = pixelBuffer
+    }
+
     guard let texture = pixelBufferTexture,
           let texId = textureId else {
       return
     }
 
-    texture.latestPixelBuffer = pixelBuffer
+    texture.latestPixelBuffer = renderBuffer
     textureRegistry?.textureFrameAvailable(texId)
     liveness.notePush()
 

@@ -68,6 +68,14 @@ All three Dart files in `lib/` form the plugin's public API. `MetaWearablesDat` 
   - `flutter_meta_wearables_dat/video_frames` — per-frame payloads (`codec`, `bytes`, `width`, `height`, `ptsUs`, `isKeyframe`) emitted in both foreground and background when a Dart subscriber is attached; zero-cost when no listeners. Codec-config frames (`VideoFrame.isCodecConfig == true` on Android in DAT 0.7.0) are filtered out before emission so recording consumers never see parameter-set frames as payload.
   - `flutter_meta_wearables_dat/device_state` — `{thermalLevel: Int}` map (Dart `ThermalLevel`: unknown=0, none=1, light=2, moderate=3, severe=4, critical=5, emergency=6, shutdown=7). The handler tracks the active device via `AutoDeviceSelector` and switches its inner per-device subscription whenever the active device changes.
 
+### The `raw` freeze: never retain an SDK pixel buffer (0.9.3)
+
+**Do not hand the SDK's own `CVPixelBuffer` to the Flutter texture.** `CMSampleBufferGetImageBuffer` returns a buffer from a pool inside the SDK. `PixelBufferTexture` holds the latest one until the next frame replaces it, and the engine retains another between `copyPixelBuffer()` and the render — two of the SDK's buffers, held indefinitely, on a pool the plugin neither owns nor can size. When the capture pipeline wants a free buffer and finds none it **stops producing silently**: no `errorStream` event, no state change, `Stream.state` still `.streaming`, preview frozen until the session is recreated. That was the 0.9.1/0.9.2 freeze, reproducible in 7-20 s on Ray-Ban Display at medium/30/`raw`.
+
+`raw` now copies into a plugin-owned `CVPixelBufferPool` (`FramePixelBufferPool`) after the FPS throttle, so only rendered frames pay the memcpy and the SDK's buffer is released as soon as the frame is processed. **`raw` on iOS is therefore no longer zero-copy** — the older docs saying otherwise are wrong. `hvc1` is untouched and already safe: VideoToolbox decodes into its own buffer.
+
+Three things corroborate the diagnosis, and each was individually dismissible, which is why it took three rounds to find: `hvc1` never froze; Android never froze (`FrameProcessor` converts I420 into its own reusable bitmap and retains nothing); and the dispatch queue measured a depth of 1 frame throughout — which reads like an alibi but is not, because queue depth is the *backlog* and the fault was the *retention*. If a future change reintroduces a strong reference to an SDK-owned buffer anywhere on the render path, expect this freeze back.
+
 ### Frame Stall Watchdog (0.9.3)
 
 Both SDKs can stop delivering frames while `StreamState` stays `.streaming` and `errorStream` stays silent — a Bluetooth Classic transport stall is the usual trigger. Nothing else in either plugin observes frame arrival, so this was invisible to apps: `captureStreamFrame` returns the texture's last frame, making a frozen stream byte-identical to a motionless scene.
