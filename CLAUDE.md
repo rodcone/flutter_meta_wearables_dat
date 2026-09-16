@@ -76,6 +76,8 @@ All three Dart files in `lib/` form the plugin's public API. `MetaWearablesDat` 
 
 Three things corroborate the diagnosis, and each was individually dismissible, which is why it took three rounds to find: `hvc1` never froze; Android never froze (`FrameProcessor` converts I420 into its own reusable bitmap and retains nothing); and the dispatch queue measured a depth of 1 frame throughout — which reads like an alibi but is not, because queue depth is the *backlog* and the fault was the *retention*. If a future change reintroduces a strong reference to an SDK-owned buffer anywhere on the render path, expect this freeze back.
 
+**It is not the whole story.** After the fix the freeze still occurs roughly once every 3-4 minutes, down from once every 30 seconds. The plugin's pool is not the residual cause — no `kCVPixelBufferPoolAllocationThresholdKey` is set so it grows rather than running dry, and an SDK buffer is now held only for the duration of `processAndSendFrame`. The remainder looks like the transport, and `hvc1` does not appear to stall at all. Before blaming the plugin again, read which half of the `frameStalled` message fired: arrival-side means nothing reached us, push-side means we had frames and failed to render them.
+
 ### Frame Stall Watchdog (0.9.3)
 
 Both SDKs can stop delivering frames while `StreamState` stays `.streaming` and `errorStream` stays silent — a Bluetooth Classic transport stall is the usual trigger. Nothing else in either plugin observes frame arrival, so this was invisible to apps: `captureStreamFrame` returns the texture's last frame, making a frozen stream byte-identical to a motionless scene.
