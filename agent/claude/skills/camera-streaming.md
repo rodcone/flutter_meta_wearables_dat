@@ -17,6 +17,12 @@ final errorSub = MetaWearablesDat.streamSessionErrorStream().listen((error) {
   // StreamSessionError: code + message
   if (error.isThermalCritical) { /* device overheating — stream paused */ }
   if (error.isHingesClosed) { /* glasses folded */ }
+  if (error.isFrameStalled) {
+    // Still "streaming" but no frames for ~3s — the preview is frozen and
+    // nothing will clear it. Restart and use the new texture id.
+    await MetaWearablesDat.stopStreamSession(deviceId);
+    textureId = await MetaWearablesDat.startStreamSession(deviceId);
+  }
   if (error.code == 'datAppOnTheGlassesUpdateRequired') {
     // On-device DAT app needs updating — bounce user to Meta AI
     MetaWearablesDat.openDATGlassesAppUpdate();
@@ -157,7 +163,9 @@ if (frame != null) {
 }
 ```
 
-Capture every 200-500ms (e.g., with `Timer.periodic`), not every rendered frame.
+Capture every 200-500ms (e.g., with `Timer.periodic`), not every rendered frame. Polling at that cadence is supported indefinitely: no native code runs and no SDK buffer is retained, so it cannot starve the capture pipeline. The cost is an offscreen GPU rasterization plus a CPU readback per call, which is what the cadence guidance is protecting.
+
+It is **not** a freeze detector. It returns whatever frame the texture last received, so a frozen stream and a motionless scene are byte-identical. Use the `frameStalled` error for that.
 
 ## Stopping
 

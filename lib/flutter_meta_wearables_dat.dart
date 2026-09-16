@@ -159,6 +159,22 @@ class StreamSessionError {
   /// `sessionEndedByDevice` (the device ended the session; the stream stops
   /// with it) and `capabilityDenied`.
   ///
+  /// **Plugin-level codes** (raised by this plugin, with no SDK error behind
+  /// them; identical on both platforms):
+  /// - `stoppedForBackground` — the app was backgrounded without background
+  ///   streaming enabled, so the plugin ended the session on purpose. A
+  ///   terminal [StreamSessionState.stopped] follows. Not a fault.
+  /// - `frameStalled` — the stream still reports
+  ///   [StreamSessionState.streaming] but no video frame has arrived for
+  ///   several seconds, so the preview is frozen. Neither SDK raises anything
+  ///   in this situation; without this code an app cannot tell a frozen stream
+  ///   from a camera pointed at something that isn't moving. The plugin does
+  ///   not restart the stream — call [MetaWearablesDat.stopStreamSession] then
+  ///   [MetaWearablesDat.startStreamSession] to recover. The `message` says
+  ///   whether frames stopped arriving from the SDK (the usual case, often a
+  ///   Bluetooth transport stall) or arrived but failed to reach the texture
+  ///   (a plugin fault worth reporting).
+  ///
   /// When this is `datAppOnTheGlassesUpdateRequired`, call
   /// [MetaWearablesDat.openDATGlassesAppUpdate] to prompt the user to update
   /// the DAT app on the glasses — streaming won't work until they do.
@@ -182,6 +198,13 @@ class StreamSessionError {
 
   /// Returns true if camera permission was denied.
   bool get isPermissionDenied => code == 'permissionDenied';
+
+  /// Returns true if the stream is still nominally streaming but has stopped
+  /// delivering frames, leaving the `Texture` frozen on its last frame.
+  ///
+  /// Recoverable: stop the session and start a new one. The plugin will not do
+  /// that for you, because a restart changes the texture id.
+  bool get isFrameStalled => code == 'frameStalled';
 
   @override
   String toString() => 'StreamSessionError($code): $message';
@@ -837,6 +860,20 @@ class MetaWearablesDat {
   /// **Note:** Raw RGBA at the default 720x1280 resolution is ~3.7 MB per
   /// frame. This method is intended for on-demand captures (e.g., every
   /// 200-500 ms), not continuous per-frame processing.
+  ///
+  /// Sustained polling at that cadence is supported. Nothing here touches the
+  /// DAT SDK — no native method is invoked, and no SDK frame buffer is retained
+  /// beyond the engine's own rasterisation — so polling cannot starve the
+  /// capture pipeline however long it runs. What it does cost is a full
+  /// offscreen GPU rasterisation plus a CPU readback of the bytes on every
+  /// call, which is why the cadence guidance above is worth keeping to.
+  ///
+  /// Do **not** use this to detect a frozen stream. It returns the last frame
+  /// the texture received, so a frozen stream and a motionless scene look
+  /// identical. Use [MetaWearablesDat.videoFramesStream] to observe frame
+  /// delivery directly, or subscribe to
+  /// [MetaWearablesDat.streamSessionErrorStream] and watch for `frameStalled`,
+  /// which the plugin raises for exactly this case.
   ///
   /// Returns a [CapturedFrame] containing the pixel data, or `null` if the
   /// capture failed (e.g., texture not available).

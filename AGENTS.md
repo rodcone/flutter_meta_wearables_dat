@@ -85,12 +85,16 @@ Communication:
 | `capabilityDenied` | The device refused the requested capability. **Android only** |
 | `datAppOnTheGlassesUpdateRequired` | The on-device DAT app needs updating. Call `MetaWearablesDat.openDATGlassesAppUpdate()` to prompt the user. |
 | `dwaUnavailable` | The DAT Wearables App is unavailable on the glasses |
+| `stoppedForBackground` | The app was backgrounded without background streaming enabled, so the plugin ended the session on purpose. A terminal `stopped` follows. Not a fault |
+| `frameStalled` | The stream still reports `streaming` but no frame has arrived for ~3s — the preview is frozen. Raised by the plugin, not the SDK. Recover with `stopStreamSession()` then `startStreamSession()` |
 
 Photo-capture failure never appears here — it rejects the `capturePhoto()` future instead (`CAPTURE_PHOTO_FAILED`, with `details` carrying the granular reason).
 
 Codes that leave the stream dead with no auto-resume need a **teardown**, not a retry: clear your texture ID and streaming flag, or the `Texture` widget freezes on its last frame. Those are `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical` and `sessionEndedByDevice`.
 
 `thermalCritical` and `deviceThermalCritical` are **not** in that list — they pause rather than end the stream, and the session stays up. Treat them as a warning (surface it, keep rendering) and use `deviceStateStream()` to react before the device reaches the emergency tier.
+
+`frameStalled` is not in that list either, but it needs the opposite of a teardown-and-stop: the stream was never stopped, so nothing will ever clear it. Restart — `stopStreamSession()` then `startStreamSession()` — and take the new texture ID. The plugin deliberately does not restart for you, because doing so would change the texture ID under a widget that is still rendering the old one. Do **not** try to detect this yourself by rasterising frames and comparing pixels: a frozen stream and a motionless scene produce identical bytes. The code exists precisely so you don't have to guess.
 
 ## API reference
 
@@ -147,7 +151,12 @@ static Future<CapturedPhoto> capturePhoto(
   PhotoCaptureFormat format = PhotoCaptureFormat.jpeg,
 })
 
-// Frame capture (Dart-side rasterization, no native call)
+// Frame capture (Dart-side rasterization, no native call).
+// Safe to poll at 200-500ms for OCR/ML — it never touches the DAT SDK, so it
+// cannot starve the capture pipeline. It costs an offscreen GPU rasterization
+// plus a CPU readback per call (~3.7MB at 720x1280), so don't call it per frame.
+// It is NOT a freeze detector: it returns the texture's last frame, so a frozen
+// stream and a motionless scene are identical. Use `frameStalled` for that.
 static Future<CapturedFrame?> captureStreamFrame(
   int textureId, {
   int width = 720,

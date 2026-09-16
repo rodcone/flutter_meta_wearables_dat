@@ -65,6 +65,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // there: letting go early cancels the SDK's stop cascade mid-flight.
   private let streamStopTimeout: TimeInterval = 3.0
   private let deviceSessionStopTimeout: TimeInterval = 10.0
+  // Longest gap tolerated between video frames while the stream still reports
+  // `.streaming`. Neither SDK raises anything when delivery just stops, so
+  // without this a frozen preview is indistinguishable from a static scene and
+  // an app can only find out by diffing pixels. At the 15 fps floor Bluetooth
+  // Classic imposes this is ~45 missed frames — long enough to ride out a
+  // transport hiccup, short enough to beat a pixel-diff heuristic.
+  private let frameStallTimeout: TimeInterval = 3.0
+  // Longer than the arrival bound, for the "frames arriving but never reaching
+  // the texture" half. That condition is a plugin fault rather than a transport
+  // one, but it has one legitimate transient: returning from the background on
+  // `hvc1`, the decoder is rebuilt and produces nothing until the next
+  // keyframe, which this stream does not emit on a fixed period. Reporting that
+  // would make an app restart a healthy stream, which is worse than staying
+  // quiet.
+  private let framePushStallTimeout: TimeInterval = 6.0
+  private let frameStallPollInterval: TimeInterval = 1.0
+  private var frameWatchdogTask: Task<Void, Never>?
+  // Latch, so one stall reports once rather than every poll.
+  private var didReportFrameStall = false
   // After a pin change the shared selector is rebuilt and resolves its active
   // device asynchronously; `createSession` against an unresolved selector
   // returns `noEligibleDevice`. Bound how long we wait for the pinned device
@@ -118,9 +137,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // await an in-flight teardown rather than skip it.
   private var teardownTask: Task<Void, Never>?
   private var teardownSeq = 0
-  private var frameCounter: Int = 0
-  private var currentTargetFPS: Double = 30.0
-  private var lastFrameSendTime: Date?
+  // Frame pipeline timing: the FPS throttle, plus the arrival/push clocks the
+  // stall watchdog reads. Lock-guarded, because it is written on `frameQueue`
+  // and read from the main actor.
+  private let liveness = FrameLivenessTracker()
   private var pixelBufferTexture: PixelBufferTexture?
   private var textureId: Int64?
   private var currentVideoCodec: MWDATCamera.VideoCodec = .raw
@@ -634,6 +654,99 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     pendingAvailabilityTeardown = nil
   }
 
+  // MARK: - Frame Stall Watchdog
+
+  /// Watches for a stream that reports `.streaming` while no frames arrive.
+  ///
+  /// Neither SDK surfaces this. `Stream.errorStream` stays quiet, the state
+  /// stays `.streaming`, and the `Texture` widget holds its last frame forever
+  /// — so the only way an app could notice was to rasterise the texture and
+  /// compare pixels, which cannot distinguish a frozen stream from someone
+  /// holding still. This emits `frameStalled` instead.
+  ///
+  /// Reporting only. The plugin does not restart the stream, for the same
+  /// reason it does not resume after `hingesClosed` or a background stop: the
+  /// app owns that decision, and a plugin-initiated restart would swap the
+  /// texture id out from under it.
+  @MainActor
+  private func startFrameWatchdog() {
+    cancelFrameWatchdog()
+    let poll = frameStallPollInterval
+    frameWatchdogTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(poll * 1000))
+        guard let self, !Task.isCancelled else { return }
+        self.checkForFrameStall()
+      }
+    }
+  }
+
+  @MainActor
+  private func cancelFrameWatchdog() {
+    frameWatchdogTask?.cancel()
+    frameWatchdogTask = nil
+    didReportFrameStall = false
+  }
+
+  /// Re-reads the condition from scratch on every tick rather than trusting
+  /// whatever armed the timer — the stream may have stopped, paused or been
+  /// backgrounded since.
+  @MainActor
+  private func checkForFrameStall() {
+    // `.paused` is excluded deliberately. The SDK pauses the stream itself
+    // (thermal, mainly) and resumes it without the app asking; frames stopping
+    // is the documented behaviour there, not a fault.
+    guard streamSession?.state == .streaming else {
+      didReportFrameStall = false
+      return
+    }
+    // The background path drops frames on purpose and already announces itself
+    // with `stoppedForBackground`.
+    guard !mustNotStreamNow else { return }
+
+    let stats = liveness.snapshot()
+    // A stream that has not produced its first frame yet is starting up.
+    guard let sinceArrival = stats.sinceArrival else { return }
+
+    // With background streaming on, frames keep arriving while the texture is
+    // deliberately not written — iOS forbids GPU access from a backgrounded
+    // app. Only the arrival clock is meaningful there.
+    let pushIsMeaningful = !isInBackground
+    // Nothing pushed yet? Measure from the first arrival, not the last: the
+    // arrival clock keeps resetting, so a pipeline that has never pushed a
+    // single frame would otherwise read as healthy forever.
+    let sincePush = stats.sincePush ?? stats.sinceFirstArrival ?? sinceArrival
+    let stalled = sinceArrival > frameStallTimeout
+      || (pushIsMeaningful && sincePush > framePushStallTimeout)
+
+    guard stalled else {
+      didReportFrameStall = false
+      return
+    }
+    guard !didReportFrameStall else { return }
+    didReportFrameStall = true
+
+    // Which side stopped is the whole diagnostic value here, so it goes in the
+    // message: arrivals flat means the stream went quiet, arrivals climbing
+    // while pushes sit still means the plugin is at fault.
+    let message: String
+    if sinceArrival > frameStallTimeout {
+      message = String(
+        format: "No video frame has arrived from the SDK for %.1fs while the stream reports streaming. "
+          + "The preview is frozen. Restart the session to recover.",
+        sinceArrival
+      )
+    } else {
+      message = String(
+        format: "Frames are arriving but have not reached the texture for %.1fs "
+          + "(arrived: %d, pushed: %d). This is a plugin fault — please report it.",
+        sincePush, stats.framesArrived, stats.framesPushed
+      )
+    }
+    MWDATLog.log("frame stall detected — \(message)")
+    streamErrorHandler.sendError(code: "frameStalled", message: message)
+  }
+
   /// Keeps a lifetime subscription on `Wearables.shared.devicesStream()` so the
   /// SDK's device discovery stays warm and the plugin always holds an
   /// up-to-date device list. This mirrors Meta's CameraAccess sample, which
@@ -894,6 +1007,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // never reports on (the device-availability watchdog, a DeviceSession that
     // stopped underneath us), and a silent detach left the app holding a live
     // texture id with no terminal event — a `Texture` frozen on its last frame.
+    cancelFrameWatchdog()
     streamStateHandler.detachEmittingStopped()
     streamErrorHandler.session = nil
 
@@ -957,8 +1071,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       decompressionSession = nil
       sessionParameterSets = []
     }
-    frameCounter = 0
-    lastFrameSendTime = nil
+    liveness.reset(targetFPS: 0)
     videoStreamSizeHandler.reset()
   }
 
@@ -1206,8 +1319,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // the stream or session mid-cascade — the muted-chime / stale-capability
     // failure those waits exist to prevent.
     abortStopWait = false
+    // With background streaming on, frames kept arriving while backgrounded but
+    // the texture was deliberately not written. Measure the push clock from
+    // here, or the first watchdog tick after foregrounding reports the whole
+    // background window as a stall.
+    liveness.resyncPushClock()
     MWDATLog.log("App entering foreground — HEVC decoder will be recreated on next frame")
-    // Deliberately nothing else. With background streaming off the session is
+    // Deliberately nothing else about the session. With background streaming off it is
     // stopped and stays stopped: the plugin never reactivates the glasses
     // camera on its own. Do not add a resume here.
   }
@@ -1216,6 +1334,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
   /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
   private func processAndSendFrame(_ videoFrame: VideoFrame) {
+    // Stamp arrival before every gate below. This clock answers "is the SDK
+    // still delivering?", which has to stay true whatever the plugin then
+    // decides to do with the frame — it is what the stall watchdog reads, and
+    // what separates a quiet stream from a plugin that stopped pushing.
+    liveness.noteArrival()
+
     // When background streaming is NOT enabled, keep the existing behaviour:
     // drop every frame while backgrounded, since iOS forbids GPU access and
     // the Flutter raster thread is suspended.
@@ -1279,27 +1403,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let height = CVPixelBufferGetHeight(pixelBuffer)
     videoStreamSizeHandler.send(width: width, height: height)
 
-    let now = Date()
-    let minInterval = 1.0 / currentTargetFPS
-
-    let timeSinceLastFrame: TimeInterval
-    if let lastSendTime = lastFrameSendTime {
-      timeSinceLastFrame = now.timeIntervalSince(lastSendTime)
-      if timeSinceLastFrame < minInterval {
-        return
-      }
-    } else {
-      timeSinceLastFrame = 0
-    }
-
-    // Update timing + counters regardless of whether we push to the texture.
-    lastFrameSendTime = now
-    frameCounter += 1
-
-    if frameCounter % 30 == 0 && timeSinceLastFrame > 0 {
-      let actualFPS = 1.0 / timeSinceLastFrame
-      MWDATLog.log("\(frameCounter) frames, target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
-    }
+    guard liveness.shouldPush() else { return }
 
     guard let texture = pixelBufferTexture,
           let texId = textureId else {
@@ -1308,6 +1412,22 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
     texture.latestPixelBuffer = pixelBuffer
     textureRegistry?.textureFrameAvailable(texId)
+    liveness.notePush()
+
+    // Report both counters, not just the pushed one. The old line logged
+    // frames that passed the throttle and sat below its early return, so a
+    // wedged throttle silenced it exactly as a dead stream would — reading it
+    // could not tell the two apart. Printing arrivals alongside pushes makes
+    // the log answer that on its own: both flat means the SDK went quiet, a
+    // widening gap means the plugin is dropping them.
+    let stats = liveness.snapshot()
+    if stats.framesPushed % 30 == 0, let gap = stats.lastPushInterval, gap > 0 {
+      MWDATLog.log(
+        "arrived: \(stats.framesArrived), pushed: \(stats.framesPushed), " +
+        "target: \(liveness.currentTargetFPS), " +
+        "actual: \(String(format: "%.1f", 1.0 / gap)) FPS"
+      )
+    }
   }
 
   // MARK: - HEVC Decompression (for hvc1 codec)
@@ -1711,18 +1831,30 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // does want a fresh session calls `stopStreamSession()` first, which
         // never reaches this guard.
         if existing.state != .stopped && existing.state != .stopping {
-          if requestedDeviceId == pinnedDeviceId {
+          if requestedDeviceId != pinnedDeviceId {
+            result(FlutterError(code: "STREAM_ACTIVE", message: "A stream is already active on another device. Stop it before switching devices.", details: nil))
+            return
+          }
+          // A stream that delivered frames and then went quiet is stale even
+          // though its state says otherwise — see the frame watchdog. Handing
+          // back the existing texture id here would report success and leave
+          // the app rendering a frozen frame, which is the one thing a restart
+          // is meant to fix. A stream that has not produced its first frame yet
+          // is starting up, not stalled, and keeps the fast path.
+          let stats = liveness.snapshot()
+          let isStalled = (stats.sinceArrival ?? 0) > frameStallTimeout
+          if !(stats.hasArrived && isStalled) {
             if let texId = textureId {
               result(texId)
             } else {
               result(FlutterError(code: "TEXTURE_ERROR", message: "Session exists but no texture registered", details: nil))
             }
-          } else {
-            result(FlutterError(code: "STREAM_ACTIVE", message: "A stream is already active on another device. Stop it before switching devices.", details: nil))
+            return
           }
-          return
+          MWDATLog.log("existing stream is stalled — recreating rather than reusing its texture")
         }
-        // Stale (stopped/stopping) stream — drop the reference and recreate.
+        // Stale stream — stopped, stopping, or streaming but frozen. Drop the
+        // reference and recreate.
         await teardownStreamOnly()
       }
 
@@ -1773,10 +1905,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let texId = registry.register(texture)
       pixelBufferTexture = texture
       textureId = texId
-      currentTargetFPS = fps
       currentVideoCodec = videoCodec
-      frameCounter = 0
-      lastFrameSendTime = nil
+      liveness.reset(targetFPS: fps)
       MWDATLog.log("Registered texture \(texId)")
 
       // 3. Add a Camera capability. DAT 0.9.0 replaced `addStream` with
@@ -1843,6 +1973,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
       // 5. Start streaming. DAT 0.8.0: Stream.start() is synchronous.
       session.start()
+      startFrameWatchdog()
       result(texId)
     }
   }

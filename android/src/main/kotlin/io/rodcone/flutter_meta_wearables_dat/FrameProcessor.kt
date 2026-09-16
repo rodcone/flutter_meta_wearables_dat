@@ -9,6 +9,30 @@ import com.meta.wearable.dat.camera.types.VideoFrame
 import java.nio.ByteBuffer
 
 /**
+ * A read of the frame pipeline's two clocks, taken together.
+ *
+ * `null` means no frame of that kind has been seen on this stream yet — a
+ * stream that has not produced its first frame is starting up, not stalled.
+ */
+internal data class FrameLiveness(
+        val sinceArrivalNanos: Long?,
+        val sincePushNanos: Long?,
+        /**
+         * Nanos since the *first* frame arrived. The baseline for "frames are
+         * arriving but none has ever reached the surface" — without it a
+         * pipeline that never pushed a single frame looks healthy forever,
+         * because the arrival clock keeps resetting and there is no push clock
+         * to compare against.
+         */
+        val sinceFirstArrivalNanos: Long?,
+        val framesArrived: Int,
+        val framesPushed: Int,
+) {
+    val hasArrived: Boolean
+        get() = sinceArrivalNanos != null
+}
+
+/**
  * Handles I420 → ARGB frame conversion, FPS throttling, and SurfaceTexture rendering.
  * Reuses byte/pixel arrays and bitmaps across frames to avoid per-frame GC pressure.
  */
@@ -19,8 +43,17 @@ internal class FrameProcessor {
     }
 
     private var targetFPS: Double = 30.0
-    private var lastFrameSendTime: Long? = null
-    private var frameCount: Int = 0
+    // Frame liveness. `0L` means "never", so these stay unboxed primitives that
+    // the stall watchdog can read from another coroutine without allocating per
+    // frame. Arrival is stamped by the collect loop before any gate; push is
+    // stamped only when a frame actually reaches the surface. A freeze with
+    // both flat is the stream going quiet, a freeze with arrivals climbing and
+    // pushes flat is a plugin fault — nothing else can tell those apart.
+    @Volatile private var firstArrivalNanos: Long = 0L
+    @Volatile private var lastArrivalNanos: Long = 0L
+    @Volatile private var lastPushNanos: Long = 0L
+    @Volatile private var framesArrived: Int = 0
+    @Volatile private var framesPushed: Int = 0
     private var reusableBitmap: Bitmap? = null
     private var reusableByteArray: ByteArray? = null
     private var reusablePixelArray: IntArray? = null
@@ -40,10 +73,58 @@ internal class FrameProcessor {
     private val lock = Any()
 
     fun configure(fps: Double) {
-        targetFPS = fps
-        frameCount = 0
-        lastFrameSendTime = null
+        // Clamped to at least 1. An unclamped 0 gives an infinite minimum
+        // interval, which freezes the texture after a single frame while
+        // `videoFramesStream()` keeps delivering — a failure whose only symptom
+        // is a frozen preview. The SDK's own StreamConfiguration is clamped the
+        // same way at the call site.
+        targetFPS = maxOf(1.0, fps)
+        framesArrived = 0
+        framesPushed = 0
+        firstArrivalNanos = 0L
+        lastArrivalNanos = 0L
+        lastPushNanos = 0L
         released = false
+    }
+
+    /**
+     * Records that the SDK delivered a frame. Called by the stream's collect
+     * loop before any gate, so it tracks delivery regardless of what the
+     * plugin then does with the frame.
+     */
+    fun noteArrival() {
+        val now = System.nanoTime()
+        if (firstArrivalNanos == 0L) firstArrivalNanos = now
+        lastArrivalNanos = now
+        framesArrived++
+    }
+
+    /**
+     * Restarts the push clock without counting a push.
+     *
+     * Called when the surface is legitimately expected to have gone undrawn for
+     * a while — returning to the foreground after background streaming, where
+     * frames kept arriving but nothing was rendered. Without this the first
+     * watchdog tick after foregrounding measures the whole background window
+     * and reports a stall that never happened.
+     */
+    fun resyncPushClock() {
+        lastPushNanos = System.nanoTime()
+    }
+
+    /** A read of both frame clocks, relative to now. */
+    fun liveness(): FrameLiveness {
+        val now = System.nanoTime()
+        val arrival = lastArrivalNanos
+        val push = lastPushNanos
+        val first = firstArrivalNanos
+        return FrameLiveness(
+                sinceArrivalNanos = if (arrival == 0L) null else now - arrival,
+                sincePushNanos = if (push == 0L) null else now - push,
+                sinceFirstArrivalNanos = if (first == 0L) null else now - first,
+                framesArrived = framesArrived,
+                framesPushed = framesPushed,
+        )
     }
 
     fun setRotation(degrees: Int) {
@@ -77,8 +158,8 @@ internal class FrameProcessor {
         // FPS throttling
         val minIntervalNanos = (1_000_000_000.0 / targetFPS).toLong()
         val now = System.nanoTime()
-        val lastTime = lastFrameSendTime
-        if (lastTime != null && (now - lastTime) < minIntervalNanos) {
+        val lastTime = lastPushNanos
+        if (lastTime != 0L && (now - lastTime) < minIntervalNanos) {
             return
         }
 
@@ -126,13 +207,16 @@ internal class FrameProcessor {
                 return
             }
 
-            lastFrameSendTime = now
-            frameCount++
-            if (frameCount % 30 == 0 && lastTime != null) {
+            lastPushNanos = now
+            framesPushed++
+            // Log arrivals alongside pushes. Reporting only what survived the
+            // throttle made the line go silent on a wedged throttle exactly as
+            // it does on a dead stream, so it could not tell the two apart.
+            if (framesPushed % 30 == 0 && lastTime != 0L) {
                 val actualFPS = 1_000_000_000.0 / (now - lastTime)
                 Log.d(
                         TAG,
-                        "Texture path — $frameCount frames, " +
+                        "Texture path — arrived: $framesArrived, pushed: $framesPushed, " +
                                 "target: $targetFPS, actual: ${"%.1f".format(actualFPS)} FPS"
                 )
             }
@@ -166,8 +250,11 @@ internal class FrameProcessor {
             reusableBitmap = null
             reusableByteArray = null
             reusablePixelArray = null
-            lastFrameSendTime = null
-            frameCount = 0
+            firstArrivalNanos = 0L
+            lastArrivalNanos = 0L
+            lastPushNanos = 0L
+            framesArrived = 0
+            framesPushed = 0
             lastTargetWidth = 0
             lastTargetHeight = 0
             rotationDegrees = 0

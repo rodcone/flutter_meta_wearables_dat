@@ -1,3 +1,7 @@
+## 0.9.3
+
+* Align version with core package's 0.9.3 release. No API changes. The core release adds a `frameStalled` error code for a stream that stops delivering frames while still reporting `streaming`, and fixes two throttle defects that could freeze the preview silently — mock-backed streams go through the same frame path and are covered by both.
+
 ## 0.9.2
 
 * Align version with core package's 0.9.2 release. No API changes. The core release is documentation-only: notably, its previous claim that background streaming costs frame rate on Bluetooth Classic was measured and retracted.

@@ -45,6 +45,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -192,6 +193,9 @@ class MetaWearablesDatPlugin :
     @Volatile private var startInProgress = false
     private var videoJob: Job? = null
     private var streamErrorJob: Job? = null
+    private var frameWatchdogJob: Job? = null
+    // Latch, so one stall reports once rather than on every poll.
+    private var didReportFrameStall: Boolean = false
     // Guards teardownStreamOnly against re-entry — it is reachable from the
     // method channel, device-loss monitoring and the start-failure paths.
     private var isTearingDownStream = false
@@ -359,7 +363,12 @@ class MetaWearablesDatPlugin :
 
     private fun handleEnteredForeground() {
         isAppInBackground = false
-        // Deliberately nothing else. With background streaming off the session
+        // With background streaming on, frames kept arriving while backgrounded
+        // but nothing was drawn. Measure the push clock from here, or the first
+        // watchdog tick after foregrounding reports the whole background window
+        // as a stall.
+        frameProcessor.resyncPushClock()
+        // Deliberately nothing else about the session. With background streaming off it
         // is stopped and stays stopped; the plugin never restarts the glasses
         // camera on its own. Do not add a resume here.
     }
@@ -1184,7 +1193,27 @@ class MetaWearablesDatPlugin :
                                             .STOPPING &&
                             st != com.meta.wearable.dat.camera.types.StreamState.CLOSED
             if (live) {
-                if (deviceId == pinnedDeviceId) {
+                if (deviceId != pinnedDeviceId) {
+                    result.error(
+                            "STREAM_ACTIVE",
+                            "A stream is already active on another device. Stop it before switching devices.",
+                            null,
+                    )
+                    return
+                }
+                // A stream that delivered frames and then went quiet is stale
+                // even though its state says otherwise — see the frame
+                // watchdog. Returning the existing texture id here would report
+                // success and leave the app rendering a frozen frame, which is
+                // the one thing a restart is meant to fix. A stream that has
+                // not produced its first frame yet is starting up, not stalled,
+                // and keeps the fast path.
+                val stats = frameProcessor.liveness()
+                val stalled =
+                        stats.hasArrived &&
+                                (stats.sinceArrivalNanos ?: 0L) >
+                                        frameStallTimeoutMs * 1_000_000L
+                if (!stalled) {
                     val entry = textureEntry
                     if (entry != null) {
                         result.success(entry.id())
@@ -1195,16 +1224,12 @@ class MetaWearablesDatPlugin :
                                 null,
                         )
                     }
-                } else {
-                    result.error(
-                            "STREAM_ACTIVE",
-                            "A stream is already active on another device. Stop it before switching devices.",
-                            null,
-                    )
+                    return
                 }
-                return
+                Log.d(TAG, "Existing stream is stalled — recreating rather than reusing its texture")
             }
-            // Stale (terminal) stream — drop it and recreate below.
+            // Stale stream — terminal, or streaming but frozen. Drop it and
+            // recreate below.
             teardownStreamOnly()
         }
 
@@ -1312,6 +1337,11 @@ class MetaWearablesDatPlugin :
                 videoJob =
                         scope.launch(Dispatchers.Default) {
                             newStream.videoStream.collect { videoFrame ->
+                                // Before any gate below: this clock answers
+                                // "is the SDK still delivering?", which has to
+                                // stay true whatever the plugin then does with
+                                // the frame. The stall watchdog reads it.
+                                frameProcessor.noteArrival()
                                 if (frameProcessor.needsBufferSizeUpdate(
                                                 videoFrame.width,
                                                 videoFrame.height,
@@ -1390,6 +1420,7 @@ class MetaWearablesDatPlugin :
                     )
                     return@launch
                 }
+                startFrameWatchdog()
                 result.success(textureId)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start stream session", e)
@@ -1632,7 +1663,118 @@ class MetaWearablesDatPlugin :
         }
     }
 
+    // region Frame stall watchdog
+
+    /**
+     * Longest gap tolerated between video frames while the stream still reports
+     * STREAMING. The SDK raises nothing when delivery just stops, so without
+     * this a frozen preview is indistinguishable from a static scene and an app
+     * can only find out by diffing pixels. Kept identical to iOS.
+     */
+    private val frameStallTimeoutMs = 3_000L
+
+    /**
+     * Longer than the arrival bound, for the "frames arriving but never
+     * reaching the surface" half. That condition is a plugin fault rather than
+     * a transport one, and reporting it spuriously would make an app restart a
+     * healthy stream — worse than staying quiet. Kept identical to iOS, where
+     * the post-background decoder rebuild makes the transient concrete.
+     */
+    private val framePushStallTimeoutMs = 6_000L
+    private val frameStallPollIntervalMs = 1_000L
+
+    /**
+     * Watches for a stream that reports STREAMING while no frames arrive, and
+     * emits `frameStalled`.
+     *
+     * Reporting only. The plugin does not restart the stream, for the same
+     * reason it does not resume after `hingesClosed` or a background stop: the
+     * app owns that decision, and a plugin-initiated restart would swap the
+     * texture id out from under it.
+     */
+    private fun startFrameWatchdog() {
+        cancelFrameWatchdog()
+        frameWatchdogJob =
+                scope.launch {
+                    while (isActive) {
+                        delay(frameStallPollIntervalMs)
+                        checkForFrameStall()
+                    }
+                }
+    }
+
+    private fun cancelFrameWatchdog() {
+        frameWatchdogJob?.cancel()
+        frameWatchdogJob = null
+        didReportFrameStall = false
+    }
+
+    /**
+     * Re-reads the condition from scratch on every tick rather than trusting
+     * whatever armed the timer — the stream may have stopped, paused or been
+     * backgrounded since.
+     */
+    private fun checkForFrameStall() {
+        // PAUSED is excluded deliberately. The SDK pauses the stream itself
+        // (thermal, mainly) and resumes it without the app asking; frames
+        // stopping is the documented behaviour there, not a fault.
+        if (stream?.state?.value !=
+                        com.meta.wearable.dat.camera.types.StreamState.STREAMING
+        ) {
+            didReportFrameStall = false
+            return
+        }
+        // The background path drops frames on purpose and already announces
+        // itself with `stoppedForBackground`.
+        if (mustNotStreamNow) return
+
+        val stats = frameProcessor.liveness()
+        // A stream that has not produced its first frame yet is starting up.
+        val sinceArrival = stats.sinceArrivalNanos ?: return
+
+        // With background streaming on, frames keep arriving while the surface
+        // is not drawn to. Only the arrival clock is meaningful there.
+        val pushIsMeaningful = !isAppInBackground
+        // Nothing pushed yet? Measure from the first arrival, not the last: the
+        // arrival clock keeps resetting, so a pipeline that has never pushed a
+        // single frame would otherwise read as healthy forever.
+        val sincePush = stats.sincePushNanos ?: stats.sinceFirstArrivalNanos ?: sinceArrival
+        val arrivalStalled = sinceArrival > frameStallTimeoutMs * 1_000_000L
+        val stalled =
+                arrivalStalled ||
+                        (pushIsMeaningful &&
+                                sincePush > framePushStallTimeoutMs * 1_000_000L)
+
+        if (!stalled) {
+            didReportFrameStall = false
+            return
+        }
+        if (didReportFrameStall) return
+        didReportFrameStall = true
+
+        // Which side stopped is the whole diagnostic value here, so it goes in
+        // the message: arrivals flat means the stream went quiet, arrivals
+        // climbing while pushes sit still means the plugin is at fault.
+        val message =
+                if (arrivalStalled) {
+                    "No video frame has arrived from the SDK for " +
+                            "${"%.1f".format(sinceArrival / 1_000_000_000.0)}s while the stream " +
+                            "reports streaming. The preview is frozen. " +
+                            "Restart the session to recover."
+                } else {
+                    "Frames are arriving but have not reached the texture for " +
+                            "${"%.1f".format(sincePush / 1_000_000_000.0)}s " +
+                            "(arrived: ${stats.framesArrived}, pushed: ${stats.framesPushed}). " +
+                            "This is a plugin fault — please report it."
+                }
+        Log.w(TAG, "Frame stall detected — $message")
+        streamSessionErrorStreamHandler?.sendError("frameStalled", message)
+    }
+
+    // endregion
+
     private fun teardownStreamOnlyLocked() {
+        cancelFrameWatchdog()
         videoJob?.cancel()
         videoJob = null
         streamErrorJob?.cancel()

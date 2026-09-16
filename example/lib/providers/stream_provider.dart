@@ -51,6 +51,11 @@ class StreamSessionProvider extends ChangeNotifier {
     'internalError',
     'deviceNotConnected',
     'deviceNotFound',
+    // Raised by the plugin, not the SDK: the stream still says `streaming` but
+    // frames stopped arriving, so the Texture is frozen. Unlike the codes above
+    // the stream is never stopped for us, so recovery here means an explicit
+    // stop + start — which is exactly what `_scheduleRecovery` does.
+    'frameStalled',
   };
   static const int _maxRecoveryAttempts = 3;
   static const Duration _recoveryWatchdog = Duration(seconds: 10);

@@ -61,6 +61,8 @@ If `startRegistration()` opens Meta AI but the app never returns:
 | `timeout` | Operation timed out | Retry the operation. |
 | `videoStreamingError` | Stream failed | Stop and restart the session. |
 | `internalError` | Internal SDK error | Check logs, restart the session. |
+| `stoppedForBackground` | The app was backgrounded without background streaming enabled — the plugin ended the session on purpose | Not a fault. A terminal `stopped` follows; show a placeholder and let the user restart. |
+| `frameStalled` | The stream still reports `streaming` but no frame has arrived for ~3s, so the preview is frozen | Restart: `stopStreamSession()` then `startStreamSession()`, and use the new texture ID. |
 
 Photo-capture failure never reaches this stream — it rejects the `capturePhoto()` future with `CAPTURE_PHOTO_FAILED` instead, `details` carrying the granular reason (`photoCaptureFailed` / `photoCaptureTimeout` on iOS; `deviceDisconnected` / `notStreaming` / `captureInProgress` / `captureFailed` on Android).
 
@@ -69,6 +71,14 @@ Photo-capture failure never reaches this stream — it rejects the `capturePhoto
 A `Texture` widget keeps showing its last frame forever if you only surface the error. For codes that leave the stream dead with no auto-resume — `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical`, `sessionEndedByDevice` — **tear the session down**: clear your texture ID and streaming flag so the placeholder renders and Start is available again. Losing the active device mid-stream needs the same handling, and it arrives on `activeDeviceStream()` rather than as an error.
 
 Do **not** tear down on `thermalCritical` / `deviceThermalCritical`: those pause the stream and leave the session up, so the stream can resume on its own. Surface them as a warning and keep rendering.
+
+### Frozen video with no error at all
+
+Distinct from the above, and the reason `frameStalled` exists. Both SDKs can stop delivering frames while the stream state stays `streaming` — a Bluetooth Classic transport stall is the common cause. Nothing is raised on `errorStream`, no state transition occurs, and the `Texture` holds its last frame indefinitely. Backgrounding the app appears to "fix" it only because that path tears the session down.
+
+The plugin watches for this and emits `frameStalled` after ~3 seconds without a frame. Handle it by restarting the session; it does not clear itself.
+
+If you want to observe frame delivery directly rather than wait for the code, subscribe to `videoFramesStream()` — it is emitted before the background gate, the FPS throttle and any decode on both platforms, so gaps in it reflect what the SDK is actually delivering. Do **not** try to detect a freeze by rasterising with `captureStreamFrame()` and comparing pixels: it returns the texture's last frame, so a frozen stream is byte-identical to a camera pointed at something still.
 
 ## Android-specific issues
 

@@ -113,6 +113,9 @@ For a complete implementation, see the [example app](https://github.com/rodcone/
   - [Optional: mock device add-on](#optional-mock-device-add-on)
   - [AI Assistant Integration](#ai-assistant-integration)
   - [Troubleshooting](#troubleshooting)
+    - [Frozen preview with no error](#frozen-preview-with-no-error)
+    - [Diagnosing the audio route (iOS)](#diagnosing-the-audio-route-ios)
+    - [Reading the plugin's native logs](#reading-the-plugins-native-logs)
   - [Example app](#example-app)
   - [Contributing](#contributing)
   - [License](#license)
@@ -504,6 +507,10 @@ MetaWearablesDat.streamSessionErrorStream().listen((error) {
   } else if (error.code == 'datAppOnTheGlassesUpdateRequired') {
     // Glasses need an app update — bounce the user to Meta AI to handle it
     MetaWearablesDat.openDATGlassesAppUpdate();
+  } else if (error.isFrameStalled) {
+    // The stream still says `streaming`, but frames stopped arriving and the
+    // preview is frozen. Nothing clears this on its own — restart the session
+    // and use the new texture ID.
   }
 });
 
@@ -703,6 +710,10 @@ void stopFrameProcessing() => _processing = false;
 
 > **Memory note:** Raw RGBA at 720×1280 is ~3.7 MB per frame. Capture on demand (every 200–500 ms is typical for OCR/ML) rather than every rendered frame.
 
+Polling at that cadence is supported for the life of a session. `captureStreamFrame` invokes no native code and retains no SDK frame buffer, so however long it runs it cannot starve the capture pipeline. What it does cost is an offscreen GPU rasterization plus a CPU readback of the bytes on every call, which is what the cadence guidance above is protecting.
+
+> **Do not use it to detect a frozen stream.** It returns the last frame the texture received, so a frozen stream and a camera pointed at something motionless produce identical bytes. The plugin raises [`frameStalled`](#frozen-preview-with-no-error) for that, and `videoFramesStream()` reflects real frame delivery if you'd rather measure it yourself.
+
 **Note:** See the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) for a complete implementation.
 
 ## Optional: mock device add-on
@@ -771,8 +782,30 @@ If you run into issues, try these steps first:
 - **From official docs**: See [Known Issues](https://wearables.developer.meta.com/docs/knownissues), [FAQ](https://developers.meta.com/wearables/faq/) and [Report a bug](https://wearables.developer.meta.com/devcenter/feedback/).
 
 Common issues:
+- **Preview freezes mid-stream with no error** — see [Frozen preview with no error](#frozen-preview-with-no-error).
 - **Wi‑Fi never prompts, or one transport streams unreliably** — see [Migrating or switching camera transport](#migrating-or-switching-camera-transport); switching between Wi‑Fi and Bluetooth Classic is a config-only change, no code required.
 - **Registration deep link not returning** — If registration opens the Meta AI app but the callback does not return to your app, verify that your URL scheme matches the one registered in the [Meta Wearables Developer Center](https://wearables.developer.meta.com/devcenter). On iOS, ensure `CFBundleURLSchemes` in `Info.plist` (and `AppLinkURLScheme` in the `MWDAT` dict) use the same scheme. On Android, ensure the `data android:scheme` in your activity's intent-filter matches that scheme.
+
+### Frozen preview with no error
+
+The `Texture` holds its last frame, `streamSessionStateStream()` still reads `streaming`, and nothing arrives on `streamSessionErrorStream()`. Neither SDK reports this — a Bluetooth Classic transport stall is the usual cause, and backgrounding the app only appears to fix it because that path tears the session down.
+
+The plugin watches for it and raises `frameStalled` on `streamSessionErrorStream()` once ~3 seconds pass without a frame while the stream still reports `streaming`. It does not restart the stream for you: a restart mints a new texture ID, and swapping that out from under a live `Texture` widget is the app's call, not the plugin's.
+
+```dart
+MetaWearablesDat.streamSessionErrorStream().listen((error) async {
+  if (!error.isFrameStalled) return;
+  // error.message says which side stopped: no frames arriving from the SDK
+  // (the usual case), or frames arriving that never reached the texture.
+  await MetaWearablesDat.stopStreamSession(deviceId);
+  final newTextureId = await MetaWearablesDat.startStreamSession(deviceId);
+  setState(() => _textureId = newTextureId);
+});
+```
+
+A stalled stream is also treated as stale by `startStreamSession()`, so a restart always mints a fresh texture rather than handing back the frozen one.
+
+If you want to watch frame delivery yourself instead of waiting for the code, subscribe to `videoFramesStream()` — it is emitted before the background gate, the FPS throttle and any decode on both platforms, so gaps in it are real gaps in delivery. Don't detect a freeze by rasterizing with `captureStreamFrame()` and comparing pixels: a frozen stream is byte-identical to a motionless scene.
 
 ### Diagnosing the audio route (iOS)
 
