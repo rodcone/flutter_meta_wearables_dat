@@ -96,6 +96,7 @@ For a complete implementation, see the [example app](https://github.com/rodcone/
     - [iOS Configuration](#ios-configuration)
       - [Choose your camera transport: Wi‑Fi (recommended) or Bluetooth Classic](#choose-your-camera-transport-wifi-recommended-or-bluetooth-classic)
       - [Migrating or switching camera transport](#migrating-or-switching-camera-transport)
+      - [UIScene lifecycle (required on iOS 27+)](#uiscene-lifecycle-required-on-ios-27)
     - [Android Configuration](#android-configuration)
       - [1. AndroidManifest.xml](#1-androidmanifestxml)
       - [2. Repository Configuration](#2-repository-configuration)
@@ -289,6 +290,36 @@ Switching transport — whether upgrading an older app or troubleshooting one th
 4. Delete the app from your test device before reinstalling — this clears any stale Bluetooth Classic accessory pairing state — then rebuild. The first stream should show the "Join Wi‑Fi Network" prompt.
 
 **To switch to Bluetooth Classic:** remove the Wi‑Fi `Info.plist` keys and entitlements, add the ExternalAccessory keys from the Bluetooth Classic recipe above, rebuild. No prompt, no entitlements needed.
+
+#### UIScene lifecycle (required on iOS 27+)
+
+iOS 27 refuses to launch an app that has not adopted the `UIScene` lifecycle, so an unmigrated host fails with *"Your iOS app has not been migrated to the UIScene lifecycle."* This is a Flutter-wide requirement, not specific to this plugin — see Flutter's [UISceneDelegate migration guide](https://docs.flutter.dev/release/breaking-changes/uiscenedelegate).
+
+**The plugin itself needs no change.** It observes background and foreground through `NotificationCenter` rather than the application delegate, precisely because Flutter stops forwarding application lifecycle events once a host adopts scenes. Background streaming, the deliberate background stop and the frame watchdog all behave identically either way.
+
+What your app needs, using [`example/ios/`](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example/ios) as the worked reference:
+
+1. **`Info.plist`** — add a `UIApplicationSceneManifest` whose `UISceneDelegateClassName` is `$(PRODUCT_MODULE_NAME).SceneDelegate` (or `FlutterSceneDelegate` if you need no custom scene code) and whose `UISceneStoryboardFile` is `Main`.
+2. **`SceneDelegate.swift`** — a new file subclassing `FlutterSceneDelegate`, added to the Runner target.
+3. **`AppDelegate.swift`** — conform to `FlutterImplicitEngineDelegate` and move `GeneratedPluginRegistrant.register` into `didInitializeImplicitFlutterEngine(_:)`.
+
+Point 3 is the one that bites. The implicit engine does not exist when the app delegate launches — it is created when the scene connects — so `window?.rootViewController as? FlutterViewController` is `nil` in `didFinishLaunchingWithOptions`. Any method channel you set up there silently stops working. Build channels from `engineBridge.applicationRegistrar.messenger()` instead:
+
+```swift
+@main
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let channel = FlutterMethodChannel(
+      name: "my_app/channel",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    // …
+  }
+}
+```
+
+Deep links move too: `scene(_:openURLContexts:)` on the scene delegate replaces `application(_:open:options:)`. Calling `super` forwards them to registered plugins, which is how `app_links` keeps receiving the DAT registration callback.
 
 ### Android Configuration
 

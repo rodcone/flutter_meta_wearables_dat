@@ -2,15 +2,31 @@ import AVFoundation
 import Flutter
 import UIKit
 
+/// Scene-based since iOS 27 requires it. Two things moved as a result:
+///
+/// * Plugin registration and the diagnostics channel are set up in
+///   `didInitializeImplicitFlutterEngine`, not `didFinishLaunchingWithOptions`.
+///   The implicit engine does not exist yet when the app delegate launches —
+///   it is created when the scene connects — so `window?.rootViewController`
+///   is nil there and the old `as? FlutterViewController` cast silently failed.
+/// * URL handling moved to `SceneDelegate`. The previous
+///   `application(_:open:options:)` override invoked `handleUrl` *into* Dart on
+///   the plugin's channel, which nothing has ever handled — the example
+///   receives registration callbacks through the `app_links` package instead.
+///   All the override really did was call `super`, which the scene delegate now
+///   does.
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    GeneratedPluginRegistrant.register(with: self)
-    registerDiagnosticsChannel()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    registerDiagnosticsChannel(messenger: engineBridge.applicationRegistrar.messenger())
   }
 
   /// Exposes the process-wide `AVAudioSession` state to the example's UI.
@@ -24,14 +40,10 @@ import UIKit
   /// Deliberately implemented here rather than in the plugin: `sharedInstance()`
   /// is process-wide, so the host app can observe whatever the plugin
   /// configured without the plugin growing a public API for it.
-  private func registerDiagnosticsChannel() {
-    guard let controller = window?.rootViewController as? FlutterViewController else {
-      NSLog("[AppDelegate] No FlutterViewController — diagnostics channel not registered")
-      return
-    }
+  private func registerDiagnosticsChannel(messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(
       name: "mwdat_example/diagnostics",
-      binaryMessenger: controller.binaryMessenger
+      binaryMessenger: messenger
     )
     channel.setMethodCallHandler { call, result in
       switch call.method {
@@ -61,32 +73,5 @@ import UIKit
       "usesBluetooth": usesBluetooth,
       "otherAudioPlaying": session.isOtherAudioPlaying,
     ]
-  }
-
-  override func application(
-    _ app: UIApplication,
-    open url: URL,
-    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
-  ) -> Bool {
-    // Check if Flutter is ready
-    guard let controller = window?.rootViewController as? FlutterViewController else {
-      // Flutter not ready yet, try to handle URL natively
-      NSLog("[AppDelegate] Flutter not ready, handling URL natively: \(url.absoluteString)")
-      return super.application(app, open: url, options: options)
-    }
-    
-    let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: controller.binaryMessenger)
-    channel.invokeMethod("handleUrl", arguments: ["url": url.absoluteString]) { result in
-      if let error = result as? FlutterError {
-        NSLog("[AppDelegate] Failed to handle route information in Flutter: \(error.message ?? "Unknown error"), code: \(error.code)")
-      } else if let handled = result as? Bool {
-        if handled {
-          NSLog("[AppDelegate] Successfully handled URL: \(url.absoluteString)")
-        } else {
-          NSLog("[AppDelegate] URL was not handled: \(url.absoluteString)")
-        }
-      }
-    }
-    return super.application(app, open: url, options: options)
   }
 }
