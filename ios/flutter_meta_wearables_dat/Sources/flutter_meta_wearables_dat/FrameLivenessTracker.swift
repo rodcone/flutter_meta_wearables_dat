@@ -16,6 +16,12 @@ struct FrameLiveness {
   let sinceFirstArrival: CFTimeInterval?
   let framesArrived: Int
   let framesPushed: Int
+  /// Frames handed to us by the SDK that `frameQueue` has not started yet.
+  /// Non-zero means we are the bottleneck, not the transport — each one pins a
+  /// `CMSampleBuffer` and, with it, a buffer from the SDK's pool.
+  let inFlight: Int
+  /// High-water mark of [inFlight] since the stream started.
+  let peakInFlight: Int
   /// The gap between the two most recent pushes, or nil before the second one.
   /// This is the instantaneous frame rate's denominator — deliberately not an
   /// average, so a stream that holds and then collapses reads as a collapse.
@@ -59,6 +65,8 @@ final class FrameLivenessTracker {
   private var lastPush: CFTimeInterval?
   private var framesArrived = 0
   private var framesPushed = 0
+  private var inFlight = 0
+  private var peakInFlight = 0
   private var lastPushInterval: CFTimeInterval?
   private var targetFPS: Double = 30.0
 
@@ -76,18 +84,35 @@ final class FrameLivenessTracker {
     lastPush = nil
     framesArrived = 0
     framesPushed = 0
+    inFlight = 0
+    peakInFlight = 0
     lastPushInterval = nil
     targetFPS = max(1.0, fps)
     os_unfair_lock_unlock(&lock)
   }
 
-  /// Records that the SDK delivered a frame. Called before every gate.
+  /// Records that the SDK delivered a frame.
+  ///
+  /// Called from the publisher callback, **not** from the frame queue. Those
+  /// are different instants: the callback is when the SDK hands the frame over,
+  /// while the queue is our own backlog. Stamping this on the queue made the
+  /// watchdog report "nothing arrived from the SDK" whenever we simply had not
+  /// got round to the frames yet — blaming the transport for our own backlog.
   func noteArrival() {
     let now = CACurrentMediaTime()
     os_unfair_lock_lock(&lock)
     if firstArrival == nil { firstArrival = now }
     lastArrival = now
     framesArrived += 1
+    inFlight += 1
+    if inFlight > peakInFlight { peakInFlight = inFlight }
+    os_unfair_lock_unlock(&lock)
+  }
+
+  /// Records that the frame queue has started processing a delivered frame.
+  func noteDequeue() {
+    os_unfair_lock_lock(&lock)
+    if inFlight > 0 { inFlight -= 1 }
     os_unfair_lock_unlock(&lock)
   }
 
@@ -147,6 +172,8 @@ final class FrameLivenessTracker {
       sinceFirstArrival: firstArrival.map { now - $0 },
       framesArrived: framesArrived,
       framesPushed: framesPushed,
+      inFlight: inFlight,
+      peakInFlight: peakInFlight,
       lastPushInterval: lastPushInterval
     )
   }

@@ -732,9 +732,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let message: String
     if sinceArrival > frameStallTimeout {
       message = String(
-        format: "No video frame has arrived from the SDK for %.1fs while the stream reports streaming. "
-          + "The preview is frozen. Restart the session to recover.",
-        sinceArrival
+        format: "No video frame has arrived from the SDK for %.1fs while the stream reports streaming "
+          + "(queued: %d, peak %d). The preview is frozen. Restart the session to recover.",
+        sinceArrival, stats.inFlight, stats.peakInFlight
       )
     } else {
       message = String(
@@ -1334,11 +1334,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
   /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
   private func processAndSendFrame(_ videoFrame: VideoFrame) {
-    // Stamp arrival before every gate below. This clock answers "is the SDK
-    // still delivering?", which has to stay true whatever the plugin then
-    // decides to do with the frame — it is what the stall watchdog reads, and
-    // what separates a quiet stream from a plugin that stopped pushing.
-    liveness.noteArrival()
+    // Arrival was stamped in the publisher callback; this only closes out the
+    // queue depth. Everything below is a gate the frame may not survive, and
+    // none of it may affect the answer to "is the SDK still delivering?".
+    liveness.noteDequeue()
 
     // When background streaming is NOT enabled, keep the existing behaviour:
     // drop every frame while backgrounded, since iOS forbids GPU access and
@@ -1424,6 +1423,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if stats.framesPushed % 30 == 0, let gap = stats.lastPushInterval, gap > 0 {
       MWDATLog.log(
         "arrived: \(stats.framesArrived), pushed: \(stats.framesPushed), " +
+        "queued: \(stats.inFlight) (peak \(stats.peakInFlight)), " +
         "target: \(liveness.currentTargetFPS), " +
         "actual: \(String(format: "%.1f", 1.0 / gap)) FPS"
       )
@@ -1946,6 +1946,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       videoFrameHandler.resetParameterSetCache()
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
+        // Stamp arrival here, on the SDK's own callback, not inside
+        // `processAndSendFrame` further down the queue. Those are different
+        // instants, and conflating them made the watchdog blame the transport
+        // for our own backlog.
+        self.liveness.noteArrival()
         self.frameQueue.async {
           self.processAndSendFrame(videoFrame)
         }
