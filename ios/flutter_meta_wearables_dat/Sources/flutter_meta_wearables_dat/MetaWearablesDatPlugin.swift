@@ -1334,9 +1334,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // camera on its own. Do not add a resume here.
   }
 
-  // MARK: - Frame Processing (zero-copy via Texture API)
-  /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
-  /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
+  // MARK: - Frame Processing (Texture API)
+  /// Pushes a CVPixelBuffer to the Flutter texture — no JPEG encode/decode, and
+  /// nothing crosses the method channel.
+  ///
+  /// `raw` used to push the SDK's own buffer straight through, which was truly
+  /// zero-copy and starved the SDK's pool; it now goes via `framePool`. `hvc1`
+  /// pushes VideoToolbox's output buffer, which the plugin already owns.
   private func processAndSendFrame(_ videoFrame: VideoFrame) {
     // Arrival was stamped in the publisher callback; this only closes out the
     // queue depth. Everything below is a gate the frame may not survive, and
