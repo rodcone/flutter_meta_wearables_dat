@@ -58,6 +58,15 @@
   app's call. The message states whether frames stopped arriving from the SDK or arrived and
   failed to reach the texture, and carries the plugin's own queue depth, so a stall says which
   side it came from rather than leaving it to be guessed.
+- **Android: the same two fixes, so the platforms stay in step.** `frameStalled` is emitted by
+  an identical watchdog (1.5 s arrival bound, 6 s render bound, `PAUSED` and the deliberate
+  background stop excluded, latched, reporting only), and the FPS throttle schedules against a
+  deadline rather than a minimum gap — Android ran the same aliasing rule as iOS and lost the
+  same ~44% of frames whenever the source rate sat near the target. `startStreamSession` also
+  treats a stalled stream as stale there, so a restart mints a fresh texture rather than
+  handing back the frozen one. The one deliberate difference is the message: iOS reports its
+  frame-queue depth, Android has no such queue to report, because the Flow collector consumes
+  frames sequentially.
 - iOS: the every-30-frames log reports arrivals, renders and queue depth. It previously counted
   only post-throttle frames and sat below the throttle's early return, so a wedged throttle
   silenced it exactly as a dead stream did.

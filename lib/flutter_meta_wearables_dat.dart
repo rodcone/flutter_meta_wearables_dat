@@ -178,6 +178,22 @@ class StreamSessionError {
   /// `sessionEndedByDevice` (the device ended the session; the stream stops
   /// with it) and `capabilityDenied`.
   ///
+  /// **Plugin-level codes** (raised by this plugin, with no SDK error behind
+  /// them; identical on both platforms):
+  /// - `stoppedForBackground` — the app was backgrounded without background
+  ///   streaming enabled, so the plugin ended the session on purpose. A
+  ///   terminal [StreamSessionState.stopped] follows. Not a fault.
+  /// - `frameStalled` — the stream still reports
+  ///   [StreamSessionState.streaming] but no video frame has arrived for
+  ///   1.5 seconds, so the preview is frozen. Neither SDK raises anything in
+  ///   this situation; without this code an app cannot tell a frozen stream
+  ///   from a camera pointed at something that isn't moving. The plugin does
+  ///   not restart the stream — call [MetaWearablesDat.stopStreamSession] then
+  ///   [MetaWearablesDat.startStreamSession] to recover, and use the new
+  ///   texture ID. The `message` says whether frames stopped arriving from the
+  ///   SDK (the usual case, a transport stall) or arrived but failed to reach
+  ///   the texture (a plugin fault worth reporting).
+  ///
   /// When this is `datAppOnTheGlassesUpdateRequired`, call
   /// [MetaWearablesDat.openDATGlassesAppUpdate] to prompt the user to update
   /// the DAT app on the glasses — streaming won't work until they do.
@@ -201,6 +217,13 @@ class StreamSessionError {
 
   /// Returns true if camera permission was denied.
   bool get isPermissionDenied => code == 'permissionDenied';
+
+  /// Returns true if the stream is still nominally streaming but has stopped
+  /// delivering frames, leaving the `Texture` frozen on its last frame.
+  ///
+  /// Recoverable: stop the session and start a new one. The plugin will not do
+  /// that for you, because a restart changes the texture ID.
+  bool get isFrameStalled => code == 'frameStalled';
 
   @override
   String toString() => 'StreamSessionError($code): $message';
