@@ -30,6 +30,30 @@
   whose simulator slices do not currently build — there is nowhere to run an XCTest
   against it. A debug `assert(Thread.isMainThread)` covers the same invariant at
   runtime on device.
+- **iOS `raw`: stop handing Flutter the SDK's own pixel buffer.** `CMSampleBufferGetImageBuffer`
+  returns a buffer from a pool inside the SDK. `PixelBufferTexture` held the latest one until
+  the next frame replaced it, and the engine retained another between `copyPixelBuffer()` and
+  the render — two of the SDK's buffers held indefinitely, on a pool the plugin neither owns
+  nor can size. When the capture pipeline wants a free buffer and finds none, it stops
+  producing: no error, no state change, `Stream.state` still `.streaming`, preview frozen.
+  Frames now copy into a plugin-owned `CVPixelBufferPool` after the FPS throttle, so only
+  rendered frames pay the memcpy and the SDK's buffer is released immediately. **`raw` on iOS
+  is no longer zero-copy.** Corroboration: `hvc1` never froze (VideoToolbox decodes into its
+  own buffer) and Android never froze (`FrameProcessor` converts I420 into its own bitmap).
+  Measured in isolation this took the freeze from ~30 s to ~3-4 min; it has not been measured
+  in combination with the platform-thread fix above.
+- **New `frameStalled` error code on `streamSessionErrorStream()`.** A watchdog polls while the
+  stream reports `.streaming` and raises it after 3 s without a frame, so a frozen preview is
+  no longer indistinguishable from a static scene. Excluded: `paused` (SDK-driven) and the
+  deliberate background stop. Reporting only — a restart mints a new texture id, which is the
+  app's call. The message states whether frames stopped arriving from the SDK or arrived and
+  failed to reach the texture, and carries the plugin's own queue depth, so a stall says which
+  side it came from rather than leaving it to be guessed.
+- iOS: the every-30-frames log reports arrivals, renders and queue depth. It previously counted
+  only post-throttle frames and sat below the throttle's early return, so a wedged throttle
+  silenced it exactly as a dead stream did.
+- Example: `frameStalled` joins the recoverable-error set, so the stream screen demonstrates
+  restart-on-stall through the existing retry machinery.
 - **Example: migrated to the `UIScene` lifecycle, which iOS 27 requires to launch at
   all.** Plugin registration moved to `didInitializeImplicitFlutterEngine` — the
   implicit engine does not exist when the app delegate launches, so
