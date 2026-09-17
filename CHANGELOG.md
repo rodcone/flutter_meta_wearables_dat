@@ -2,6 +2,44 @@
 
 - Add vendor-neutral native video-frame consumer registries on iOS and Android
   for sibling plugins that need sustained processing without Dart byte copies.
+- **iOS: `videoFramesStream()` delivered nothing at all.** `VideoFrameStreamHandler`
+  invoked its `FlutterEventSink` from a private serial queue, but Flutter requires
+  channel messages to be sent from the platform thread. The engine flagged it —
+  "sent a message from a non-platform thread" on
+  `flutter_meta_wearables_dat/video_frames` — and the frames never reached Dart, so
+  an app whose liveness check hangs off that stream saw a permanently dead feed and
+  restarted its session on a loop. The texture preview was unaffected, which is why
+  this stayed hidden: only consumers of the frame stream ever noticed. Both codecs
+  now deliver on the platform thread. Frame *preparation* stays off it — the pixel
+  copy and the HEVC NAL scan still run on the caller's queue, and only the finished
+  payload crosses over.
+- iOS: the frame handler's sink is lock-guarded rather than queue-confined.
+  `hasListener` read it without synchronisation on every frame,
+  `onListen`/`onCancel` blocked the platform thread on `sinkQueue.sync`, and a
+  cancel landing between the listener check and delivery could invoke a torn-down
+  sink. The sink is now re-read on the platform thread immediately before use, so a
+  cancel in that window is honoured.
+- iOS: deliveries to the platform thread are bounded (8 in flight) and surplus
+  frames are dropped with a periodic log, rather than letting a busy main thread
+  accumulate an unbounded backlog of ~1.8 MB payloads. Frame ordering is unchanged:
+  emissions come from one serial queue, so they reach the main queue in order.
+- CI: a new `platform-thread-affinity` job asserts that every iOS stream handler
+  invoking an event sink shows a platform-thread hop. Verified to fail on the
+  unfixed handler and pass on the fixed one. It is a source check rather than a unit
+  test because the handler's SwiftPM target links the vendored MWDAT xcframeworks,
+  whose simulator slices do not currently build — there is nowhere to run an XCTest
+  against it. A debug `assert(Thread.isMainThread)` covers the same invariant at
+  runtime on device.
+- **Example: migrated to the `UIScene` lifecycle, which iOS 27 requires to launch at
+  all.** Plugin registration moved to `didInitializeImplicitFlutterEngine` — the
+  implicit engine does not exist when the app delegate launches, so
+  `window?.rootViewController` is nil in `didFinishLaunchingWithOptions`. A
+  `SceneDelegate` now handles scene URL events; the previous
+  `application(_:open:options:)` override invoked `handleUrl` *into* Dart on the
+  plugin's channel, which nothing has ever handled — registration callbacks arrive
+  through `app_links`. The plugin itself needed no change: it already observes
+  lifecycle through `NotificationCenter` rather than the application delegate, for
+  exactly this reason.
 
 ## 0.9.2
 

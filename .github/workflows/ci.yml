@@ -218,6 +218,49 @@ jobs:
   # behind pub.dev's "pub points"; --exit-code-threshold 0 fails the job when
   # any points are lost (max - granted > 0), so every release stays at
   # 160/160. Runs on a clean checkout so pana resolves the package itself.
+  platform-thread-affinity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Flutter requires channel messages to be sent from the platform thread.
+      # `VideoFrameStreamHandler` invoked its sink from a private serial queue
+      # instead, which the engine reports as "sent a message from a
+      # non-platform thread" and which left `videoFramesStream()` delivering
+      # nothing at all on iOS — a silent failure, since the texture preview
+      # kept working and only consumers of the frame stream were affected.
+      #
+      # Every other handler already hopped to the main actor, so this was one
+      # file out of step rather than a design gap. The invariant is cheap to
+      # state and would have caught it: a handler that invokes an event sink
+      # must show evidence of a platform-thread hop.
+      #
+      # Deliberately a source check rather than a unit test. The handler lives
+      # in a SwiftPM target that links the vendored MWDAT xcframeworks, whose
+      # simulator slices do not currently build, so there is nowhere to run an
+      # XCTest against it. A debug `assert(Thread.isMainThread)` in the
+      # delivery path covers the same invariant at runtime on device.
+      - name: Event sinks are invoked on the platform thread
+        run: |
+          FAIL=0
+          for f in ios/flutter_meta_wearables_dat/Sources/flutter_meta_wearables_dat/*StreamHandler.swift; do
+            SENDS=$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$f" | grep -cE '[Ss]ink\??\(|events\??\(' || true)
+            if [ "$SENDS" -eq 0 ]; then
+              echo "skip $(basename "$f") — no sink invocation"
+              continue
+            fi
+            if grep -qE '@MainActor|DispatchQueue\.main|Thread\.isMainThread' "$f"; then
+              echo "OK   $(basename "$f") — $SENDS sink call(s), hops to the platform thread"
+            else
+              echo "ERROR: $(basename "$f") invokes an event sink with no platform-thread hop"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" -ne 0 ]; then
+            echo "Send channel messages from the platform thread — dispatch to main before calling the sink."
+            exit 1
+          fi
+          echo "OK: every stream handler that sends to Dart hops to the platform thread"
+
   pana:
     runs-on: ubuntu-latest
     strategy:

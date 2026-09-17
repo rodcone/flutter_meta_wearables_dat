@@ -8,11 +8,22 @@ import Foundation
 /// serialization is skipped entirely when `hasListener` is false so there
 /// is no per-frame cost for apps that don't need the feed.
 final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
+    /// Guarded by `sinkLock`. Written from the platform thread in
+    /// `onListen`/`onCancel`, read from the SDK's frame queue on every frame.
     private var eventSink: FlutterEventSink?
-    private let sinkQueue = DispatchQueue(
-        label: "io.rodcone.mwdat.video_frames",
-        qos: .userInitiated
-    )
+    private let sinkLock = NSLock()
+
+    /// Payloads handed to the platform thread but not yet delivered.
+    ///
+    /// Every frame has to hop to the platform thread (see `send`), and a busy
+    /// main thread must not be allowed to accumulate an unbounded backlog of
+    /// multi-megabyte payloads — at 504x896 BGRA that is ~1.8 MB each. Past
+    /// this many in flight, new frames are dropped rather than queued: a
+    /// recording consumer losing frames under load is recoverable, running the
+    /// app out of memory is not.
+    private static let maxPendingDeliveries = 8
+    private var pendingDeliveries = 0
+    private var droppedFrames = 0
 
     /// HEVC IRAP NAL unit types — the pictures a decoder can start on.
     /// H.265 Table 7-1: 16-18 BLA, 19-20 IDR, 21 CRA, 22-23 reserved IRAP.
@@ -39,19 +50,90 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
     private var cachedParameterSets = Data()
     private let cacheLock = NSLock()
 
-    var hasListener: Bool { eventSink != nil }
+    var hasListener: Bool {
+        sinkLock.lock()
+        defer { sinkLock.unlock() }
+        return eventSink != nil
+    }
 
     func onListen(
         withArguments _: Any?,
         eventSink events: @escaping FlutterEventSink
     ) -> FlutterError? {
-        sinkQueue.sync { eventSink = events }
+        sinkLock.lock()
+        eventSink = events
+        droppedFrames = 0
+        sinkLock.unlock()
         return nil
     }
 
     func onCancel(withArguments _: Any?) -> FlutterError? {
-        sinkQueue.sync { eventSink = nil }
+        sinkLock.lock()
+        eventSink = nil
+        sinkLock.unlock()
         return nil
+    }
+
+    // MARK: - Delivery
+
+    /// Delivers one payload to Dart on the platform thread.
+    ///
+    /// Flutter requires channel messages to be sent from the platform thread.
+    /// This handler used to invoke the sink on its own serial queue, which the
+    /// engine reports as "sent a message from a non-platform thread" and which
+    /// left the frames undelivered — `videoFramesStream()` produced nothing at
+    /// all on iOS. Every other stream handler in this plugin already hops to
+    /// the main actor; this one was the exception.
+    ///
+    /// Frame *preparation* deliberately stays off the platform thread: the
+    /// pixel copy and the NAL scan both happen on the caller's queue, and only
+    /// the finished payload crosses over.
+    private func send(_ payload: [String: Any]) {
+        sinkLock.lock()
+        guard eventSink != nil else {
+            sinkLock.unlock()
+            return
+        }
+        guard pendingDeliveries < Self.maxPendingDeliveries else {
+            droppedFrames += 1
+            let dropped = droppedFrames
+            sinkLock.unlock()
+            // Logged occasionally rather than per frame: if the platform thread
+            // is far enough behind to be dropping frames, a line per frame
+            // makes it worse.
+            if dropped % 30 == 1 {
+                NSLog(
+                    "[MWDAT] video_frames: platform thread behind, dropped \(dropped) frame(s) so far")
+            }
+            return
+        }
+        pendingDeliveries += 1
+        sinkLock.unlock()
+
+        let deliver: () -> Void = { [weak self] in
+            guard let self else { return }
+            // Re-read under the lock rather than capturing the sink above:
+            // `onCancel` can land between the check and this block running, and
+            // invoking a torn-down sink is exactly the race this avoids.
+            self.sinkLock.lock()
+            let sink = self.eventSink
+            self.pendingDeliveries = max(0, self.pendingDeliveries - 1)
+            self.sinkLock.unlock()
+            assert(
+                Thread.isMainThread,
+                "FlutterEventSink must be invoked on the platform thread")
+            sink?(payload)
+        }
+
+        // Ordering holds because emissions come from one serial queue, so the
+        // blocks reach the main queue in frame order. The fast path keeps a
+        // caller already on the platform thread from being reordered behind an
+        // async hop.
+        if Thread.isMainThread {
+            deliver()
+        } else {
+            DispatchQueue.main.async(execute: deliver)
+        }
     }
 
     /// Drops the cached parameter sets. Called when a stream session starts,
@@ -75,7 +157,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         pixelBuffer: CVPixelBuffer,
         ptsUs: Int64
     ) {
-        guard eventSink != nil else { return }
+        guard hasListener else { return }
 
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
@@ -98,9 +180,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             "isKeyframe": true,
         ]
 
-        sinkQueue.async { [weak self] in
-            self?.eventSink?(payload)
-        }
+        send(payload)
     }
 
     /// Emit a compressed hvc1 sample buffer. Extracts the CMBlockBuffer bytes
@@ -112,7 +192,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         sampleBuffer: CMSampleBuffer,
         ptsUs: Int64
     ) {
-        guard eventSink != nil else { return }
+        guard hasListener else { return }
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
             return
         }
@@ -213,9 +293,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             "isKeyframe": selfContained,
         ]
 
-        sinkQueue.async { [weak self] in
-            self?.eventSink?(payload)
-        }
+        send(payload)
     }
 
     /// What a single walk of an access unit's NAL units established.

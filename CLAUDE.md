@@ -38,7 +38,9 @@ rm -rf example/ios/Runner.xcworkspace/xcshareddata/swiftpm
 cd example/android && ./gradlew build --refresh-dependencies
 ```
 
-No test suite exists yet.
+Dart tests live in `test/` and run with `flutter test`; CI runs them in the `test` job.
+
+**There is no native test suite, and one cannot currently be run.** The plugin's SwiftPM target links the vendored MWDAT xcframeworks, whose simulator slices do not match their sources — `flutter build ios --simulator` fails with `No type named 'Permission' in module 'MWDATCore'` and similar, on the core target as well as the mock. Until that is sorted, native invariants are covered by debug `assert`s plus source checks in CI (see the `platform-thread-affinity` job).
 
 ## Architecture
 
