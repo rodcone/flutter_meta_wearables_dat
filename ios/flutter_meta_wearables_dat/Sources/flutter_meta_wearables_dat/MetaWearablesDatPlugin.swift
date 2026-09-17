@@ -127,7 +127,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private let framePool = FramePixelBufferPool()
   // Longest gap tolerated between frames while the stream still reports
   // `.streaming`. Neither SDK raises anything when delivery just stops.
-  private let frameStallTimeout: TimeInterval = 3.0
+  //
+  // 1.5 s rather than the 3 s this shipped with, now that there is device data
+  // to size it against. Arrivals run at ~29 fps (~34 ms apart) and the worst
+  // legitimate gap measured across several sessions was 222 ms, so this leaves
+  // roughly a 7x margin — while halving how long the preview sits frozen
+  // before an app can react. Recovery itself is fast: a restart on a stalled
+  // stream was back to `.streaming` in 0.4 s on device, so detection dominates
+  // the visible freeze and is the part worth shortening.
+  private let frameStallTimeout: TimeInterval = 1.5
   // Longer for the "arriving but not rendering" half: returning from background
   // on `hvc1` rebuilds the decoder, which emits nothing until the next
   // keyframe, and a false positive would make an app restart a healthy stream.

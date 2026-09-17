@@ -68,6 +68,9 @@ final class FrameLivenessTracker {
   private var inFlight = 0
   private var peakInFlight = 0
   private var lastPushInterval: CFTimeInterval?
+  /// When the next frame is due, for the throttle. A deadline rather than a
+  /// minimum gap: see `shouldPush()`.
+  private var nextPushDue: CFTimeInterval?
   private var targetFPS: Double = 30.0
 
   /// Clears per-stream history and sets the throttle's target.
@@ -87,6 +90,7 @@ final class FrameLivenessTracker {
     inFlight = 0
     peakInFlight = 0
     lastPushInterval = nil
+    nextPushDue = nil
     targetFPS = max(1.0, fps)
     os_unfair_lock_unlock(&lock)
   }
@@ -116,25 +120,27 @@ final class FrameLivenessTracker {
     os_unfair_lock_unlock(&lock)
   }
 
-  /// Whether this frame should be pushed to the texture, per the FPS throttle.
+  /// Whether this frame is due, per the FPS throttle.
+  ///
+  /// A deadline, not a minimum gap. The old rule — drop anything arriving less
+  /// than `1/targetFPS` after the last push — aliases badly whenever the source
+  /// rate sits near the target. Measured on device: a 29 fps stream against a
+  /// 30 fps target rendered at 16 fps, because every gap that jittered under
+  /// 33.3 ms was dropped and the next one landed at ~68 ms. Nearly half the
+  /// frames were discarded for no benefit. Against a deadline, a source at or
+  /// below the target passes through untouched, and a faster one is still
+  /// decimated to the target.
   ///
   /// A pure decision — it stamps nothing. The clock advances in `notePush()`,
   /// once the frame has actually reached the texture, so a pipeline that passes
-  /// the throttle and then fails to push still reads as stalled. Stamping here
-  /// would record pushes that never happened and hide the one fault the
-  /// watchdog exists to catch.
-  ///
-  /// A non-positive delta — which a monotonic clock should never produce, but
-  /// which would wedge the pipeline permanently if it did — passes rather than
-  /// throttles.
+  /// the throttle and then fails to push still reads as stalled.
   func shouldPush() -> Bool {
     let now = CACurrentMediaTime()
     os_unfair_lock_lock(&lock)
     defer { os_unfair_lock_unlock(&lock) }
 
-    guard let last = lastPush else { return true }
-    let elapsed = now - last
-    return !(elapsed > 0 && elapsed < 1.0 / targetFPS)
+    guard let due = nextPushDue else { return true }
+    return now >= due
   }
 
   /// Records that a frame reached the Flutter texture.
@@ -144,6 +150,11 @@ final class FrameLivenessTracker {
     lastPushInterval = lastPush.map { now - $0 }
     lastPush = now
     framesPushed += 1
+    // Advance from the previous deadline so the cadence does not drift, but
+    // never schedule in the past: after a stall that would let a burst through
+    // while it caught up.
+    let base = nextPushDue ?? now
+    nextPushDue = max(now, base + 1.0 / targetFPS)
     os_unfair_lock_unlock(&lock)
   }
 

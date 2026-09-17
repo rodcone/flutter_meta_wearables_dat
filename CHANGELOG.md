@@ -42,8 +42,17 @@
   own buffer) and Android never froze (`FrameProcessor` converts I420 into its own bitmap).
   Measured in isolation this took the freeze from ~30 s to ~3-4 min; it has not been measured
   in combination with the platform-thread fix above.
+- **iOS: the FPS throttle was discarding nearly half the stream.** It dropped any frame
+  arriving less than `1/targetFPS` after the last one, which aliases badly whenever the source
+  rate sits near the target: measured on device, a 29 fps stream against a 30 fps request
+  rendered at **16 fps** — every gap that jittered under 33.3 ms was dropped and the next
+  landed at ~68 ms. The throttle now schedules against a deadline instead of enforcing a
+  minimum gap, so a source at or below the target passes through untouched and a faster one is
+  still decimated to the target. In simulation against the measured jitter, 29 fps in now gives
+  28.5 fps out instead of 19.7, and 60 fps in gives exactly 30 instead of 24 — the old rule
+  under-delivered in both regimes, not just near the target.
 - **New `frameStalled` error code on `streamSessionErrorStream()`.** A watchdog polls while the
-  stream reports `.streaming` and raises it after 3 s without a frame, so a frozen preview is
+  stream reports `.streaming` and raises it after 1.5 s without a frame, so a frozen preview is
   no longer indistinguishable from a static scene. Excluded: `paused` (SDK-driven) and the
   deliberate background stop. Reporting only — a restart mints a new texture id, which is the
   app's call. The message states whether frames stopped arriving from the SDK or arrived and
