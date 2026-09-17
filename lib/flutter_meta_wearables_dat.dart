@@ -185,14 +185,15 @@ class StreamSessionError {
   ///   terminal [StreamSessionState.stopped] follows. Not a fault.
   /// - `frameStalled` — the stream still reports
   ///   [StreamSessionState.streaming] but no video frame has arrived for
-  ///   1.5 seconds, so the preview is frozen. Neither SDK raises anything in
-  ///   this situation; without this code an app cannot tell a frozen stream
-  ///   from a camera pointed at something that isn't moving. The plugin does
-  ///   not restart the stream — call [MetaWearablesDat.stopStreamSession] then
-  ///   [MetaWearablesDat.startStreamSession] to recover, and use the new
-  ///   texture ID. The `message` says whether frames stopped arriving from the
-  ///   SDK (the usual case, a transport stall) or arrived but failed to reach
-  ///   the texture (a plugin fault worth reporting).
+  ///   1.5 seconds, so frame delivery is stalled. Short stalls can recover
+  ///   without a state transition; the plugin reports each detected episode
+  ///   once and re-arms after frame arrival and texture delivery are healthy
+  ///   again. If delivery does not resume, call
+  ///   [MetaWearablesDat.stopStreamSession] followed by
+  ///   [MetaWearablesDat.startStreamSession], and use the new texture ID. The
+  ///   `message` says whether frames stopped arriving from the SDK (the usual
+  ///   case, a transport stall) or arrived but failed to reach the texture (a
+  ///   plugin fault worth reporting).
   ///
   /// When this is `datAppOnTheGlassesUpdateRequired`, call
   /// [MetaWearablesDat.openDATGlassesAppUpdate] to prompt the user to update

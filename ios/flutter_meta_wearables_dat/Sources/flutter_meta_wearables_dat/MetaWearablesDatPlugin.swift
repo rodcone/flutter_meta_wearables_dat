@@ -951,7 +951,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if arrivalStalled {
       message = String(
         format: "No video frame has arrived from the SDK for %.1fs while the stream reports streaming "
-          + "(queued: %d, peak %d). The preview is frozen. Restart the session to recover.",
+          + "(queued: %d, peak %d). Frame delivery is paused and may recover automatically. "
+          + "If it does not resume, restart the session.",
         sinceArrival, stats.inFlight, stats.peakInFlight
       )
     } else {

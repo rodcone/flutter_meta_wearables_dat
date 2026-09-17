@@ -75,10 +75,13 @@
 - **New `frameStalled` error code on `streamSessionErrorStream()`.** A watchdog polls while the
   stream reports `.streaming` and raises it after 1.5 s without a frame, so a frozen preview is
   no longer indistinguishable from a static scene. Excluded: `paused` (SDK-driven) and the
-  deliberate background stop. Reporting only — a restart mints a new texture id, which is the
-  app's call. The message states whether frames stopped arriving from the SDK or arrived and
-  failed to reach the texture, and carries the plugin's own queue depth, so a stall says which
-  side it came from rather than leaving it to be guessed.
+  deliberate background stop. Short stalls can recover without a state transition; the signal
+  is latched once per detected episode and re-arms after arrival and texture delivery are healthy
+  again. The diagnostic no longer claims every stall requires a restart. If delivery stays
+  stalled, restarting still mints a new texture id and remains the app's call. The message states
+  whether frames stopped arriving from the SDK or arrived and failed to reach the texture, and
+  carries the plugin's own queue depth, so a stall says which side it came from rather than
+  leaving it to be guessed.
 - **Android: the same two fixes, so the platforms stay in step.** `frameStalled` is emitted by
   an identical watchdog (1.5 s arrival bound, 6 s render bound, `PAUSED` and the deliberate
   background stop excluded, latched, reporting only), and the FPS throttle schedules against a

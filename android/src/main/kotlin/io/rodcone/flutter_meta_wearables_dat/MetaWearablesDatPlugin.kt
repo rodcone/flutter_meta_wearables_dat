@@ -1765,8 +1765,8 @@ class MetaWearablesDatPlugin :
                     "No video frame has arrived from the SDK for " +
                             "${"%.1f".format(sinceArrival / 1_000_000_000.0)}s while the stream " +
                             "reports streaming (arrived: ${stats.framesArrived}, " +
-                            "rendered: ${stats.framesPushed}). The preview is frozen. " +
-                            "Restart the session to recover."
+                            "rendered: ${stats.framesPushed}). Frame delivery is paused and may " +
+                            "recover automatically. If it does not resume, restart the session."
                 } else {
                     "Frames are arriving but have not reached the texture for " +
                             "${"%.1f".format(sincePush / 1_000_000_000.0)}s " +
