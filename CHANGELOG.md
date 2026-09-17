@@ -42,6 +42,14 @@
   own buffer) and Android never froze (`FrameProcessor` converts I420 into its own bitmap).
   Measured in isolation this took the freeze from ~30 s to ~3-4 min; it has not been measured
   in combination with the platform-thread fix above.
+- **Retraction: Bluetooth Classic does not cap medium streams at ~15 fps.** 0.9.1 reported that
+  a 24 fps medium stream averages ~14 fps there and advised staying at 15 fps or lower; 0.9.2
+  re-measured it against a control and concluded "the shortfall is the transport's". Both
+  readings came from a log line that counted only frames surviving the FPS throttle, and the
+  throttle was discarding roughly half of them — so both arms of that A/B were halved by the
+  same defect and the control proved nothing. Measured at the point of arrival instead, a
+  30 fps medium stream on Bluetooth Classic delivers ~29 fps. The transport was not the limit.
+  The README guidance derived from it has been removed.
 - **iOS: the FPS throttle was discarding nearly half the stream.** It dropped any frame
   arriving less than `1/targetFPS` after the last one, which aliases badly whenever the source
   rate sits near the target: measured on device, a 29 fps stream against a 30 fps request
