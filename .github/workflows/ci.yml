@@ -261,6 +261,23 @@ jobs:
           fi
           echo "OK: every stream handler that sends to Dart hops to the platform thread"
 
+      # MWDAT video frames wrap SDK-owned sample buffers. Processing them after
+      # the publisher callback returns can retain the SDK's capture pool and
+      # eventually stop delivery without an SDK error or state transition.
+      - name: iOS SDK frames are consumed within the publisher callback
+        run: |
+          PLUGIN=ios/flutter_meta_wearables_dat/Sources/flutter_meta_wearables_dat/MetaWearablesDatPlugin.swift
+          CALLBACK=$(grep -A 25 'videoFramePublisher.listen' "$PLUGIN")
+          if ! echo "$CALLBACK" | grep -q 'self.frameQueue.sync'; then
+            echo "ERROR: videoFramePublisher must synchronously consume SDK-owned frames"
+            exit 1
+          fi
+          if echo "$CALLBACK" | grep -q 'self.frameQueue.async'; then
+            echo "ERROR: videoFramePublisher retains SDK-owned frames across an async hop"
+            exit 1
+          fi
+          echo "OK: SDK-owned frames are consumed before the publisher callback returns"
+
   pana:
     runs-on: ubuntu-latest
     strategy:

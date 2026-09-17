@@ -31,17 +31,22 @@
   against it. A debug `assert(Thread.isMainThread)` covers the same invariant at
   runtime on device.
 - **iOS `raw`: stop handing Flutter the SDK's own pixel buffer.** `CMSampleBufferGetImageBuffer`
-  returns a buffer from a pool inside the SDK. `PixelBufferTexture` held the latest one until
-  the next frame replaced it, and the engine retained another between `copyPixelBuffer()` and
-  the render — two of the SDK's buffers held indefinitely, on a pool the plugin neither owns
-  nor can size. When the capture pipeline wants a free buffer and finds none, it stops
-  producing: no error, no state change, `Stream.state` still `.streaming`, preview frozen.
-  Frames now copy into a plugin-owned `CVPixelBufferPool` after the FPS throttle, so only
-  rendered frames pay the memcpy and the SDK's buffer is released immediately. **`raw` on iOS
-  is no longer zero-copy.** Corroboration: `hvc1` never froze (VideoToolbox decodes into its
-  own buffer) and Android never froze (`FrameProcessor` converts I420 into its own bitmap).
-  Measured in isolation this took the freeze from ~30 s to ~3-4 min; it has not been measured
-  in combination with the platform-thread fix above.
+  returns a buffer owned by the SDK. Frames now copy into a plugin-owned `CVPixelBufferPool`
+  after the FPS throttle, so Flutter and its rasterizer never retain the SDK's buffer.
+  **`raw` on iOS is no longer zero-copy.** This reduced the frequency of the freeze but did not
+  eliminate it; the publisher callback lifetime fix below addresses the remaining retention.
+- **The stream freeze is not transport-specific.** Reproduced on the Wi-Fi transport at ~5
+  minutes, in the same shape as Bluetooth Classic: frames stop arriving from the SDK, the
+  stream still reports `.streaming`, nothing is raised on any SDK channel, and the plugin's own
+  frame queue is empty throughout. Switching transport is therefore not a workaround.
+- **iOS: consume SDK frames before returning from the publisher callback.** The plugin used to
+  retain each `VideoFrame` and its SDK-owned `CMSampleBuffer` across an asynchronous dispatch to
+  its serial frame queue. Meta's native CameraAccess sample processes frames synchronously in
+  the publisher callback and ran the same `raw` / medium / 30 fps configuration for almost 20
+  minutes without a freeze, while the plugin repeatedly froze within about five minutes. The
+  plugin now dispatches synchronously to its serial queue, preserving frame and hvc1 decode
+  order while releasing the SDK frame before the callback returns. The production path then ran
+  beyond its previous failure window without a freeze in device testing.
 - **Retraction: Bluetooth Classic does not cap medium streams at ~15 fps.** 0.9.1 reported that
   a 24 fps medium stream averages ~14 fps there and advised staying at 15 fps or lower; 0.9.2
   re-measured it against a control and concluded "the shortfall is the transport's". Both
@@ -59,6 +64,14 @@
   still decimated to the target. In simulation against the measured jitter, 29 fps in now gives
   28.5 fps out instead of 19.7, and 60 fps in gives exactly 30 instead of 24 — the old rule
   under-delivered in both regimes, not just near the target.
+
+  **Correction to the above, for anyone reading the 0.9.3 history:** this landed on Android but
+  not on iOS. The iOS deadline logic went into `FrameLivenessTracker.shouldPush()`, which
+  nothing called — the plugin's frame path still ran the old `Date()`-based floor, so iOS kept
+  rendering ~16 fps from a ~29 fps source through the whole of 0.9.3's development. Caught from
+  a field log whose arrived/rendered ratio stayed at 1.78 after the "fix". The throttle is now
+  actually wired to it, and the dead `frameCounter` / `lastFrameSendTime` state that made the
+  old path look live has been deleted.
 - **New `frameStalled` error code on `streamSessionErrorStream()`.** A watchdog polls while the
   stream reports `.streaming` and raises it after 1.5 s without a frame, so a frozen preview is
   no longer indistinguishable from a static scene. Excluded: `paused` (SDK-driven) and the
