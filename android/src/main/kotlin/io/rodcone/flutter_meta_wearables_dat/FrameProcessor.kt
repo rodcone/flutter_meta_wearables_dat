@@ -9,6 +9,29 @@ import com.meta.wearable.dat.camera.types.VideoFrame
 import java.nio.ByteBuffer
 
 /**
+ * A read of the frame pipeline's clocks, taken together.
+ *
+ * `null` means no frame of that kind has been seen on this stream yet — a
+ * stream that has not produced its first frame is starting up, not stalled.
+ */
+internal data class FrameLiveness(
+        val sinceArrivalNanos: Long?,
+        val sincePushNanos: Long?,
+        /**
+         * Nanos since the *first* arrival. The baseline for "frames are arriving
+         * but none has ever reached the surface" — without it a pipeline that
+         * never pushed anything looks healthy forever, because the arrival clock
+         * keeps resetting and there is no push clock to compare against.
+         */
+        val sinceFirstArrivalNanos: Long?,
+        val framesArrived: Int,
+        val framesPushed: Int,
+) {
+    val hasArrived: Boolean
+        get() = sinceArrivalNanos != null
+}
+
+/**
  * Handles I420 → ARGB frame conversion, FPS throttling, and SurfaceTexture rendering.
  * Reuses byte/pixel arrays and bitmaps across frames to avoid per-frame GC pressure.
  */
@@ -19,8 +42,22 @@ internal class FrameProcessor {
     }
 
     private var targetFPS: Int = 30
-    private var lastFrameSendTime: Long? = null
-    private var frameCount: Int = 0
+
+    // Frame liveness, mirroring iOS's FrameLivenessTracker. `0L` means "never",
+    // so these stay unboxed primitives the stall watchdog can read from another
+    // coroutine without allocating per frame. Arrival is stamped by the stream's
+    // collect loop before any gate; push only when a frame reaches the surface.
+    // A freeze with both flat is the stream going quiet; arrivals climbing with
+    // pushes flat is a plugin fault.
+    @Volatile private var firstArrivalNanos: Long = 0L
+    @Volatile private var lastArrivalNanos: Long = 0L
+    @Volatile private var lastPushNanos: Long = 0L
+    @Volatile private var framesArrived: Int = 0
+    @Volatile private var framesPushed: Int = 0
+
+    // When the next frame is due. A deadline rather than a minimum gap — see
+    // `processFrame`.
+    @Volatile private var nextPushDueNanos: Long = 0L
     private var reusableBitmap: Bitmap? = null
     private var reusableByteArray: ByteArray? = null
     private var reusablePixelArray: IntArray? = null
@@ -41,9 +78,51 @@ internal class FrameProcessor {
 
     fun configure(fps: Int) {
         targetFPS = fps
-        frameCount = 0
-        lastFrameSendTime = null
+        framesArrived = 0
+        framesPushed = 0
+        firstArrivalNanos = 0L
+        lastArrivalNanos = 0L
+        lastPushNanos = 0L
+        nextPushDueNanos = 0L
         released = false
+    }
+
+    /**
+     * Records that the SDK delivered a frame. Called by the stream's collect
+     * loop before any gate, so it tracks delivery regardless of what the plugin
+     * then does with the frame.
+     */
+    fun noteArrival() {
+        val now = System.nanoTime()
+        if (firstArrivalNanos == 0L) firstArrivalNanos = now
+        lastArrivalNanos = now
+        framesArrived++
+    }
+
+    /**
+     * Restarts the push clock without counting a push, for when the surface is
+     * legitimately expected to have gone undrawn — returning to the foreground
+     * after background streaming. Without it the first watchdog tick after
+     * foregrounding measures the whole background window.
+     */
+    fun resyncPushClock() {
+        lastPushNanos = System.nanoTime()
+        nextPushDueNanos = 0L
+    }
+
+    /** A read of the frame clocks, relative to now. */
+    fun liveness(): FrameLiveness {
+        val now = System.nanoTime()
+        val arrival = lastArrivalNanos
+        val push = lastPushNanos
+        val first = firstArrivalNanos
+        return FrameLiveness(
+                sinceArrivalNanos = if (arrival == 0L) null else now - arrival,
+                sincePushNanos = if (push == 0L) null else now - push,
+                sinceFirstArrivalNanos = if (first == 0L) null else now - first,
+                framesArrived = framesArrived,
+                framesPushed = framesPushed,
+        )
     }
 
     fun setRotation(degrees: Int) {
@@ -75,10 +154,18 @@ internal class FrameProcessor {
         if (released) return
 
         // FPS throttling
+        // A deadline, not a minimum gap. Dropping anything that arrives less
+        // than `1/targetFPS` after the last push aliases badly whenever the
+        // source rate sits near the target: measured on iOS, a 29 fps stream
+        // against a 30 fps request rendered at 16 fps, because every gap that
+        // jittered under the interval was dropped and the next landed at twice
+        // it. Android ran the same rule and had the same flaw. Against a
+        // deadline, a source at or below the target passes through untouched
+        // and a faster one is still decimated to the target.
         val minIntervalNanos = 1_000_000_000L / targetFPS
         val now = System.nanoTime()
-        val lastTime = lastFrameSendTime
-        if (lastTime != null && (now - lastTime) < minIntervalNanos) {
+        val lastTime = lastPushNanos
+        if (nextPushDueNanos != 0L && now < nextPushDueNanos) {
             return
         }
 
@@ -126,13 +213,23 @@ internal class FrameProcessor {
                 return
             }
 
-            lastFrameSendTime = now
-            frameCount++
-            if (frameCount % 30 == 0 && lastTime != null) {
+            lastPushNanos = now
+            framesPushed++
+            // Advance from the previous deadline so the cadence does not drift,
+            // but never schedule in the past: after a stall that would let a
+            // burst through while it caught up.
+            val base = if (nextPushDueNanos == 0L) now else nextPushDueNanos
+            nextPushDueNanos = maxOf(now, base + minIntervalNanos)
+
+            // Report arrivals alongside renders. Counting only what survived the
+            // throttle made this line go silent on a wedged throttle exactly as
+            // it does on a dead stream, so reading it could not tell the two
+            // apart.
+            if (framesPushed % 30 == 0 && lastTime != 0L) {
                 val actualFPS = 1_000_000_000.0 / (now - lastTime)
                 Log.d(
                         TAG,
-                        "Texture path — $frameCount frames, " +
+                        "Texture path — arrived: $framesArrived, pushed: $framesPushed, " +
                                 "target: $targetFPS, actual: ${"%.1f".format(actualFPS)} FPS"
                 )
             }
@@ -166,8 +263,12 @@ internal class FrameProcessor {
             reusableBitmap = null
             reusableByteArray = null
             reusablePixelArray = null
-            lastFrameSendTime = null
-            frameCount = 0
+            firstArrivalNanos = 0L
+            lastArrivalNanos = 0L
+            lastPushNanos = 0L
+            nextPushDueNanos = 0L
+            framesArrived = 0
+            framesPushed = 0
             lastTargetWidth = 0
             lastTargetHeight = 0
             rotationDegrees = 0
