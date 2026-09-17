@@ -1948,13 +1948,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // handler outlives the session, so drop any parameter sets cached from
       // a previous stream before the first frame of this one arrives.
       videoFrameHandler.resetParameterSetCache()
+      NSLog(
+        "[MWDAT] frame ownership experiment: processing synchronously inside the SDK callback")
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         // Stamp arrival on the SDK's own callback, not inside the frame queue:
         // those are different instants, and conflating them makes a backlog of
         // ours look like the transport going quiet.
         self.liveness.noteArrival()
-        self.frameQueue.async {
+        // Keep the serial queue — hvc1 decode order depends on it — but wait for
+        // processing to finish before returning Meta's publisher callback.
+        //
+        // The old async hop retained `videoFrame` and its SDK-owned
+        // `CMSampleBuffer` beyond the callback's lifetime. Meta's CameraAccess
+        // sample consumes each frame synchronously and has now streamed the
+        // failing raw / medium / 30 configuration for twenty minutes without a
+        // stall. This is the one remaining ownership difference between that
+        // path and ours. `sync` preserves ordering while ensuring the SDK gets
+        // its frame back before its callback returns.
+        self.frameQueue.sync {
           self.processAndSendFrame(videoFrame)
         }
       }
