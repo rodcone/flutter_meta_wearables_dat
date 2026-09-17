@@ -72,26 +72,29 @@
     <array>
         <string>fb-viewapp</string>
     </array>
-	<!-- iOS camera transport = Bluetooth Classic (see README → "Choose your camera
-	     transport"). Declaring the ExternalAccessory protocol is the whole switch: while
-	     it is present the SDK satisfies its high-bandwidth lease over Bluetooth Classic
-	     and never brings up Wi-Fi. Nothing to provision, no "Join Wi-Fi Network" prompt,
-	     no paid-account entitlements — which is why the example app defaults to it.
-	     To switch to Wi-Fi instead (higher bandwidth, more setup): comment out the
-	     ExternalAccessory protocol and the `external-accessory` background mode below,
-	     un-comment the HotspotConfiguration + wifi-info entitlements in
-	     Runner.entitlements, and add back NSLocalNetworkUsageDescription +
-	     NSBonjourServices (`_bonjour._tcp`). -->
+	<!-- iOS camera transport = Wi-Fi (see README → "Choose your camera transport").
+	     This branch is an experiment: the example normally ships Bluetooth Classic,
+	     which needs no entitlements and so signs on a free Apple Developer account.
+	     Wi-Fi needs HotspotConfiguration + wifi-info provisioned on the App ID, which
+	     a free account cannot have.
+	     Matches Meta's own CameraAccess sample, which ships Wi-Fi: the ExternalAccessory
+	     protocol is absent, `external-accessory` is absent from UIBackgroundModes, and
+	     NSLocalNetworkUsageDescription + NSBonjourServices are declared.
+	     To switch back to Bluetooth Classic: un-comment the ExternalAccessory protocol
+	     below, restore `external-accessory` to UIBackgroundModes, re-comment the Wi-Fi
+	     keys further down, and empty Runner.entitlements. Delete the app from the device
+	     before reinstalling either way — stale accessory pairing state keeps the old
+	     transport alive.
 	<key>UISupportedExternalAccessoryProtocols</key>
      <array>
          <string>com.meta.ar.wearable</string>
      </array>
+	-->
 	  <key>UIBackgroundModes</key>
      <array>
          <string>audio</string>
          <string>bluetooth-central</string>
          <string>bluetooth-peripheral</string>
-         <string>external-accessory</string>
      </array>
 	  <!-- Meta Wearables Device Access Toolkit Setup -->
  	<key>MWDAT</key>
@@ -119,16 +122,15 @@
 	<string>This app needs access to your camera to stream video.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs access to your microphone to stream video.</string>
-	<!-- Wi-Fi transport only: once the SDK joins the glasses' Wi-Fi AP, traffic to the
+	<!-- Wi-Fi transport: once the SDK joins the glasses' Wi-Fi AP, traffic to the
 	     glasses is local-network traffic, so iOS requires a usage string + the Bonjour
-	     service the SDK browses to find them. Not needed on Bluetooth Classic.
+	     service the SDK browses to find them. Not needed on Bluetooth Classic. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>This allows your phone to find and connect to your glasses over Wi-Fi.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_bonjour._tcp</string>
 	</array>
-	-->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
