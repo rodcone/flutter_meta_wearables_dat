@@ -42,6 +42,14 @@
   own buffer) and Android never froze (`FrameProcessor` converts I420 into its own bitmap).
   Measured in isolation this took the freeze from ~30 s to ~3-4 min; it has not been measured
   in combination with the platform-thread fix above.
+- **The stream freeze is not transport-specific.** Reproduced on the Wi-Fi transport at ~5
+  minutes, in the same shape as Bluetooth Classic: frames stop arriving from the SDK, the
+  stream still reports `.streaming`, nothing is raised on any SDK channel, and the plugin's own
+  frame queue is empty throughout. Both transports also show the same run-up — the instantaneous
+  render rate sagging over the last few seconds before delivery stops. Switching transport is
+  therefore not a workaround, and the fault sits above the link, in the DAT session layer.
+  Meta's own CameraAccess sample ships the Wi-Fi configuration, which is what this was tested
+  against.
 - **Retraction: Bluetooth Classic does not cap medium streams at ~15 fps.** 0.9.1 reported that
   a 24 fps medium stream averages ~14 fps there and advised staying at 15 fps or lower; 0.9.2
   re-measured it against a control and concluded "the shortfall is the transport's". Both
@@ -59,6 +67,14 @@
   still decimated to the target. In simulation against the measured jitter, 29 fps in now gives
   28.5 fps out instead of 19.7, and 60 fps in gives exactly 30 instead of 24 — the old rule
   under-delivered in both regimes, not just near the target.
+
+  **Correction to the above, for anyone reading the 0.9.3 history:** this landed on Android but
+  not on iOS. The iOS deadline logic went into `FrameLivenessTracker.shouldPush()`, which
+  nothing called — the plugin's frame path still ran the old `Date()`-based floor, so iOS kept
+  rendering ~16 fps from a ~29 fps source through the whole of 0.9.3's development. Caught from
+  a field log whose arrived/rendered ratio stayed at 1.78 after the "fix". The throttle is now
+  actually wired to it, and the dead `frameCounter` / `lastFrameSendTime` state that made the
+  old path look live has been deleted.
 - **New `frameStalled` error code on `streamSessionErrorStream()`.** A watchdog polls while the
   stream reports `.streaming` and raises it after 1.5 s without a frame, so a frozen preview is
   no longer indistinguishable from a static scene. Excluded: `paused` (SDK-driven) and the
