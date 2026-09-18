@@ -1,62 +1,34 @@
 ## 0.9.2
 
-**Breaking:** `startStreamSession(fps: double)` is now
-`startStreamSession(frameRate: StreamFrameRate)`. Migrate `fps: 24` to
-`frameRate: StreamFrameRate.fps24`.
+**Breaking:** Replace `startStreamSession(fps: 24)` with
+`startStreamSession(frameRate: StreamFrameRate.fps24)`.
 
-* Add native `videoFramesStream(maxFramesPerSecond:)` sampling on iOS and
-  Android, avoiding unnecessary full-rate frame conversion and channel copies.
-* Fix iOS `videoFramesStream()`: deliver events on Flutter's platform thread,
-  honor listener cancellation and ordering, bound channel backpressure, and
-  convert raw 420v/420f frames to the documented BGRA format.
-* Add native video-frame consumer registries for sibling iOS and Android
-  plugins that need sustained processing without Dart byte copies.
-* Fix iOS raw-frame ownership and callback lifetime so the SDK's pixel buffers
-  are released before its publisher callback returns, addressing a source of
-  silent stream freezes.
-* Fix near-target FPS throttling and add the `frameStalled` watchdog on both
-  platforms.
-* Migrate the example app to the UIScene lifecycle required by iOS 27.
-* Correct the Bluetooth Classic frame-rate guidance and document that Wi-Fi
-  prompts again after a full session stop/start.
+* Add native frame sampling and consumer registries; fix iOS platform-thread
+  delivery, backpressure, and raw BGRA conversion.
+* Fix iOS frame lifetime freezes, FPS throttling, and `frameStalled`
+  reporting on both platforms.
+* Migrate the example to the iOS 27 UIScene lifecycle and update transport docs.
 
 ## 0.9.1
 
-* **`stopStreamSession()` now ends the whole device session, on both platforms.** The glasses' stream-ended tone hangs off the session lifecycle, so the previous stream-only stop never chimed. Matches Meta's CameraAccess sample and the 0.9.0 background path. Trade-off: the next `startStreamSession()` is a full reconnect rather than a fast re-attach, and the future resolves only once the stop handshake completes.
-* **iOS: `enableBackgroundStreaming()` / `disableBackgroundStreaming()` no longer freeze the UI.** AVAudioSession activation/deactivation block for hundreds of milliseconds and ran inline on the platform thread; all session work now runs on a serial queue, and both futures resolve when the work has actually landed.
-* **iOS: fixed a 0.9.0 defect that could strand the glasses after a background-stop timeout.** One expired background assertion latched a flag that made every later teardown release the stream mid-cascade, so the next start was rejected. Reset on foreground.
-* **iOS `hvc1`: fixed green/corrupted frames and preview freezes.** Recording keyframes are keyed off a NAL scan for true IRAP pictures, with parameter sets prepended only where genuinely missing — `isKeyframe` now means "self-decodable as shipped". The decoder rebuilds itself from in-band parameter sets when the glasses switch quality mid-stream, and the FPS throttle no longer drops frames ahead of the decoder (only the texture push is throttled).
-* **iOS: the background-streaming keep-alive no longer requests Bluetooth HFP.** It routed glasses audio onto an 8 kHz SCO link that contended with the video transport for the Bluetooth radio. Note the active keep-alive still shares the Bluetooth Classic radio with video — prefer 15 fps or lower while enabled there, or the Wi-Fi transport. The audio route is now logged on activation and on route changes (`[MWDAT-ROUTE]`).
-* iOS: stream and session stop-waits are event-driven instead of 50 ms polls, and the background-stop error-suppression window now tracks the teardown's real worst case (15 s, was 5 s).
-* Android: `AppForegroundTracker` now logs under the same tag as every other component, so `adb logcat -s MetaWearablesDat` no longer drops the lifecycle lines.
-* `CameraPermissionException.toString()` now includes the `details` map; example app: `flutter build apk` no longer fails on a `lintVitalRelease` false positive.
+* Make `stopStreamSession()` end the device session; the next start performs a
+  full reconnect.
+* Fix iOS background-streaming stalls and teardown, and remove Bluetooth HFP
+  from its keep-alive.
+* Fix iOS hvc1 decoding and improve diagnostics and Android example builds.
 
 ## 0.9.0
 
-**BREAKING CHANGES**
+**Breaking:** Backgrounding now stops the session unless
+`enableBackgroundStreaming()` was called. Apps must clear the texture ID on
+`StreamSessionState.stopped`; sessions do not auto-resume.
 
-* **Backgrounding now stops the stream session unless you opt in.** Previously the plugin only stopped *rendering* while backgrounded on iOS and did nothing at all on Android, leaving a live session, an attached camera capability and a registered texture with no event to Dart — apps were left holding a texture id and a `Texture` frozen on its last frame. Now a true background transition (app backgrounded or phone locked) tears the `DeviceSession` down, emits a terminal `stopped`, and releases the texture. Call `enableBackgroundStreaming()` **before** `startStreamSession()` to keep the old behaviour.
-* **There is no auto-resume.** Returning to the foreground does nothing by design — the plugin never reactivates the glasses camera on its own. Show your placeholder and let the user restart.
-* **`startStreamSession()` now fails with `APP_BACKGROUNDED`** while the app is backgrounded and background streaming is off. Checked on entry and again at the final commit point, so a start that was in flight when the app backgrounded cannot leave a live stream running with nothing to stop it.
-* **New `stoppedForBackground` code on `streamSessionErrorStream()`**, emitted just before the terminal `stopped`, so a deliberate stop is distinguishable from a fault. Exclude it from any retry logic.
-* **iOS: raw-codec frames now reach `videoFramesStream()` while backgrounded.** `emitRaw` sat after the background guard while `emitHvc1` sat before it, so with `VideoCodec.raw` — the default — nothing was delivered in background despite the documented contract. Raw frames are also no longer FPS-throttled, matching hvc1 and Android; apps with a low `fps` subscribed to `videoFramesStream()` will see more callbacks.
-
-**What you must change**
-
-Subscribe to `streamSessionStateStream()` and clear your texture id on `StreamSessionState.stopped`. An app that caches the texture id and never listens will render an unregistered texture — black or frozen — after any background round trip.
-
-**Fixes**
-
-* **Android emitted no terminal `stopped` on any plugin-initiated teardown.** The state handler was detached before `stream.stop()`, so the SDK's `STOPPING`/`STOPPED` transitions were never observed. This affected every stop, not just backgrounding — the same bug iOS fixed in 0.8.1.
-* **iOS lifecycle detection missed `UISceneDelegate` hosts entirely.** Flutter stops forwarding application lifecycle events once a host adopts scenes, and current Flutter templates are scene-based by default, so the plugin was silently blind on a growing share of apps. Lifecycle is now observed via `NotificationCenter`, which UIKit posts in both cases.
-* Android gained process-wide foreground detection, which it had no notion of at all. Rotation, activity transitions and multi-window do not count as backgrounding.
-* Teardown noise no longer surfaces as an error: the SDK's `videoStreamingError` during a deliberate background stop is suppressed for a bounded window, so apps stop showing "Video streaming encountered an error" for a clean shutdown.
-* Android: the foreground service no longer resurrects itself after process death with default branding, no engine and an unstoppable wake lock; it also stops when the user swipes the app from Recents. The wake lock gained a timeout backstop.
-* Transient interruptions never stop a stream: Control Center, the notification shade, the app-switcher preview and incoming-call banners on iOS; rotation and split-screen on Android.
-
-**Added**
-
-* `MetaWearablesDat.isBackgroundStreamingEnabled()` — reads the flag from the native side. Dart's copy drifts across a hot restart, where the isolate resets but the audio session or foreground service keeps running.
+* Add `stoppedForBackground`, reject foreground-only starts with
+  `APP_BACKGROUNDED`, and suppress expected teardown errors.
+* Deliver iOS raw frames in the background and fix lifecycle/state reporting
+  on both platforms.
+* Harden Android background handling and add
+  `MetaWearablesDat.isBackgroundStreamingEnabled()`.
 
 ## 0.8.1
 * **Stream teardowns are no longer silent.** iOS detached the stream-state handler *before* stopping the camera, so every plugin-initiated teardown — the device-availability watchdog, or a `DeviceSession` that stopped underneath us — reached Dart as nothing at all. Apps were left holding a live texture id and a `Texture` frozen on its last frame, with no state change and no error. `streamSessionStateStream()` now emits a terminal `stopped` on those paths.
