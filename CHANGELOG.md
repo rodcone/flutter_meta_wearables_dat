@@ -1,9 +1,10 @@
-## 0.8.1
+## 0.9.0
 **BEHAVIOUR CHANGES**
 * iOS: `stopStreamSession()` now ends the underlying `DeviceSession` instead of keeping it cached for the process lifetime. The glasses' stream-ended tone hangs off the session lifecycle, so the cached session meant the tone only played when the app was killed. The Dart API is unchanged, but every `startStreamSession()` after a stop now pays a full session reconnect instead of a fast capability re-add.
 * iOS: session teardown waits for the `DeviceSession` to actually reach `.stopped` (10 s backstop) before releasing it, so the session-end handshake reliably reaches the glasses.
 * iOS: stream teardown is now event-driven: the plugin holds its `Camera`/`Stream` references until the SDK reports `.stopped` (30 s backstop) instead of polling for 3 s and releasing unconditionally. The SDK's stop cascade holds the `Stream` weakly; the old bounded release could cancel the stop handshake mid-flight and strand a live capability on the glasses.
 * iOS: `stopStreamSession()` with no active stream still ends a lingering `DeviceSession` left behind by a failed start (the call still rejects with `SESSION_NOT_FOUND` afterwards).
+* iOS: `stopStreamSession()` resolves as soon as the stop is initiated and finishes the stop handshake in the background, rather than awaiting it. Awaiting meant the Dart Future could hang for as long as both backstops allow (30 s stream + 10 s session, sequential) against an unresponsive device, where pre-0.9.0 it returned in about 3 s. The handshake still has to complete for the glasses to chime, so a `startStreamSession()` issued during it waits for the teardown to finish before creating a new session.
 
 **FIXES**
 * iOS: `AVAudioSession` activation moved off the main thread. The method channel delivers `enableBackgroundStreaming` / `disableBackgroundStreaming` on main, and activation blocks for hundreds of milliseconds while the media server negotiates, so every stream start and stop froze the host app's UI.

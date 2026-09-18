@@ -117,6 +117,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // await an in-flight teardown rather than skip it.
   private var teardownTask: Task<Void, Never>?
   private var teardownSeq = 0
+  // A `stopStreamSession` teardown still running after the Dart call resolved.
+  // The Dart Future no longer waits out the stop handshake (up to
+  // `streamStopTimeout` + `deviceSessionStopTimeout`), so a fast restart can
+  // now arrive mid-teardown — something Dart could not do while the call was
+  // blocking. `startStreamSession` awaits this before creating a session, or
+  // it would build a second one while the old is still stopping.
+  private var deviceSessionTeardownTask: Task<Void, Never>?
   private var frameCounter: Int = 0
   private var currentTargetFPS: Double = 30.0
   private var lastFrameSendTime: Date?
@@ -1235,6 +1242,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       isStartingSession = true
       defer { isStartingSession = false }
 
+      // Wait out a teardown that `stopStreamSession` left running. Without
+      // this, a restart issued right after stop would see `deviceSession ==
+      // nil` (cleared before the stop handshake begins) and start a second
+      // session while the first was still stopping.
+      if let pendingTeardown = deviceSessionTeardownTask {
+        await pendingTeardown.value
+        if deviceSessionTeardownTask == pendingTeardown { deviceSessionTeardownTask = nil }
+      }
+
       // A non-nil `streamSession` only counts as active if it's not terminal:
       // the SDK can stop a stream (hinges, thermal) without clearing our
       // reference, so check the actual state. Same selection → return the
@@ -1364,7 +1380,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // cached — end it anyway so the glasses aren't left mid-session
         // (which would also mute the next start's tone).
         if deviceSession != nil {
-          await teardownDeviceSession()
+          startDetachedDeviceSessionTeardown()
         }
         result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
         return
@@ -1375,9 +1391,29 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // Meta's CameraAccess sample ends its session as the user-visible stop
       // and chimes; keeping the session cached here (the old behaviour, for
       // fast restarts) meant the glasses only chimed when the app was killed.
-      await teardownDeviceSession()
+      //
+      // The handshake runs detached and the Dart call resolves now. Awaiting it
+      // here made `stopStreamSession` hang for as long as the two backstops
+      // allow (`streamStopTimeout` + `deviceSessionStopTimeout`, sequential)
+      // against a wedged SDK, where the pre-0.9.0 behaviour was ~3s. The stop
+      // still has to complete for the glasses to chime, so it is tracked in
+      // `deviceSessionTeardownTask` and awaited by the next start.
+      startDetachedDeviceSessionTeardown()
       result(true)
     }
+  }
+
+  /// Runs `teardownDeviceSession` without blocking the caller, tracking it so
+  /// `startStreamSession` can await it. Replaces an in-flight teardown's slot
+  /// only after chaining onto it, so no teardown is dropped.
+  @MainActor
+  private func startDetachedDeviceSessionTeardown() {
+    let pending = deviceSessionTeardownTask
+    let task = Task { @MainActor in
+      if let pending { await pending.value }
+      await self.teardownDeviceSession()
+    }
+    deviceSessionTeardownTask = task
   }
 
   func capturePhoto(call: FlutterMethodCall, result: @escaping FlutterResult) {
