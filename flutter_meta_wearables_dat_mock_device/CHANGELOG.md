@@ -1,6 +1,13 @@
+## 0.9.3
+
+* Align version with the core package's 0.9.3 release. No API changes in this
+  package. This release also includes the unpublished 0.9.2 migration from
+  `startStreamSession(fps: double)` to `frameRate: StreamFrameRate`.
+
 ## 0.9.2
 
-* Align version with core package's 0.9.2 release. No API changes in this package. Note the core release replaces `startStreamSession(fps: double)` with `frameRate: StreamFrameRate`, which also applies to mock-backed streams.
+* This version was tagged but was not published to pub.dev. Its changes ship in
+  0.9.3.
 
 ## 0.9.1
 

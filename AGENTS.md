@@ -227,7 +227,7 @@ Add to `Info.plist`:
 
 The SDK streams over one of two high-bandwidth links; on iOS you pick which **purely via `Info.plist` + entitlements** (no runtime switch). Configure exactly one.
 
-**Wi‑Fi (recommended)** — higher bandwidth. Triggers a one-time *"Join Wi‑Fi Network"* prompt and joins the glasses' AP (phone internet then rides cellular). **Trade-off:** that AP association makes `startStreamSession()` roughly **10 seconds** slower to first frame than Bluetooth Classic's near-instant connect. Add to `Info.plist`:
+**Wi‑Fi (recommended)** — higher bandwidth. Joins the glasses' AP (phone internet then rides cellular) and triggers a *"Join Wi‑Fi Network"* prompt whenever a new device session acquires the Wi‑Fi link. Because `stopStreamSession()` ends the whole device session, DAT 0.9.0 prompts again after each stop/start cycle; the plugin cannot accept or suppress the native alert. Keeping the stream active avoids another join. **Trade-off:** that AP association makes `startStreamSession()` roughly **10 seconds** slower to first frame than Bluetooth Classic's near-instant connect. Add to `Info.plist`:
 
 ```xml
 <key>NSLocalNetworkUsageDescription</key>

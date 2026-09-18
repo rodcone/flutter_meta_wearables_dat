@@ -229,7 +229,7 @@ Add the following to your `Info.plist`:
 
 The DAT SDK streams video over one of two high-bandwidth links to the glasses, and on iOS **you select which one purely through `Info.plist` + entitlements — there is no runtime switch.** Configure exactly one.
 
-**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture). On the first stream the SDK joins the glasses' Wi‑Fi access point, so iOS shows a one-time *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. **Trade-off:** that Wi‑Fi association makes `startStreamSession()` noticeably slower — expect roughly **10 seconds** more before the first frame arrives, vs. Bluetooth Classic's near-instant connect. Add to `Info.plist`:
+**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture). The SDK joins the glasses' Wi‑Fi access point, so iOS shows a *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. DAT 0.9.0 requests that consent again whenever a new device session acquires the Wi‑Fi link. Since `stopStreamSession()` ends the whole device session, expect another prompt after each stop/start cycle; iOS does not let the plugin accept or suppress it. Keeping the stream active avoids another join. **Trade-off:** that Wi‑Fi association makes `startStreamSession()` noticeably slower — expect roughly **10 seconds** more before the first frame arrives, vs. Bluetooth Classic's near-instant connect. Add to `Info.plist`:
 
 ```xml
 <key>NSLocalNetworkUsageDescription</key>
