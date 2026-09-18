@@ -1111,8 +1111,20 @@ class MetaWearablesDat {
   /// the underlying capture). On Android, [enableBackgroundStreaming] is
   /// what keeps the OS from killing the streaming process once the app
   /// leaves the foreground.
-  static Stream<VideoFrame> videoFramesStream() {
-    return MetaWearablesDatPlatform.instance.videoFramesStream();
+  ///
+  /// Set [maxFramesPerSecond] when the consumer samples frames for ML/OCR and
+  /// does not need the full recording rate. Sampling happens natively before
+  /// pixel conversion or payload copying, so `2.5` sends roughly one frame
+  /// every 400 ms instead of copying every frame across the platform channel.
+  /// Leave it null to receive every frame. Values must be finite, greater than
+  /// zero and no greater than 30.
+  static Stream<VideoFrame> videoFramesStream({
+    double? maxFramesPerSecond,
+  }) {
+    _validateVideoFrameRate(maxFramesPerSecond);
+    return MetaWearablesDatPlatform.instance.videoFramesStream(
+      maxFramesPerSecond: maxFramesPerSecond,
+    );
   }
 
   /// Opens the Meta AI app to the DAT-app-update screen on the connected
@@ -1140,5 +1152,16 @@ class MetaWearablesDat {
   /// active device changes.
   static Stream<DeviceState> deviceStateStream() {
     return MetaWearablesDatPlatform.instance.deviceStateStream();
+  }
+}
+
+void _validateVideoFrameRate(double? value) {
+  if (value == null) return;
+  if (!value.isFinite || value <= 0 || value > 30) {
+    throw ArgumentError.value(
+      value,
+      'maxFramesPerSecond',
+      'Must be finite, greater than 0, and no greater than 30.',
+    );
   }
 }

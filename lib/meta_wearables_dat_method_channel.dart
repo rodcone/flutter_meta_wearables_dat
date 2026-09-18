@@ -323,8 +323,11 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
-  Stream<VideoFrame> videoFramesStream() {
-    return videoFramesEventChannel.receiveBroadcastStream().map((
+  Stream<VideoFrame> videoFramesStream({double? maxFramesPerSecond}) {
+    final arguments = maxFramesPerSecond == null
+        ? null
+        : <String, dynamic>{'maxFramesPerSecond': maxFramesPerSecond};
+    return videoFramesEventChannel.receiveBroadcastStream(arguments).map((
       dynamic event,
     ) {
       final map = Map<String, dynamic>.from(event as Map);

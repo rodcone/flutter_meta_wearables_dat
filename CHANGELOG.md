@@ -1,5 +1,10 @@
 ## Unreleased
 
+- **`videoFramesStream()` can now sample before native payload creation.** Pass
+  `maxFramesPerSecond` (for example `2.5` for one OCR frame every 400 ms) to
+  avoid converting and copying the full camera rate across the EventChannel.
+  `null` preserves the every-frame recording behavior. iOS and Android apply
+  the same monotonic-deadline sampler before their BGRA/I420 byte copy.
 - **iOS: `videoFramesStream()` raw frames now honor the documented BGRA
   contract.** DAT supplies `VideoCodec.raw` as 420v bi-planar YUV, but the
   plugin copied the pixel buffer's top-level base address and labelled those

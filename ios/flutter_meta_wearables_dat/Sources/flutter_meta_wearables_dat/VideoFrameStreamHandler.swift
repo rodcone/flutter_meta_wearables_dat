@@ -25,6 +25,8 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
     private var pendingDeliveries = 0
     private var droppedFrames = 0
     private var sinkGeneration: UInt64 = 0
+    private var samplingInterval: TimeInterval?
+    private var nextSampleDeadline: TimeInterval?
 
     /// Converts DAT's documented 420v raw frames into the BGRA layout promised
     /// by the public Dart API. Accessed only from the serial frame queue.
@@ -62,13 +64,27 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
     }
 
     func onListen(
-        withArguments _: Any?,
+        withArguments arguments: Any?,
         eventSink events: @escaping FlutterEventSink
     ) -> FlutterError? {
+        let maxFramesPerSecond = (arguments as? [String: Any])?["maxFramesPerSecond"]
+            as? NSNumber
+        if let maxFramesPerSecond {
+            let value = maxFramesPerSecond.doubleValue
+            guard value.isFinite, value > 0, value <= 30 else {
+                return FlutterError(
+                    code: "INVALID_ARGUMENT",
+                    message: "maxFramesPerSecond must be finite, greater than 0, and no greater than 30.",
+                    details: value)
+            }
+        }
+
         sinkLock.lock()
         sinkGeneration &+= 1
         eventSink = events
         droppedFrames = 0
+        samplingInterval = maxFramesPerSecond.map { 1.0 / $0.doubleValue }
+        nextSampleDeadline = nil
         sinkLock.unlock()
         return nil
     }
@@ -77,6 +93,8 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         sinkLock.lock()
         sinkGeneration &+= 1
         eventSink = nil
+        samplingInterval = nil
+        nextSampleDeadline = nil
         sinkLock.unlock()
         return nil
     }
@@ -107,6 +125,21 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         guard eventSink != nil else {
             sinkLock.unlock()
             return nil
+        }
+        if let samplingInterval {
+            let now = ProcessInfo.processInfo.systemUptime
+            if let nextSampleDeadline, now < nextSampleDeadline {
+                sinkLock.unlock()
+                return nil
+            }
+            if let nextSampleDeadline {
+                let elapsedIntervals = floor(
+                    (now - nextSampleDeadline) / samplingInterval) + 1
+                self.nextSampleDeadline = nextSampleDeadline
+                    + elapsedIntervals * samplingInterval
+            } else {
+                nextSampleDeadline = now + samplingInterval
+            }
         }
         guard pendingDeliveries < Self.maxPendingDeliveries else {
             droppedFrames += 1
@@ -171,6 +204,9 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         cacheLock.lock()
         cachedParameterSets = Data()
         cacheLock.unlock()
+        sinkLock.lock()
+        nextSampleDeadline = nil
+        sinkLock.unlock()
         rawConverter.reset()
     }
 

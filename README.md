@@ -618,7 +618,11 @@ await MetaWearablesDat.disableBackgroundStreaming();
 **Accessing frames while backgrounded.** The normal `Texture` widget can't render in background (no GPU access), but the plugin exposes every decoded frame to Dart via `videoFramesStream()`, in both foreground and background. Useful for recording to disk, running ML, or re-muxing:
 
 ```dart
-final sub = MetaWearablesDat.videoFramesStream().listen((frame) {
+final sub = MetaWearablesDat.videoFramesStream(
+  // Optional: sample natively before conversion/copy for ML or OCR.
+  // Omit this to receive every frame for recording.
+  maxFramesPerSecond: 2.5,
+).listen((frame) {
   // frame.codec                   → VideoCodec.raw or VideoCodec.hvc1
   // frame.bytes                   → Uint8List of the raw codec payload
   // frame.width / frame.height    → pixel dimensions
@@ -632,7 +636,7 @@ Frame bytes are codec-dependent:
 - `VideoCodec.raw` — **iOS**: BGRA pixel data at `bytesPerRow * height` bytes; rows may carry trailing padding for alignment, so iterate rows with `VideoFrame.bytesPerRow` rather than assuming `width * 4`. **Android**: I420 planar YUV, tightly packed at `width * height * 3/2` bytes (Y plane, then U, then V; `bytesPerRow` is `null`).
 - `VideoCodec.hvc1` (iOS only) — raw HEVC elementary stream (`hvc1` NAL units). Keyframes carry the parameter sets (VPS/SPS/PPS) inline, so the stream is self-contained and can be fed straight into `ffmpeg -i file.h265 out.mp4` or muxed into an mp4 track via `ffmpeg_kit_flutter`.
 
-Subscribing to `videoFramesStream()` is zero-cost when there are no listeners — the plugin won't encode or emit anything until the first subscriber attaches. Always subscribe *before* calling `startStreamSession()` if you want to capture the opening keyframe.
+Subscribing to `videoFramesStream()` is zero-cost when there are no listeners — the plugin won't encode or emit anything until the first subscriber attaches. For ML/OCR, use `maxFramesPerSecond` to sample natively before iOS YUV→BGRA conversion or either platform's payload copy; for lossless recording, leave it `null` (the default). Always subscribe *before* calling `startStreamSession()` if you want to capture the opening keyframe. Keep one configured upstream subscription active at a time; an EventChannel has one native listener configuration.
 
 **Native frame consumers.** Sibling native plugins that need sustained raw-frame
 processing can register directly with
