@@ -261,4 +261,12 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     );
     return ok ?? false;
   }
+
+  @override
+  Future<Uint8List?> grabCurrentFrame() async {
+    final bytes = await methodChannel.invokeMethod<Uint8List>(
+      'grabCurrentFrame',
+    );
+    return bytes;
+  }
 }

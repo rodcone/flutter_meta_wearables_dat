@@ -1,6 +1,7 @@
 // ignore_for_file: public_member_api_docs
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat/meta_wearables_dat_method_channel.dart';
@@ -133,5 +134,9 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     throw UnimplementedError(
       'restartActiveDeviceMonitoring() has not been implemented.',
     );
+  }
+
+  Future<Uint8List?> grabCurrentFrame() {
+    throw UnimplementedError('grabCurrentFrame() has not been implemented.');
   }
 }

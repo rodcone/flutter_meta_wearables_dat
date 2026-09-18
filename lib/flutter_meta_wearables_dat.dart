@@ -229,7 +229,10 @@ class MetaWearablesDat {
   /// Stream of active device availability changes.
   /// Returns true when an active device is available, false otherwise.
   static Stream<bool> activeDeviceStream() {
-    return MetaWearablesDatPlatform.instance.activeDeviceStream();
+    return MetaWearablesDatPlatform.instance.activeDeviceStream().map((isActive) {
+      debugPrint('[MetaWearablesDAT] activeDeviceStream event: isActive=$isActive');
+      return isActive;
+    });
   }
 
   /// Restarts active device monitoring on Android.
@@ -238,5 +241,11 @@ class MetaWearablesDat {
   /// No-op on iOS.
   static Future<bool> restartActiveDeviceMonitoring() {
     return MetaWearablesDatPlatform.instance.restartActiveDeviceMonitoring();
+  }
+
+  /// Grabs the current video frame directly from native memory as JPEG bytes.
+  /// Returns null if no frame is available.
+  static Future<Uint8List?> grabCurrentFrame() {
+    return MetaWearablesDatPlatform.instance.grabCurrentFrame();
   }
 }
