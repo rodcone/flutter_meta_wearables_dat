@@ -118,7 +118,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // await an in-flight teardown rather than skip it.
   private var teardownTask: Task<Void, Never>?
   private var teardownSeq = 0
-  private var frameCounter: Int = 0
   // Frame arrival/push clocks for the stall watchdog, lock-guarded because the
   // SDK's frame queue writes them and the main actor reads them.
   private let liveness = FrameLivenessTracker()
@@ -144,7 +143,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var frameWatchdogTask: Task<Void, Never>?
   private var didReportFrameStall = false
   private var currentTargetFPS: Int = 30
-  private var lastFrameSendTime: Date?
   private var pixelBufferTexture: PixelBufferTexture?
   private var textureId: Int64?
   private var currentVideoCodec: MWDATCamera.VideoCodec = .raw
@@ -953,7 +951,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     if arrivalStalled {
       message = String(
         format: "No video frame has arrived from the SDK for %.1fs while the stream reports streaming "
-          + "(queued: %d, peak %d). The preview is frozen. Restart the session to recover.",
+          + "(queued: %d, peak %d). Frame delivery is paused and may recover automatically. "
+          + "If it does not resume, restart the session.",
         sinceArrival, stats.inFlight, stats.peakInFlight
       )
     } else {
@@ -1063,8 +1062,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       decompressionSession = nil
       sessionParameterSets = []
     }
-    frameCounter = 0
-    lastFrameSendTime = nil
     framePool.invalidate()
     liveness.reset(targetFPS: 0)
     videoStreamSizeHandler.reset()
@@ -1399,35 +1396,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let height = CVPixelBufferGetHeight(pixelBuffer)
     videoStreamSizeHandler.send(width: width, height: height)
 
-    let now = Date()
-    let minInterval = 1.0 / Double(currentTargetFPS)
-
-    let timeSinceLastFrame: TimeInterval
-    if let lastSendTime = lastFrameSendTime {
-      timeSinceLastFrame = now.timeIntervalSince(lastSendTime)
-      if timeSinceLastFrame < minInterval {
-        return
-      }
-    } else {
-      timeSinceLastFrame = 0
-    }
-
-    // Update timing + counters regardless of whether we push to the texture.
-    lastFrameSendTime = now
-    frameCounter += 1
-
-    // Report arrivals and queue depth alongside the rendered count. Counting
-    // only post-throttle frames made this line go silent on a wedged throttle
-    // exactly as it does on a dead stream, so reading it could not tell the two
-    // apart — which is the first question worth asking when the preview stops.
-    if frameCounter % 30 == 0 && timeSinceLastFrame > 0 {
-      let actualFPS = 1.0 / timeSinceLastFrame
-      let stats = liveness.snapshot()
-      NSLog(
-        "[MWDAT] arrived: \(stats.framesArrived), pushed: \(frameCounter), "
-          + "queued: \(stats.inFlight) (peak \(stats.peakInFlight)), "
-          + "target: \(currentTargetFPS), actual: \(String(format: "%.1f", actualFPS)) FPS")
-    }
+    // The throttle lives in `liveness`, which schedules against a deadline
+    // rather than enforcing a minimum gap between pushes. The old rule dropped
+    // anything arriving sooner than `1/targetFPS` after the last push, which
+    // aliases badly when the source rate sits near the target: measured on
+    // device, a 29 fps stream against a 30 fps request rendered at 16 fps.
+    guard liveness.shouldPush() else { return }
 
     // Hand the texture a buffer we own. For `raw`, `pixelBuffer` is the SDK's
     // own pooled buffer, and both the texture and the engine hold onto it for
@@ -1451,6 +1425,18 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     texture.latestPixelBuffer = renderBuffer
     textureRegistry?.textureFrameAvailable(texId)
     liveness.notePush()
+
+    // Report arrivals alongside renders. Counting only post-throttle frames
+    // made this line go silent on a wedged throttle exactly as it does on a
+    // dead stream, so reading it could not tell the two apart — which is the
+    // first question worth asking when the preview stops.
+    let stats = liveness.snapshot()
+    if stats.framesPushed % 30 == 0, let gap = stats.lastPushInterval, gap > 0 {
+      NSLog(
+        "[MWDAT] arrived: \(stats.framesArrived), pushed: \(stats.framesPushed), "
+          + "queued: \(stats.inFlight) (peak \(stats.peakInFlight)), "
+          + "target: \(currentTargetFPS), actual: \(String(format: "%.1f", 1.0 / gap)) FPS")
+    }
   }
 
   // MARK: - HEVC Decompression (for hvc1 codec)
@@ -1926,8 +1912,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       textureId = texId
       currentTargetFPS = fps
       currentVideoCodec = videoCodec
-      frameCounter = 0
-      lastFrameSendTime = nil
       liveness.reset(targetFPS: Double(fps))
       NSLog("[MWDAT] Registered texture \(texId)")
 
@@ -1964,14 +1948,22 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // `streamErrorHandler` once its `session` is set below. The frame
       // handler outlives the session, so drop any parameter sets cached from
       // a previous stream before the first frame of this one arrives.
-      videoFrameHandler.resetParameterSetCache()
+      videoFrameHandler.resetSessionState()
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         // Stamp arrival on the SDK's own callback, not inside the frame queue:
         // those are different instants, and conflating them makes a backlog of
         // ours look like the transport going quiet.
         self.liveness.noteArrival()
-        self.frameQueue.async {
+        // Keep the serial queue — hvc1 decode order depends on it — but wait for
+        // processing to finish before returning Meta's publisher callback.
+        //
+        // `videoFrame` wraps an SDK-owned `CMSampleBuffer`. Retaining it across
+        // an async hop can keep the SDK's capture buffer alive after the
+        // publisher callback returns and eventually starve its frame pool.
+        // `sync` preserves ordering while ensuring the SDK gets its frame back
+        // before this callback returns.
+        self.frameQueue.sync {
           self.processAndSendFrame(videoFrame)
         }
       }

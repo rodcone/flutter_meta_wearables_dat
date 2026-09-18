@@ -34,6 +34,7 @@ let package = Package(
                 .linkedFramework("CoreBluetooth"),
                 .linkedFramework("Network"),
                 .linkedFramework("AVFoundation"),
+                .linkedFramework("Accelerate"),
                 .linkedFramework("VideoToolbox"),
                 .linkedLibrary("c++")
             ]

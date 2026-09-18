@@ -1340,6 +1340,7 @@ class MetaWearablesDatPlugin :
                 camera = newCamera
                 stream = newStream
                 streamStateStreamHandler?.stream = newStream
+                videoFrameStreamHandler.resetSessionState()
 
                 videoJob =
                         scope.launch(Dispatchers.Default) {
@@ -1638,14 +1639,8 @@ class MetaWearablesDatPlugin :
         val buffer = videoFrame.buffer
         val remaining = buffer.remaining()
         if (remaining <= 0) return
-        val bytes = ByteArray(remaining)
-        val originalPosition = buffer.position()
-        buffer.get(bytes, 0, remaining)
-        // Restore so the FrameProcessor can still read the same bytes.
-        buffer.position(originalPosition)
         videoFrameStreamHandler.emit(
                 codec = if (videoFrame.isCompressed) "hvc1" else "raw",
-                bytes = bytes,
                 width = videoFrame.width,
                 height = videoFrame.height,
                 ptsUs = videoFrame.presentationTimeUs,
@@ -1653,6 +1648,19 @@ class MetaWearablesDatPlugin :
                 // every frame is self-contained. Accurate for raw I420;
                 // conservative for hvc1 (not currently reachable on Android).
                 isKeyframe = true,
+                // Sampling and backpressure are checked before this provider
+                // runs, so frames Dart will not receive are never copied.
+                bytesProvider = {
+                    val bytes = ByteArray(remaining)
+                    val originalPosition = buffer.position()
+                    try {
+                        buffer.get(bytes, 0, remaining)
+                        bytes
+                    } finally {
+                        // Restore so FrameProcessor can still read the same bytes.
+                        buffer.position(originalPosition)
+                    }
+                },
         )
     }
 
@@ -1765,8 +1773,8 @@ class MetaWearablesDatPlugin :
                     "No video frame has arrived from the SDK for " +
                             "${"%.1f".format(sinceArrival / 1_000_000_000.0)}s while the stream " +
                             "reports streaming (arrived: ${stats.framesArrived}, " +
-                            "rendered: ${stats.framesPushed}). The preview is frozen. " +
-                            "Restart the session to recover."
+                            "rendered: ${stats.framesPushed}). Frame delivery is paused and may " +
+                            "recover automatically. If it does not resume, restart the session."
                 } else {
                     "Frames are arriving but have not reached the texture for " +
                             "${"%.1f".format(sincePush / 1_000_000_000.0)}s " +

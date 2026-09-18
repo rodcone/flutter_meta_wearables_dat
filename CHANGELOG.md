@@ -1,142 +1,34 @@
-## Unreleased
-
-- Add vendor-neutral native video-frame consumer registries on iOS and Android
-  for sibling plugins that need sustained processing without Dart byte copies.
-- **iOS: `videoFramesStream()` delivered nothing at all.** `VideoFrameStreamHandler`
-  invoked its `FlutterEventSink` from a private serial queue, but Flutter requires
-  channel messages to be sent from the platform thread. The engine flagged it —
-  "sent a message from a non-platform thread" on
-  `flutter_meta_wearables_dat/video_frames` — and the frames never reached Dart, so
-  an app whose liveness check hangs off that stream saw a permanently dead feed and
-  restarted its session on a loop. The texture preview was unaffected, which is why
-  this stayed hidden: only consumers of the frame stream ever noticed. Both codecs
-  now deliver on the platform thread. Frame *preparation* stays off it — the pixel
-  copy and the HEVC NAL scan still run on the caller's queue, and only the finished
-  payload crosses over.
-- iOS: the frame handler's sink is lock-guarded rather than queue-confined.
-  `hasListener` read it without synchronisation on every frame,
-  `onListen`/`onCancel` blocked the platform thread on `sinkQueue.sync`, and a
-  cancel landing between the listener check and delivery could invoke a torn-down
-  sink. The sink is now re-read on the platform thread immediately before use, so a
-  cancel in that window is honoured.
-- iOS: deliveries to the platform thread are bounded (8 in flight) and surplus
-  frames are dropped with a periodic log, rather than letting a busy main thread
-  accumulate an unbounded backlog of ~1.8 MB payloads. Frame ordering is unchanged:
-  emissions come from one serial queue, so they reach the main queue in order.
-- CI: a new `platform-thread-affinity` job asserts that every iOS stream handler
-  invoking an event sink shows a platform-thread hop. Verified to fail on the
-  unfixed handler and pass on the fixed one. It is a source check rather than a unit
-  test because the handler's SwiftPM target links the vendored MWDAT xcframeworks,
-  whose simulator slices do not currently build — there is nowhere to run an XCTest
-  against it. A debug `assert(Thread.isMainThread)` covers the same invariant at
-  runtime on device.
-- **iOS `raw`: stop handing Flutter the SDK's own pixel buffer.** `CMSampleBufferGetImageBuffer`
-  returns a buffer from a pool inside the SDK. `PixelBufferTexture` held the latest one until
-  the next frame replaced it, and the engine retained another between `copyPixelBuffer()` and
-  the render — two of the SDK's buffers held indefinitely, on a pool the plugin neither owns
-  nor can size. When the capture pipeline wants a free buffer and finds none, it stops
-  producing: no error, no state change, `Stream.state` still `.streaming`, preview frozen.
-  Frames now copy into a plugin-owned `CVPixelBufferPool` after the FPS throttle, so only
-  rendered frames pay the memcpy and the SDK's buffer is released immediately. **`raw` on iOS
-  is no longer zero-copy.** Corroboration: `hvc1` never froze (VideoToolbox decodes into its
-  own buffer) and Android never froze (`FrameProcessor` converts I420 into its own bitmap).
-  Measured in isolation this took the freeze from ~30 s to ~3-4 min; it has not been measured
-  in combination with the platform-thread fix above.
-- **Retraction: Bluetooth Classic does not cap medium streams at ~15 fps.** 0.9.1 reported that
-  a 24 fps medium stream averages ~14 fps there and advised staying at 15 fps or lower; 0.9.2
-  re-measured it against a control and concluded "the shortfall is the transport's". Both
-  readings came from a log line that counted only frames surviving the FPS throttle, and the
-  throttle was discarding roughly half of them — so both arms of that A/B were halved by the
-  same defect and the control proved nothing. Measured at the point of arrival instead, a
-  30 fps medium stream on Bluetooth Classic delivers ~29 fps. The transport was not the limit.
-  The README guidance derived from it has been removed.
-- **iOS: the FPS throttle was discarding nearly half the stream.** It dropped any frame
-  arriving less than `1/targetFPS` after the last one, which aliases badly whenever the source
-  rate sits near the target: measured on device, a 29 fps stream against a 30 fps request
-  rendered at **16 fps** — every gap that jittered under 33.3 ms was dropped and the next
-  landed at ~68 ms. The throttle now schedules against a deadline instead of enforcing a
-  minimum gap, so a source at or below the target passes through untouched and a faster one is
-  still decimated to the target. In simulation against the measured jitter, 29 fps in now gives
-  28.5 fps out instead of 19.7, and 60 fps in gives exactly 30 instead of 24 — the old rule
-  under-delivered in both regimes, not just near the target.
-- **New `frameStalled` error code on `streamSessionErrorStream()`.** A watchdog polls while the
-  stream reports `.streaming` and raises it after 1.5 s without a frame, so a frozen preview is
-  no longer indistinguishable from a static scene. Excluded: `paused` (SDK-driven) and the
-  deliberate background stop. Reporting only — a restart mints a new texture id, which is the
-  app's call. The message states whether frames stopped arriving from the SDK or arrived and
-  failed to reach the texture, and carries the plugin's own queue depth, so a stall says which
-  side it came from rather than leaving it to be guessed.
-- **Android: the same two fixes, so the platforms stay in step.** `frameStalled` is emitted by
-  an identical watchdog (1.5 s arrival bound, 6 s render bound, `PAUSED` and the deliberate
-  background stop excluded, latched, reporting only), and the FPS throttle schedules against a
-  deadline rather than a minimum gap — Android ran the same aliasing rule as iOS and lost the
-  same ~44% of frames whenever the source rate sat near the target. `startStreamSession` also
-  treats a stalled stream as stale there, so a restart mints a fresh texture rather than
-  handing back the frozen one. The one deliberate difference is the message: iOS reports its
-  frame-queue depth, Android has no such queue to report, because the Flow collector consumes
-  frames sequentially.
-- iOS: the every-30-frames log reports arrivals, renders and queue depth. It previously counted
-  only post-throttle frames and sat below the throttle's early return, so a wedged throttle
-  silenced it exactly as a dead stream did.
-- Example: `frameStalled` joins the recoverable-error set, so the stream screen demonstrates
-  restart-on-stall through the existing retry machinery.
-- **Example: migrated to the `UIScene` lifecycle, which iOS 27 requires to launch at
-  all.** Plugin registration moved to `didInitializeImplicitFlutterEngine` — the
-  implicit engine does not exist when the app delegate launches, so
-  `window?.rootViewController` is nil in `didFinishLaunchingWithOptions`. A
-  `SceneDelegate` now handles scene URL events; the previous
-  `application(_:open:options:)` override invoked `handleUrl` *into* Dart on the
-  plugin's channel, which nothing has ever handled — registration callbacks arrive
-  through `app_links`. The plugin itself needed no change: it already observes
-  lifecycle through `NotificationCenter` rather than the application delegate, for
-  exactly this reason.
-
 ## 0.9.2
 
-**BREAKING CHANGES** — note these ship in a *patch* release. A constraint of
-`^0.9.0` or `^0.9.1` resolves to this version on `pub upgrade`, so pin
-`flutter_meta_wearables_dat: 0.9.1` if you are not ready to migrate.
+**Breaking:** Replace `startStreamSession(fps: 24)` with
+`startStreamSession(frameRate: StreamFrameRate.fps24)`.
 
-* **`startStreamSession(fps: double)` is now `startStreamSession(frameRate: StreamFrameRate)`.** The DAT SDK accepts exactly five frame rates on both platforms (2, 7, 15, 24, 30) and its behaviour with any other value is undefined; the old `double` let callers request anything. `StreamFrameRate` makes the legal set the type, mirroring `StreamQuality`. Migration: `fps: 24` becomes `frameRate: StreamFrameRate.fps24`; the default is unchanged at 30. Closes [#34](https://github.com/rodcone/flutter_meta_wearables_dat/issues/34).
-* Example app: the frame-rate slider is now a five-way picker driven by `StreamFrameRate.values`.
+* Add native frame sampling and consumer registries; fix iOS platform-thread
+  delivery, backpressure, and raw BGRA conversion.
+* Fix iOS frame lifetime freezes, FPS throttling, and `frameStalled`
+  reporting on both platforms.
+* Migrate the example to the iOS 27 UIScene lifecycle and update transport docs.
 
 ## 0.9.1
 
-* **`stopStreamSession()` now ends the whole device session, on both platforms.** The glasses' stream-ended tone hangs off the session lifecycle, so the previous stream-only stop never chimed. Matches Meta's CameraAccess sample and the 0.9.0 background path. Trade-off: the next `startStreamSession()` is a full reconnect rather than a fast re-attach, and the future resolves only once the stop handshake completes.
-* **iOS: `enableBackgroundStreaming()` / `disableBackgroundStreaming()` no longer freeze the UI.** AVAudioSession activation/deactivation block for hundreds of milliseconds and ran inline on the platform thread; all session work now runs on a serial queue, and both futures resolve when the work has actually landed.
-* **iOS: fixed a 0.9.0 defect that could strand the glasses after a background-stop timeout.** One expired background assertion latched a flag that made every later teardown release the stream mid-cascade, so the next start was rejected. Reset on foreground.
-* **iOS `hvc1`: fixed green/corrupted frames and preview freezes.** Recording keyframes are keyed off a NAL scan for true IRAP pictures, with parameter sets prepended only where genuinely missing — `isKeyframe` now means "self-decodable as shipped". The decoder rebuilds itself from in-band parameter sets when the glasses switch quality mid-stream, and the FPS throttle no longer drops frames ahead of the decoder (only the texture push is throttled).
-* **iOS: the background-streaming keep-alive no longer requests Bluetooth HFP.** It routed glasses audio onto an 8 kHz SCO link that contended with the video transport for the Bluetooth radio. Note the active keep-alive still shares the Bluetooth Classic radio with video — prefer 15 fps or lower while enabled there, or the Wi-Fi transport. The audio route is now logged on activation and on route changes (`[MWDAT-ROUTE]`).
-* iOS: stream and session stop-waits are event-driven instead of 50 ms polls, and the background-stop error-suppression window now tracks the teardown's real worst case (15 s, was 5 s).
-* Android: `AppForegroundTracker` now logs under the same tag as every other component, so `adb logcat -s MetaWearablesDat` no longer drops the lifecycle lines.
-* `CameraPermissionException.toString()` now includes the `details` map; example app: `flutter build apk` no longer fails on a `lintVitalRelease` false positive.
+* Make `stopStreamSession()` end the device session; the next start performs a
+  full reconnect.
+* Fix iOS background-streaming stalls and teardown, and remove Bluetooth HFP
+  from its keep-alive.
+* Fix iOS hvc1 decoding and improve diagnostics and Android example builds.
 
 ## 0.9.0
 
-**BREAKING CHANGES**
+**Breaking:** Backgrounding now stops the session unless
+`enableBackgroundStreaming()` was called. Apps must clear the texture ID on
+`StreamSessionState.stopped`; sessions do not auto-resume.
 
-* **Backgrounding now stops the stream session unless you opt in.** Previously the plugin only stopped *rendering* while backgrounded on iOS and did nothing at all on Android, leaving a live session, an attached camera capability and a registered texture with no event to Dart — apps were left holding a texture id and a `Texture` frozen on its last frame. Now a true background transition (app backgrounded or phone locked) tears the `DeviceSession` down, emits a terminal `stopped`, and releases the texture. Call `enableBackgroundStreaming()` **before** `startStreamSession()` to keep the old behaviour.
-* **There is no auto-resume.** Returning to the foreground does nothing by design — the plugin never reactivates the glasses camera on its own. Show your placeholder and let the user restart.
-* **`startStreamSession()` now fails with `APP_BACKGROUNDED`** while the app is backgrounded and background streaming is off. Checked on entry and again at the final commit point, so a start that was in flight when the app backgrounded cannot leave a live stream running with nothing to stop it.
-* **New `stoppedForBackground` code on `streamSessionErrorStream()`**, emitted just before the terminal `stopped`, so a deliberate stop is distinguishable from a fault. Exclude it from any retry logic.
-* **iOS: raw-codec frames now reach `videoFramesStream()` while backgrounded.** `emitRaw` sat after the background guard while `emitHvc1` sat before it, so with `VideoCodec.raw` — the default — nothing was delivered in background despite the documented contract. Raw frames are also no longer FPS-throttled, matching hvc1 and Android; apps with a low `fps` subscribed to `videoFramesStream()` will see more callbacks.
-
-**What you must change**
-
-Subscribe to `streamSessionStateStream()` and clear your texture id on `StreamSessionState.stopped`. An app that caches the texture id and never listens will render an unregistered texture — black or frozen — after any background round trip.
-
-**Fixes**
-
-* **Android emitted no terminal `stopped` on any plugin-initiated teardown.** The state handler was detached before `stream.stop()`, so the SDK's `STOPPING`/`STOPPED` transitions were never observed. This affected every stop, not just backgrounding — the same bug iOS fixed in 0.8.1.
-* **iOS lifecycle detection missed `UISceneDelegate` hosts entirely.** Flutter stops forwarding application lifecycle events once a host adopts scenes, and current Flutter templates are scene-based by default, so the plugin was silently blind on a growing share of apps. Lifecycle is now observed via `NotificationCenter`, which UIKit posts in both cases.
-* Android gained process-wide foreground detection, which it had no notion of at all. Rotation, activity transitions and multi-window do not count as backgrounding.
-* Teardown noise no longer surfaces as an error: the SDK's `videoStreamingError` during a deliberate background stop is suppressed for a bounded window, so apps stop showing "Video streaming encountered an error" for a clean shutdown.
-* Android: the foreground service no longer resurrects itself after process death with default branding, no engine and an unstoppable wake lock; it also stops when the user swipes the app from Recents. The wake lock gained a timeout backstop.
-* Transient interruptions never stop a stream: Control Center, the notification shade, the app-switcher preview and incoming-call banners on iOS; rotation and split-screen on Android.
-
-**Added**
-
-* `MetaWearablesDat.isBackgroundStreamingEnabled()` — reads the flag from the native side. Dart's copy drifts across a hot restart, where the isolate resets but the audio session or foreground service keeps running.
+* Add `stoppedForBackground`, reject foreground-only starts with
+  `APP_BACKGROUNDED`, and suppress expected teardown errors.
+* Deliver iOS raw frames in the background and fix lifecycle/state reporting
+  on both platforms.
+* Harden Android background handling and add
+  `MetaWearablesDat.isBackgroundStreamingEnabled()`.
 
 ## 0.8.1
 * **Stream teardowns are no longer silent.** iOS detached the stream-state handler *before* stopping the camera, so every plugin-initiated teardown — the device-availability watchdog, or a `DeviceSession` that stopped underneath us — reached Dart as nothing at all. Apps were left holding a live texture id and a `Texture` frozen on its last frame, with no state change and no error. `streamSessionStateStream()` now emits a terminal `stopped` on those paths.

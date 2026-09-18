@@ -1,16 +1,17 @@
 ## 0.9.2
 
-* Align version with core package's 0.9.2 release. No API changes in this package. Note the core release replaces `startStreamSession(fps: double)` with `frameRate: StreamFrameRate`, which also applies to mock-backed streams.
+* Align with core 0.9.2 and its `frameRate` API. No mock-only API changes.
 
 ## 0.9.1
 
-* Align version with core package's 0.9.1 release. No API changes. Note the core release changes `stopStreamSession()` to end the whole device session (glasses chime; next start is a full reconnect) — mock-backed streams follow the same path.
+* Align with core 0.9.1. Mock streams now use full-session stop and reconnect.
 
 ## 0.9.0
 
-* Align version with core package's 0.9.0 release. No API changes.
-
-  Note the core package's background-streaming contract changed in a breaking way in this release, and mock-backed streams are subject to it too: backgrounding now stops the session unless `enableBackgroundStreaming()` was called. Mock behaviour on background is not fully representative of real glasses — MockDeviceKit drives the phone's camera, which iOS stops on background regardless — so validate background behaviour on hardware.
+* Align with core 0.9.0 background-streaming behavior. No mock-only API
+  changes.
+* Mock background behavior can differ on iOS because the phone camera stops in
+  the background.
 
 ## 0.8.1
 

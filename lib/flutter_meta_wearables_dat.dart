@@ -185,14 +185,15 @@ class StreamSessionError {
   ///   terminal [StreamSessionState.stopped] follows. Not a fault.
   /// - `frameStalled` — the stream still reports
   ///   [StreamSessionState.streaming] but no video frame has arrived for
-  ///   1.5 seconds, so the preview is frozen. Neither SDK raises anything in
-  ///   this situation; without this code an app cannot tell a frozen stream
-  ///   from a camera pointed at something that isn't moving. The plugin does
-  ///   not restart the stream — call [MetaWearablesDat.stopStreamSession] then
-  ///   [MetaWearablesDat.startStreamSession] to recover, and use the new
-  ///   texture ID. The `message` says whether frames stopped arriving from the
-  ///   SDK (the usual case, a transport stall) or arrived but failed to reach
-  ///   the texture (a plugin fault worth reporting).
+  ///   1.5 seconds, so frame delivery is stalled. Short stalls can recover
+  ///   without a state transition; the plugin reports each detected episode
+  ///   once and re-arms after frame arrival and texture delivery are healthy
+  ///   again. If delivery does not resume, call
+  ///   [MetaWearablesDat.stopStreamSession] followed by
+  ///   [MetaWearablesDat.startStreamSession], and use the new texture ID. The
+  ///   `message` says whether frames stopped arriving from the SDK (the usual
+  ///   case, a transport stall) or arrived but failed to reach the texture (a
+  ///   plugin fault worth reporting).
   ///
   /// When this is `datAppOnTheGlassesUpdateRequired`, call
   /// [MetaWearablesDat.openDATGlassesAppUpdate] to prompt the user to update
@@ -1110,8 +1111,20 @@ class MetaWearablesDat {
   /// the underlying capture). On Android, [enableBackgroundStreaming] is
   /// what keeps the OS from killing the streaming process once the app
   /// leaves the foreground.
-  static Stream<VideoFrame> videoFramesStream() {
-    return MetaWearablesDatPlatform.instance.videoFramesStream();
+  ///
+  /// Set [maxFramesPerSecond] when the consumer samples frames for ML/OCR and
+  /// does not need the full recording rate. Sampling happens natively before
+  /// pixel conversion or payload copying, so `2.5` sends roughly one frame
+  /// every 400 ms instead of copying every frame across the platform channel.
+  /// Leave it null to receive every frame. Values must be finite, greater than
+  /// zero and no greater than 30.
+  static Stream<VideoFrame> videoFramesStream({
+    double? maxFramesPerSecond,
+  }) {
+    _validateVideoFrameRate(maxFramesPerSecond);
+    return MetaWearablesDatPlatform.instance.videoFramesStream(
+      maxFramesPerSecond: maxFramesPerSecond,
+    );
   }
 
   /// Opens the Meta AI app to the DAT-app-update screen on the connected
@@ -1139,5 +1152,16 @@ class MetaWearablesDat {
   /// active device changes.
   static Stream<DeviceState> deviceStateStream() {
     return MetaWearablesDatPlatform.instance.deviceStateStream();
+  }
+}
+
+void _validateVideoFrameRate(double? value) {
+  if (value == null) return;
+  if (!value.isFinite || value <= 0 || value > 30) {
+    throw ArgumentError.value(
+      value,
+      'maxFramesPerSecond',
+      'Must be finite, greater than 0, and no greater than 30.',
+    );
   }
 }

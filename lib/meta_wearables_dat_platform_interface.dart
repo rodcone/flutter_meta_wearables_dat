@@ -143,7 +143,7 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     );
   }
 
-  Stream<VideoFrame> videoFramesStream() {
+  Stream<VideoFrame> videoFramesStream({double? maxFramesPerSecond}) {
     throw UnimplementedError('videoFramesStream() has not been implemented.');
   }
 
