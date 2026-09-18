@@ -1,5 +1,16 @@
 ## Unreleased
 
+- **iOS: `videoFramesStream()` raw frames now honor the documented BGRA
+  contract.** DAT supplies `VideoCodec.raw` as 420v bi-planar YUV, but the
+  plugin copied the pixel buffer's top-level base address and labelled those
+  bytes BGRA. A 504x896 frame therefore arrived with an impossible 772-byte
+  "BGRA" stride instead of at least 2016 bytes, so consumers correctly rejected
+  every frame and OCR/ML received nothing. The handler now uses Accelerate's
+  CPU-only 420v/420f conversion to write directly into a Dart-owned BGRA payload,
+  including while background streaming. A once-per-layout diagnostic reports the source FourCC,
+  plane strides, output BGRA stride and byte count. Delivery capacity is also
+  reserved before conversion, avoiding the expensive copy for frames that
+  would be dropped under platform-channel backpressure.
 - Add vendor-neutral native video-frame consumer registries on iOS and Android
   for sibling plugins that need sustained processing without Dart byte copies.
 - **iOS: `videoFramesStream()` delivered nothing at all.** `VideoFrameStreamHandler`

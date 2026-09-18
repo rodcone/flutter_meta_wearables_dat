@@ -24,6 +24,11 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
     private static let maxPendingDeliveries = 8
     private var pendingDeliveries = 0
     private var droppedFrames = 0
+    private var sinkGeneration: UInt64 = 0
+
+    /// Converts DAT's documented 420v raw frames into the BGRA layout promised
+    /// by the public Dart API. Accessed only from the serial frame queue.
+    private let rawConverter = RawVideoFrameBGRAConverter()
 
     /// HEVC IRAP NAL unit types — the pictures a decoder can start on.
     /// H.265 Table 7-1: 16-18 BLA, 19-20 IDR, 21 CRA, 22-23 reserved IRAP.
@@ -61,6 +66,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         eventSink events: @escaping FlutterEventSink
     ) -> FlutterError? {
         sinkLock.lock()
+        sinkGeneration &+= 1
         eventSink = events
         droppedFrames = 0
         sinkLock.unlock()
@@ -69,6 +75,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
 
     func onCancel(withArguments _: Any?) -> FlutterError? {
         sinkLock.lock()
+        sinkGeneration &+= 1
         eventSink = nil
         sinkLock.unlock()
         return nil
@@ -88,11 +95,18 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
     /// Frame *preparation* deliberately stays off the platform thread: the
     /// pixel copy and the NAL scan both happen on the caller's queue, and only
     /// the finished payload crosses over.
-    private func send(_ payload: [String: Any]) {
+    private struct DeliveryReservation {
+        let sinkGeneration: UInt64
+    }
+
+    /// Reserves bounded space on the platform-thread queue before any frame
+    /// bytes are copied or converted. Under backpressure, dropping here avoids
+    /// doing a multi-megabyte BGRA conversion for a frame Dart cannot receive.
+    private func reserveDelivery() -> DeliveryReservation? {
         sinkLock.lock()
         guard eventSink != nil else {
             sinkLock.unlock()
-            return
+            return nil
         }
         guard pendingDeliveries < Self.maxPendingDeliveries else {
             droppedFrames += 1
@@ -105,10 +119,24 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
                 NSLog(
                     "[MWDAT] video_frames: platform thread behind, dropped \(dropped) frame(s) so far")
             }
-            return
+            return nil
         }
         pendingDeliveries += 1
+        let reservation = DeliveryReservation(sinkGeneration: sinkGeneration)
         sinkLock.unlock()
+        return reservation
+    }
+
+    private func abandonDelivery() {
+        sinkLock.lock()
+        pendingDeliveries = max(0, pendingDeliveries - 1)
+        sinkLock.unlock()
+    }
+
+    private func send(
+        _ payload: [String: Any],
+        reservation: DeliveryReservation
+    ) {
 
         let deliver: () -> Void = { [weak self] in
             guard let self else { return }
@@ -116,7 +144,9 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             // `onCancel` can land between the check and this block running, and
             // invoking a torn-down sink is exactly the race this avoids.
             self.sinkLock.lock()
-            let sink = self.eventSink
+            let sink = self.sinkGeneration == reservation.sinkGeneration
+                ? self.eventSink
+                : nil
             self.pendingDeliveries = max(0, self.pendingDeliveries - 1)
             self.sinkLock.unlock()
             assert(
@@ -125,15 +155,10 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             sink?(payload)
         }
 
-        // Ordering holds because emissions come from one serial queue, so the
-        // blocks reach the main queue in frame order. The fast path keeps a
-        // caller already on the platform thread from being reordered behind an
-        // async hop.
-        if Thread.isMainThread {
-            deliver()
-        } else {
-            DispatchQueue.main.async(execute: deliver)
-        }
+        // Emissions come from one serial queue, so main-queue blocks retain
+        // frame order. Always enqueue: a synchronous main-thread fast path can
+        // overtake an older frame that is already waiting on that queue.
+        DispatchQueue.main.async(execute: deliver)
     }
 
     /// Drops the cached parameter sets. Called when a stream session starts,
@@ -142,45 +167,39 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
     /// IRAP, which would activate an SPS whose dimensions disagree with the
     /// coded picture. Sessions restart routinely now that backgrounding tears
     /// the DeviceSession down.
-    func resetParameterSetCache() {
+    func resetSessionState() {
         cacheLock.lock()
         cachedParameterSets = Data()
         cacheLock.unlock()
+        rawConverter.reset()
     }
 
     // MARK: - Emission
 
-    /// Emit a decoded raw BGRA pixel buffer. Caller passes the already-locked
-    /// pixel buffer base address; we memcpy into a Data so Flutter owns the
-    /// bytes on the main isolate.
+    /// Emit a raw frame as packed BGRA, matching the public Dart contract.
+    /// DAT supplies raw frames as 420v bi-planar YUV, so conversion and the
+    /// ownership copy both finish before the SDK publisher callback returns.
     func emitRaw(
         pixelBuffer: CVPixelBuffer,
         ptsUs: Int64
     ) {
-        guard hasListener else { return }
-
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
-
-        let length = bytesPerRow * height
-        let data = Data(bytes: base, count: length)
+        guard let reservation = reserveDelivery() else { return }
+        guard let frame = rawConverter.convert(pixelBuffer) else {
+            abandonDelivery()
+            return
+        }
 
         let payload: [String: Any] = [
             "codec": "raw",
-            "bytes": FlutterStandardTypedData(bytes: data),
-            "width": width,
-            "height": height,
-            "bytesPerRow": bytesPerRow,
+            "bytes": FlutterStandardTypedData(bytes: frame.bytes),
+            "width": frame.width,
+            "height": frame.height,
+            "bytesPerRow": frame.bytesPerRow,
             "ptsUs": ptsUs,
             "isKeyframe": true,
         ]
 
-        send(payload)
+        send(payload, reservation: reservation)
     }
 
     /// Emit a compressed hvc1 sample buffer. Extracts the CMBlockBuffer bytes
@@ -192,7 +211,6 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
         sampleBuffer: CMSampleBuffer,
         ptsUs: Int64
     ) {
-        guard hasListener else { return }
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
             return
         }
@@ -207,6 +225,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             dataPointerOut: &dataPointer
         )
         guard status == kCMBlockBufferNoErr, let dataPointer else { return }
+        guard let reservation = reserveDelivery() else { return }
 
         let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer)
 
@@ -293,7 +312,7 @@ final class VideoFrameStreamHandler: NSObject, FlutterStreamHandler {
             "isKeyframe": selfContained,
         ]
 
-        send(payload)
+        send(payload, reservation: reservation)
     }
 
     /// What a single walk of an access unit's NAL units established.

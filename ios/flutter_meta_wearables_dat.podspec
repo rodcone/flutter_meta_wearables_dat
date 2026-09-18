@@ -25,7 +25,7 @@ capture, and background streaming on iOS 17.2+.
     'flutter_meta_wearables_dat/Frameworks/MWDATCamera.xcframework'
   ]
   s.preserve_paths = 'flutter_meta_wearables_dat/Frameworks/*.xcframework'
-  s.frameworks = 'CoreBluetooth', 'Network', 'AVFoundation', 'VideoToolbox'
+  s.frameworks = 'CoreBluetooth', 'Network', 'AVFoundation', 'Accelerate', 'VideoToolbox'
   s.xcconfig = { 'OTHER_LDFLAGS' => '-framework MWDATCamera -framework MWDATCore' }
 
   # Flutter.framework does not contain a i386 slice.

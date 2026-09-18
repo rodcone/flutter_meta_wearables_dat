@@ -1948,7 +1948,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // `streamErrorHandler` once its `session` is set below. The frame
       // handler outlives the session, so drop any parameter sets cached from
       // a previous stream before the first frame of this one arrives.
-      videoFrameHandler.resetParameterSetCache()
+      videoFrameHandler.resetSessionState()
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
         guard let self else { return }
         // Stamp arrival on the SDK's own callback, not inside the frame queue:
