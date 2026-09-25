@@ -181,3 +181,20 @@ whether `@unknown default` is valid) and the exact deployment target the binary 
 Strings in the binary are occasionally the only way to confirm a behaviour change — e.g. finding
 `NSBluetoothAlwaysUsageDescription` inside `MWDATCore` confirmed 0.9.0's mock-device Info.plist
 enforcement.
+
+## Release comparison refs and generated interfaces
+
+Android does not necessarily publish Git release tags. Use the verified `Release <version>` commit
+from `git log` when a version ref is absent; record both comparison SHAs in the plan. iOS release
+tags still provide the framework payload.
+
+For SourceKitten, use `source.request.editor.open.interface` with quoted string values for
+`key.name` and `key.modulename`, `key.synthesizedextensions: 1`, and compiler arguments `-sdk`
+(the `xcrun --sdk iphoneos --show-sdk-path` result), `-target arm64-apple-ios17.2`, and `-F` for
+each staged framework's `ios-arm64` directory. Keep the request kind as a YAML UID (unquoted).
+Read `key.sourcetext` from the JSON response, validate doc comments and declarations, and preserve
+the existing reference-snapshot header before writing the tracked dump.
+
+A changelog can omit removed enum cases or inserted constructor parameters: DAT 1.0 removed iOS
+registration timeout cases and inserted Android StreamConfiguration.audioCodec. Compare the
+used symbols against binary interfaces before assuming unchanged call sites still compile.
