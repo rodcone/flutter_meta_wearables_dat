@@ -4,7 +4,6 @@
    DO NOT EDIT MANUALLY. Run `string-resources-sync --source android` to update. */
 
 "dat_error_photo_capture_failed" = "Het maken van de foto is mislukt";
-"dat_error_photo_capture_timeout" = "Time-out voor foto-opname";
 "dat_error_stream_battery_low" = "Batterijniveau apparaat is te laag voor streamen";
 "dat_error_stream_critical_error" = "Kritieke fout, de stream moet worden beëindigd";
 "dat_error_stream_device_not_connected" = "Apparaat is niet gekoppeld";

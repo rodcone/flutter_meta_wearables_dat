@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "Avregistreringsprocessen misslyckades av okänd anledning";
 "dat_error_registration_meta_ai_not_installed" = "Meta AI-appen är inte installerad på enheten och det krävs för registrering";
 "dat_error_registration_network_unavailable" = "Ingen internetanslutning är tillgänglig. Kontrollera anslutningen och försök igen";
-"dat_error_registration_timeout" = "Tiden för registrering har gått ut, inget svar från Meta AI";
 "dat_error_registration_unknown" = "Det uppstod ett okänt fel under registreringen";
 "dat_error_session_already_exists" = "Det finns redan en session för den här enheten";
 "dat_error_session_already_stopped" = "Sessionen har redan stoppats";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "Användaren är redan avregistrerad när hen försöker avregistrera sig igen";
 "dat_error_unregistration_configuration_invalid" = "Konfigurationen av åtkomstverktygslådan för kroppsburna enheter är ogiltig eller ofullständig";
 "dat_error_unregistration_meta_ai_not_installed" = "Meta AI-appen är inte installerad på enheten och det krävs för avregistrering";
-"dat_error_unregistration_timeout" = "Tiden för avregistrering har gått ut, inget svar från Meta AI";
 "dat_error_unregistration_unknown" = "Det uppstod ett okänt fel under avregistreringen";
 "dat_error_wearables_already_configured" = "Redan konfigurerat";
 "dat_error_wearables_already_initialized" = "Kroppsburna enheter har redan initierats.";

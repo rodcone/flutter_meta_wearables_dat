@@ -51,7 +51,11 @@ Applied every release unless the maintainer says otherwise:
 - **Don't mirror an SDK enum into Dart when an existing one covers it** (0.9.0's `CameraState`
   duplicates `StreamState` — deliberately unexposed).
 - **Both packages move in lockstep** at the same plugin version.
-- **Plugin version ≠ DAT version.** A DAT bump is a **minor** bump of the plugin (pre-1.0).
+- **Select the plugin version explicitly.** Follow the maintainer's release target, including
+  prerelease suffixes. This migration targets `1.0.0-rc.1` for both packages with DAT `1.0.0`.
+  SDK and plugin versions need not match on future releases; preserve plugin semver compatibility.
+  RC install snippets must opt into the prerelease, CI must compare the suffix, and GitHub releases
+  must be marked prerelease. The no-tag/no-publish rule applies to RCs too.
 
 ---
 
@@ -85,7 +89,18 @@ between commands and later phases run `rm -rf`.
    answer when you're unsure how a new API is meant to be used. Sample-app *choices* are not SDK
    *constraints* — don't confuse the two.
 
-Output: a table of every changelog item → relevant? → why → feasibility. Display items get one line.
+Output: separate iOS and Android triage tables covering **Added, Changed, Fixed, and Removed**.
+For every item, record its category, plugin relevance (relevant / not relevant / uncertain), why,
+supporting evidence, and proposed action (adopt / already covered / defer / no action / investigate).
+Include intervening releases when skipping SDK versions. Mark absent categories explicitly; do not
+invent entries. Display items still get a row explaining their exclusion. Resolve material unknowns
+with the maintainer before implementing the affected change.
+
+**Plan before mutation.** First use Phases 2–3 only to stage and inspect SDK artifacts and generate
+candidate snapshots in a scratch directory. Do not replace tracked frameworks, edit dependencies,
+overwrite snapshots, or change implementation code yet. Prepare and present the Phase 4 plan from
+that evidence, then apply the Phase 2–3 replacements and proceed to Phase 5. The plan must exist
+before implementation begins; revise it when new evidence changes the scope.
 
 ## Phase 2 — Bump binaries and dependencies
 
@@ -131,6 +146,11 @@ prominent changelog entry.
 
 Cover iOS, Android, example app, docs. Per item: the file, the change, and *why the SDK forces it*.
 Flag every consumer-visible change. Keep the plan on disk — it feeds the PR description and report.
+Include Dart and mock-package impacts, links to the changelog triage, excluded/deferred items,
+verification steps, hardware-only checks, and unresolved questions. Present the plan to the
+maintainer before implementation. Ask clarifying questions where an answer materially affects the
+approach; resolve those questions before dependent work. Work one phase at a time, reporting its
+findings and the next step, without rushing or treating silence as an answer.
 
 **Run autonomously from here** — in the sense of standing rule 6: don't seek approval for routine
 scope calls, but don't guess either. For a scope decision the standing rules cover, take the
@@ -163,7 +183,8 @@ The SwiftPM build also rewrites two tracked files; the reference has the exact r
 
 ## Phase 7 — Versions, changelogs, docs
 
-1. Version → next minor in all four locations (preflight already proved they agreed).
+1. Version → the selected plugin release target in all four locations, preserving any prerelease
+   suffix (preflight already proved they agreed). Do not infer a stable release from the DAT version.
 2. **Both `CHANGELOG.md` files** need a `## <version>` entry — the release workflow extracts them.
    The mock entry is not boilerplate: 0.9.0 silently made mock devices enforce the same
    `Info.plist` checks as real hardware, a consumer-visible break that reached our own release

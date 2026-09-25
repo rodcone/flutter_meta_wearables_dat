@@ -4,7 +4,6 @@
    DO NOT EDIT MANUALLY. Run `string-resources-sync --source android` to update. */
 
 "dat_error_photo_capture_failed" = "Bildetaking mislyktes";
-"dat_error_photo_capture_timeout" = "Bildetaking tidsavbrutt";
 "dat_error_stream_battery_low" = "Enhetens batterinivå er for lavt for strømming";
 "dat_error_stream_critical_error" = "Alvorlig feil, strømmingen avsluttes";
 "dat_error_stream_device_not_connected" = "Enheten er ikke koblet til";

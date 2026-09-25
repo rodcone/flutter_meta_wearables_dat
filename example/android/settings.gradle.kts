@@ -1,16 +1,3 @@
-import java.util.Properties
-import kotlin.io.path.div
-import kotlin.io.path.exists
-import kotlin.io.path.inputStream
-
-val localProperties =
-    Properties().apply {
-        val localPropertiesPath = rootDir.toPath() / "local.properties"
-        if (localPropertiesPath.exists()) {
-            load(localPropertiesPath.inputStream())
-        }
-    }
-
 pluginManagement {
     val flutterSdkPath =
         run {
@@ -43,13 +30,6 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven("https://storage.googleapis.com/download.flutter.io")
-        maven {
-            url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
-            credentials {
-                username = "" // not needed
-                password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
-            }
-        }
     }
 }
 

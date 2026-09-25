@@ -31,13 +31,15 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 - **Optional mock glasses:** Develop with a simulated pair driven by the phone's camera, without including mock-device dependencies in production.
 - **Reactive API:** Follow registration, availability, session, error, and thermal state with Dart `Stream`s.
 
+**Coming soon:** Support for more DAT capabilities is planned for the 1.1 release series, starting with motion, inputs, and richer device state (battery, charging, wear detection, and hinge state). These APIs are not available yet; the 1.0 release candidates focus on DAT 1.0.0 compatibility and the existing camera workflow.
+
 ## Quick start
 
 ### 1. Install
 
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.2
+  flutter_meta_wearables_dat: ^1.0.0-rc.1
 ```
 
 ### 2. Configure iOS or Android
@@ -331,48 +333,21 @@ Add the following to your app's `AndroidManifest.xml`:
 
 #### 2. Repository Configuration
 
-Add the GitHub Packages repository to your `settings.gradle.kts`. First, add the necessary imports at the top of the file:
+DAT 1.0.0 is published to Maven Central. No GitHub token is required. In `settings.gradle.kts`:
 
 ```kotlin
-import java.util.Properties
-import kotlin.io.path.div
-import kotlin.io.path.exists
-import kotlin.io.path.inputStream
-```
-
-Then add the repository configuration:
-
-```kotlin
-val localProperties =
-    Properties().apply {
-        val localPropertiesPath = rootDir.toPath() / "local.properties"
-        if (localPropertiesPath.exists()) {
-            load(localPropertiesPath.inputStream())
-        }
-    }
-
 dependencyResolutionManagement {
-    // Flutter's Gradle plugin adds a maven repo at the project level.
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
-            credentials {
-                username = "" // not needed
-                password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
-            }
-        }
+        maven("https://storage.googleapis.com/download.flutter.io")
     }
 }
 ```
 
 **Note:** We use `PREFER_SETTINGS` instead of `FAIL_ON_PROJECT_REPOS` because Flutter's Gradle plugin needs to add repositories at the project level.
 
-Set a GitHub token with `read:packages` scope via:
-- Environment variable: `GITHUB_TOKEN`
-- Or in `local.properties`: `github_token=your_token_here`
 
 #### 3. MainActivity configuration
 
@@ -553,11 +528,13 @@ For full background streaming (app backgrounded, phone locked, or both) on **eit
 | `enableBackgroundStreaming()` | App backgrounded, or phone locked |
 | --- | --- |
 | **not called** (default) | Session is **stopped**. You get `stoppedForBackground` on `streamSessionErrorStream()`, then a terminal `stopped`, and the texture is released. Nothing resumes on foreground. |
-| **called** | Session stays alive. The preview resumes on foreground (brief keyframe-wait stall on `hvc1`). |
+| **called** | The plugin keeps background streaming enabled instead of deliberately stopping the session. If the session remains active, the preview resumes on foreground (brief keyframe-wait stall on `hvc1`). See the known limitation below. |
 
 This covers all three "not visible" states: the app sent to background, the screen locked while the app is in front, and both combined.
 
-**Bluetooth Classic cost (iOS).** The keep-alive audio session shares the Bluetooth radio with the camera transport, so under marginal radio conditions a high-fps stream can stall. Android is unaffected. The plugin logs the audio route on activation and on route changes (`[MWDAT-ROUTE]`) so this is diagnosable from console logs.
+**Known iOS lock limitation (DAT 1.0.0).** Testing on iPhone 17 / iOS 27.0 with Meta Ray-Ban Display over Bluetooth Classic found intermittent session termination while locked with background streaming enabled. RAW tests sometimes ended after about 8–15 seconds with `unexpectedError` / "Session ended by device", while other 20–30-second attempts passed. HVC1 testing passed, but is not a confirmed workaround. The cause and whether this is a regression remain undetermined. Handle session errors and terminal `stopped` events even with background streaming enabled; continuous locked-frame delivery has not been independently verified. See the [hardware QA record](doc/plans/dat-1.0.0.md#hardware-results--2026-09-25-remaining-tests-deferred).
+
+**Audio route diagnostics (iOS).** The plugin logs the audio route on activation and on route changes (`[MWDAT-ROUTE]`) to help investigate streaming failures. These logs alone do not establish the cause of a failure.
 
 > **Retracted:** this section used to report that a 24 fps medium stream averages ~14 fps on Bluetooth Classic, and advised staying at 15 fps or lower. Both were wrong. That figure came from a log line counting only frames that survived the plugin's own FPS throttle, and the throttle was discarding roughly half of them whenever the source rate sat near the target — a defect fixed since (see the changelog). Measured properly, a 30 fps medium stream on Bluetooth Classic delivers ~29 fps from the SDK. The transport was never the limit; the plugin was. The A/B in 0.9.2 that appeared to confirm a transport ceiling had both of its arms halved by the same bug.
 
@@ -613,7 +590,7 @@ await MetaWearablesDat.disableBackgroundStreaming();
 
 **Android — no manual manifest changes needed.** The plugin's manifest auto-merges the required permissions (`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`) and declares the internal foreground service. On Android 13+ (API 33+), the first call to `enableBackgroundStreaming()` prompts the user for `POST_NOTIFICATIONS` — if denied, the foreground service still runs (so the stream survives), but its notification is suppressed by the OS until the user enables notifications for your app in system settings.
 
-**How it works.** On iOS the plugin activates an `AVAudioSession` configured for Bluetooth HFP + mixing, which keeps the process scheduled in background. The HEVC hardware decoder is invalidated on background entry (iOS forbids GPU access from backgrounded apps) and lazily recreated on the first frame after foreground — you'll see a brief stall while the decoder waits for the next keyframe, then streaming resumes cleanly. While backgrounded, the raw hvc1 NAL bytes still reach `videoFramesStream()` for recording. On Android the plugin starts a foreground service of type `connectedDevice` with your notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
+**How it works.** On iOS the plugin activates an `AVAudioSession` using `.playAndRecord` / `.videoRecording` with `.mixWithOthers` for background execution. It does not enable Bluetooth HFP. The HEVC hardware decoder is invalidated on background entry (iOS forbids GPU access from backgrounded apps) and lazily recreated on the first frame after foreground — an active session may briefly stall while the decoder waits for the next keyframe. While the session remains active in background, raw hvc1 NAL bytes are forwarded to `videoFramesStream()` for recording. On Android the plugin starts a foreground service of type `connectedDevice` with your notification and holds a `PARTIAL_WAKE_LOCK` until you disable it.
 
 **Accessing frames while backgrounded.** The normal `Texture` widget can't render in background (no GPU access), but the plugin exposes every decoded frame to Dart via `videoFramesStream()`, in both foreground and background. Useful for recording to disk, running ML, or re-muxing:
 
@@ -708,8 +685,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.2
-  flutter_meta_wearables_dat_mock_device: ^0.9.2
+  flutter_meta_wearables_dat: ^1.0.0-rc.1
+  flutter_meta_wearables_dat_mock_device: ^1.0.0-rc.1
 ```
 
 ```dart
@@ -783,3 +760,5 @@ Contributions are welcome! Feel free to open [issues](https://github.com/rodcone
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
+
+DAT 1.0 compatibility: `insufficientSDKVersion` is terminal and requires an app update; `dwaOutOfStuRange` is a nonblocking warning and must not stop or restart the stream. The plugin retains app-initiated registration; Meta-AI-initiated registration requests and new experimental capabilities are not exposed.

@@ -77,12 +77,13 @@ class StreamSessionProvider extends ChangeNotifier {
   // pause the stream rather than ending it, and the UI already renders the
   // `paused` state.
   static const Set<String> _terminalStreamErrors = {
+    'insufficientSDKVersion',
     // stream-level
     'hingesClosed',
     'permissionDenied',
     'peakPowerShutdown',
     'batteryCritical',
-    // iOS-only: on Android this arrives as `deviceThermalEmergency`
+    // Legacy code: DAT 1.0 uses `deviceThermalEmergency` on both platforms.
     'thermalEmergency',
     // device-session-level
     'deviceThermalEmergency',
@@ -187,6 +188,8 @@ class StreamSessionProvider extends ChangeNotifier {
     final error = _pendingUserAction;
     if (error == null) return null;
     return switch (error.code) {
+      'insufficientSDKVersion' =>
+        'Update this app to a version with a supported Meta Wearables SDK.',
       'hingesClosed' => 'Put your glasses back on to start streaming again.',
       'permissionDenied' =>
         'Camera access was denied. Grant it again to keep streaming.',
@@ -477,6 +480,13 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   Future<void> _setStreamError(StreamSessionError error) async {
+    if (error.code == 'dwaOutOfStuRange') {
+      // Compatibility advice must not interrupt a usable stream or recovery.
+      _lastError = error;
+      notifyListeners();
+      return;
+    }
+
     // A terminal error has already told the user what to do. The SDK keeps
     // emitting teardown noise while that stop converges, and letting it through
     // would swap the actionable message ("put your glasses back on") for a
@@ -549,13 +559,17 @@ class StreamSessionProvider extends ChangeNotifier {
   void _latchUserAction(StreamSessionError error) {
     _pendingUserAction = error;
     _pendingUserActionTimer?.cancel();
+    _pendingUserActionTimer = null;
+    // A timeout or glasses reconnect cannot update the SDK bundled in this app.
+    if (error.code == 'insufficientSDKVersion') return;
     // Backstop: on doff the link often stays up, so no device event ever
     // arrives to clear this. Re-enable Start rather than strand the user — if
     // they still aren't ready, the next start fails and re-latches.
     _pendingUserActionTimer = Timer(_userActionGrace, _clearPendingUserAction);
   }
 
-  void _clearPendingUserAction() {
+  void _clearPendingUserAction({bool force = false}) {
+    if (!force && _pendingUserAction?.code == 'insufficientSDKVersion') return;
     _pendingUserActionTimer?.cancel();
     _pendingUserActionTimer = null;
     if (_pendingUserAction == null) return;
@@ -738,7 +752,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _recoveryAttempts = 0;
     _cancelRecovery();
     // A deliberate stop supersedes whatever the latch was waiting for.
-    _clearPendingUserAction();
+    _clearPendingUserAction(force: true);
 
     await _teardownSession();
     notifyListeners();

@@ -175,6 +175,8 @@ internal class StreamSessionErrorStreamHandler : EventChannel.StreamHandler {
                     when {
                         identifier.contains("DAT_APP") || identifier.contains("DATAPP") ->
                                 "datAppOnTheGlassesUpdateRequired"
+                        identifier.contains("INSUFFICIENT_SDK_VERSION") -> "insufficientSDKVersion"
+                        identifier.contains("DWA_OUT_OF_STU_RANGE") -> "dwaOutOfStuRange"
                         identifier.contains("DWA") -> "dwaUnavailable"
                         identifier.contains("THERMAL_EMERGENCY") ->
                                 "deviceThermalEmergency"

@@ -102,45 +102,22 @@ Transport does not affect App Store eligibility — the SDK links `ExternalAcces
 </application>
 ```
 
-**android/settings.gradle.kts** — Add imports at the top:
+**android/settings.gradle.kts** — Use Maven Central (no token required):
 
 ```kotlin
-import java.util.Properties
-import kotlin.io.path.div
-import kotlin.io.path.exists
-import kotlin.io.path.inputStream
-```
-
-Add GitHub Packages repository:
-
-```kotlin
-val localProperties =
-    Properties().apply {
-        val localPropertiesPath = rootDir.toPath() / "local.properties"
-        if (localPropertiesPath.exists()) {
-            load(localPropertiesPath.inputStream())
-        }
-    }
-
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
-            credentials {
-                username = ""
-                password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
-            }
-        }
+        maven("https://storage.googleapis.com/download.flutter.io")
     }
 }
 ```
 
 Use `PREFER_SETTINGS` (not `FAIL_ON_PROJECT_REPOS`) because Flutter's Gradle plugin adds repositories at the project level.
 
-**GitHub token:** Set `GITHUB_TOKEN` env var or add `github_token=your_token` to `local.properties`. The token needs `read:packages` scope.
+DAT 1.0.0 uses Maven Central; no GitHub Packages token is required.
 
 **MainActivity** — Must extend `FlutterFragmentActivity`:
 

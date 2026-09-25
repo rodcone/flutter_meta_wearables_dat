@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "Échec du processus de désinscription pour une raison non spécifiée";
 "dat_error_registration_meta_ai_not_installed" = "L’application Meta AI n’est pas installée sur l’appareil, ce qui est nécessaire pour l’enregistrement";
 "dat_error_registration_network_unavailable" = "Aucune connexion Internet disponible. Vérifiez votre connexion et réessayez";
-"dat_error_registration_timeout" = "Le délai d’inscription a expiré, aucune réponse de Meta AI";
 "dat_error_registration_unknown" = "Une erreur inconnue est survenue lors du processus d’enregistrement";
 "dat_error_session_already_exists" = "Une session existe déjà pour cet appareil";
 "dat_error_session_already_stopped" = "La session a déjà été arrêtée";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "L’enregistrement de l’utilisateur(ice) est déjà annulé lorsqu’il ou elle tente d’annuler de nouveau son enregistrement";
 "dat_error_unregistration_configuration_invalid" = "La configuration de la Boîte à outils d’accès par un appareil wearable n’est pas valide ou est incomplète";
 "dat_error_unregistration_meta_ai_not_installed" = "L’application Meta AI n’est pas installée sur l’appareil, ce qui est nécessaire pour l’annulation de l’enregistrement";
-"dat_error_unregistration_timeout" = "Le délai de désinscription a expiré, aucune réponse de Meta AI";
 "dat_error_unregistration_unknown" = "Une erreur inconnue s’est produite lors du processus d’annulation de l’enregistrement";
 "dat_error_wearables_already_configured" = "Déjà configuré";
 "dat_error_wearables_already_initialized" = "Les wearables ont déjà été initialisés.";

@@ -1316,7 +1316,7 @@ class MetaWearablesDatPlugin :
                 // `Camera` owns the stream.
                 var addedCamera: Camera? = null
                 activeSession
-                        .addCamera(StreamConfiguration(videoQuality = streamQuality, fps))
+                        .addCamera(StreamConfiguration(videoQuality = streamQuality, frameRate = fps))
                         .onSuccess { addedCamera = it }
                         .onFailure { error, _ ->
                             val code =

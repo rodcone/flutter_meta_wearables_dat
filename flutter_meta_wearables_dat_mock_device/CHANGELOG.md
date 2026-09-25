@@ -1,3 +1,11 @@
+## 1.0.0-rc.1
+
+- Release candidate, versioned in lockstep with the core plugin's 1.0.0 release candidate.
+- Upgrade MockDeviceKit to DAT 1.0.0 in lockstep with the core plugin; Android now resolves from Maven Central without a token.
+- Await iOS mock disable/unpair teardown before completing the existing Dart Futures.
+- Adopt upstream Android mock stream-start diagnostics, including missing CAMERA permission details.
+- New experimental mock capabilities and display preview are not exposed.
+
 ## 0.9.2
 
 * Align with core 0.9.2 and its `frameRate` API. No mock-only API changes.

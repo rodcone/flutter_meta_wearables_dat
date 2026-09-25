@@ -35,6 +35,7 @@
 .idea/
 .vscode/
 .claude/
+.agents/
 
 # This package's own build output. `.pubignore` REPLACES `.gitignore` for pub,
 # so `build/` being git-ignored does not keep it out of the archive — and pub

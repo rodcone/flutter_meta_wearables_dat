@@ -388,7 +388,73 @@ extern "C" {
 
 #if defined(__OBJC__)
 
+/// A named hardware button.
+/// @Unpublishable
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATButtonType, "ObjC_ButtonType", closed) {
+/// The primary action button.
+  MWDATButtonTypeAction = 0,
+/// Not a button event — set when the enclosing <code>MWDATInputEvent/type</code> is not <code>button</code>.
+  MWDATButtonTypeUnknown = 1,
+};
+
+/// The kind of capture interaction.
+/// @Unpublishable
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATCapturePressType, "ObjC_CapturePressType", closed) {
+/// A single short press of the capture button. Defaults to capturing a photo.
+  MWDATCapturePressTypeShortPress = 0,
+/// A press and hold of the capture button. Defaults to starting a video recording.
+  MWDATCapturePressTypeHold = 1,
+/// A double press of the capture button. Defaults to stopping an in-progress video recording.
+  MWDATCapturePressTypeDoublePress = 2,
+/// Not a capture event — set when the enclosing <code>MWDATInputEvent/type</code> is not <code>capture</code>.
+  MWDATCapturePressTypeUnknown = 3,
+};
+
+/// The phase of a drag interaction.
+/// @Unpublishable
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATDragAction, "ObjC_DragAction", closed) {
+/// The pointer went down, beginning the drag.
+  MWDATDragActionDown = 0,
+/// The pointer moved while down.
+  MWDATDragActionMove = 1,
+/// The pointer went up, ending the drag.
+  MWDATDragActionUp = 2,
+/// Not a drag event — set when the enclosing <code>MWDATInputEvent/type</code> is not <code>drag</code>.
+  MWDATDragActionUnknown = 3,
+};
+
+/// The device surface that produced an input event.
+/// @Unpublishable
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATInputSource, "ObjC_InputSource", closed) {
+/// The capacitive touchpad on the glasses.
+  MWDATInputSourceCaptouch = 0,
+/// Neural Band discrete gesture input.
+  MWDATInputSourceNeuralBand = 1,
+/// The dedicated capture button on the glasses.
+  MWDATInputSourceCaptureButton = 2,
+/// The dedicated action button on the glasses.
+  MWDATInputSourceActionButton = 3,
+/// Neural Band pinch-and-drag input.
+  MWDATInputSourceNeuralBandDrag = 4,
+/// The source could not be determined.
+  MWDATInputSourceUnknown = 5,
+};
+
 @class NSURL;
+/// Objective-C bridge for configuring standalone photo capture on simulated glasses.
+/// @Unpublishable
+SWIFT_CLASS_NAMED("ObjC_MockCameraCaptureKit")
+@interface MockCameraCaptureKit : NSObject
+/// Set the image file to return when a photo capture is triggered.
+/// \param fileURL URL of the file containing the image (JPEG or HEIC).
+///
+- (void)setCapturedPhotoWithFileURL:(NSURL * _Nonnull)fileURL;
+/// Simulate a capture failure on the next capture attempt.
+- (void)simulateCaptureFailure;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
 SWIFT_CLASS_NAMED("ObjC_MockCameraKit")
 @interface MockCameraKit : NSObject
 /// Set camera feed from a video file. Supported codecs: h.265
@@ -463,6 +529,21 @@ SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly, strong) MWDATMockDev
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
+@class UIView;
+SWIFT_CLASS_NAMED("ObjC_MockDisplayKit")
+@interface MockDisplayKit : NSObject
+/// Sends a display click for the supplied element identifier.
+///
+/// returns:
+/// Whether the click was delivered to an active DISPLAY capability.
+- (BOOL)sendClickWithIdentifier:(NSString * _Nonnull)identifier SWIFT_WARN_UNUSED_RESULT;
+/// Creates a locally rendered preview of the captured display content. The returned view is
+/// single-use; create a new view after removing it from its superview.
+- (UIView * _Nonnull)createPreviewView SWIFT_WARN_UNUSED_RESULT;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
 @class MockGlassesServices;
 SWIFT_PROTOCOL_NAMED("ObjC_MockGlasses")
 @protocol MockGlasses <MockDevice>
@@ -474,10 +555,102 @@ SWIFT_PROTOCOL_NAMED("ObjC_MockGlasses")
 @property (nonatomic, readonly, strong) MockGlassesServices * _Nonnull services;
 @end
 
+@class MockSpeechKit;
+@class MockMotionKit;
+@class MockInputKit;
+@class MockVoiceInvocationKit;
 SWIFT_CLASS_NAMED("ObjC_MockGlassesServices")
 @interface MockGlassesServices : NSObject
 @property (nonatomic, readonly, strong) MockCameraKit * _Nonnull camera;
 @property (nonatomic, readonly, strong) MockCaptouchKit * _Nonnull captouch;
+/// Configures standalone photo capture behavior for the simulated glasses.
+/// @Unpublishable
+@property (nonatomic, readonly, strong) MockCameraCaptureKit * _Nonnull cameraCapture;
+/// Injects synthetic Speech capability events.
+/// @Unpublishable
+@property (nonatomic, readonly, strong) MockSpeechKit * _Nonnull speech;
+/// Injects deterministic Motion samples.
+/// @Unpublishable
+@property (nonatomic, readonly, strong) MockMotionKit * _Nonnull motion;
+/// Injects synthetic Inputs capability events.
+/// @Unpublishable
+@property (nonatomic, readonly, strong) MockInputKit * _Nonnull input;
+@property (nonatomic, readonly, strong) MockDisplayKit * _Nonnull display;
+@property (nonatomic, readonly, strong) MockVoiceInvocationKit * _Nonnull voiceInvocation;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+/// Injects synthetic input interactions into a connected app during testing. Objective-C mirror of
+/// <code>MockInputKit</code>.
+/// @Unpublishable
+SWIFT_CLASS_NAMED("ObjC_MockInputKit")
+@interface MockInputKit : NSObject
+/// Injects an upward navigation event from the given source.
+- (void)navUpWithSource:(enum MWDATInputSource)source;
+/// Injects a downward navigation event from the given source.
+- (void)navDownWithSource:(enum MWDATInputSource)source;
+/// Injects a leftward navigation event from the given source.
+- (void)navLeftWithSource:(enum MWDATInputSource)source;
+/// Injects a rightward navigation event from the given source.
+- (void)navRightWithSource:(enum MWDATInputSource)source;
+/// Injects a select / confirm event from the given source.
+- (void)selectWithSource:(enum MWDATInputSource)source;
+/// Injects a back / dismiss event from the given source.
+- (void)backWithSource:(enum MWDATInputSource)source;
+/// Injects a capture-button press resolved to the given press type.
+- (void)captureWithPressType:(enum MWDATCapturePressType)pressType;
+/// Injects a physical button press.
+- (void)buttonWithType:(enum MWDATButtonType)type;
+/// Injects one sample of a continuous Neural Band drag stream.
+- (void)dragWithAction:(enum MWDATDragAction)action x:(float)x y:(float)y dx:(float)dx dy:(float)dy;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+/// Keep in sync with the <code>MockMotionKit</code> Swift protocol.
+/// @Unpublishable
+SWIFT_CLASS_NAMED("ObjC_MockMotionKit")
+@interface MockMotionKit : NSObject
+@property (nonatomic, readonly) BOOL isStreaming;
+/// Feed a CSV recording for deterministic replay; the in-memory <code>[MotionSample]</code> overload is Swift-only.
+- (void)setMotionFeedWithFileURL:(NSURL * _Nonnull)fileURL;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+/// Controls synthetic Speech events for a mock device.
+/// @Unpublishable
+SWIFT_CLASS_NAMED("ObjC_MockSpeechKit")
+@interface MockSpeechKit : NSObject
+@property (nonatomic, readonly) BOOL isListening;
+/// <code>MockSpeechSource</code> is a Swift enum that cannot cross to ObjC, so it is exposed as a Bool.
+/// Only takes effect while not <code>isListening</code>.
+- (void)setLiveDeviceAsrEnabled:(BOOL)enabled;
+- (void)simulateTranscriptionWithText:(NSString * _Nonnull)text isFinal:(BOOL)isFinal confidence:(float)confidence;
+- (void)simulateErrorWithErrorCode:(int32_t)errorCode message:(NSString * _Nonnull)message;
+- (void)simulateCompletion;
+- (void)setLocale:(NSString * _Nonnull)locale;
+/// Snapshot only — the Swift <code>liveSourceDiagnosticPublisher</code> (<code>Announcer</code>) cannot cross to ObjC.
+@property (nonatomic, readonly, copy) NSString * _Nullable liveSourceDiagnostic;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+SWIFT_CLASS_NAMED("ObjC_MockVoiceInvocationKit")
+@interface MockVoiceInvocationKit : NSObject
+/// Sends a launch app action to all connected clients.
+///
+/// returns:
+/// The request ID of the sent action, or nil if no clients are connected.
+- (NSString * _Nullable)sendLaunchAppAction SWIFT_WARN_UNUSED_RESULT;
+/// Sends a deliberately malformed action to all connected clients.
+///
+/// returns:
+/// The request ID of the sent action, or nil if no clients are connected.
+- (NSString * _Nullable)sendIncompleteAction SWIFT_WARN_UNUSED_RESULT;
+/// Returns true if there are connected clients.
+@property (nonatomic, readonly) BOOL hasConnectedClients;
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end

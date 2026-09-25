@@ -395,8 +395,8 @@ SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _
 + (NSNotificationName _Nonnull)wearablesDevicesChanged SWIFT_WARN_UNUSED_RESULT;
 @end
 
-/// Errors that can occur when navigating to a screen in the Meta AI companion app.
-typedef SWIFT_ENUM_NAMED(NSInteger, MWDATNavigationError, "NavigationError", closed) {
+/// Errors that can occur when navigating to a screen in the Meta AI app.
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATNavigationError, "NavigationError", open) {
 /// The Meta AI app is not installed on the device.
   MWDATNavigationErrorMetaAINotInstalled = 0,
 /// The app is not registered with AI glasses.
@@ -511,6 +511,7 @@ typedef SWIFT_ENUM_NAMED(NSInteger, MWDATLinkState, "ObjC_LinkState", closed) {
 
 typedef SWIFT_ENUM_NAMED(NSInteger, MWDATPermission, "ObjC_Permission", closed) {
   MWDATPermissionCamera = 0,
+  MWDATPermissionMicrophone = 1,
 };
 
 typedef SWIFT_ENUM_NAMED(NSInteger, MWDATPermissionStatus, "ObjC_PermissionStatus", closed) {
@@ -580,7 +581,7 @@ typedef SWIFT_ENUM_NAMED(NSInteger, MWDATPermissionError, "PermissionError", ope
 static NSString * _Nonnull const MWDATPermissionErrorDomain = @"MWDATCore.PermissionError";
 
 /// Error conditions that can occur during the registration process.
-typedef SWIFT_ENUM_NAMED(NSInteger, MWDATRegistrationError, "RegistrationError", closed) {
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATRegistrationError, "RegistrationError", open) {
 /// User is already registered when attempting to register again.
   MWDATRegistrationErrorAlreadyRegistered = 0,
 /// The Wearables Device Access Toolkit configuration is invalid or incomplete.
@@ -589,10 +590,8 @@ typedef SWIFT_ENUM_NAMED(NSInteger, MWDATRegistrationError, "RegistrationError",
   MWDATRegistrationErrorMetaAINotInstalled = 2,
 /// Network connection is unavailable. Please check your internet connection and try again.
   MWDATRegistrationErrorNetworkUnavailable = 3,
-/// The registration process timed out. Please try again.
-  MWDATRegistrationErrorTimeout = 4,
 /// An unknown error occurred during the registration process.
-  MWDATRegistrationErrorUnknown = 5,
+  MWDATRegistrationErrorUnknown = 4,
 };
 static NSString * _Nonnull const MWDATRegistrationErrorDomain = @"MWDATCore.RegistrationError";
 
@@ -609,33 +608,41 @@ typedef SWIFT_ENUM_NAMED(NSInteger, MWDATRegistrationState, "RegistrationState",
 };
 
 /// Error conditions that can occur during the unregistration process.
-typedef SWIFT_ENUM_NAMED(NSInteger, MWDATUnregistrationError, "UnregistrationError", closed) {
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATUnregistrationError, "UnregistrationError", open) {
 /// User is already unregistered when attempting to unregister again.
   MWDATUnregistrationErrorAlreadyUnregistered = 0,
 /// The Wearables Device Access Toolkit configuration is invalid or incomplete.
   MWDATUnregistrationErrorConfigurationInvalid = 1,
 /// The Meta AI app is not installed on the device, which is required for unregistration.
   MWDATUnregistrationErrorMetaAINotInstalled = 2,
-/// The registration process timed out. Please try again.
-  MWDATUnregistrationErrorTimeout = 3,
 /// An unknown error occurred during the unregistration process.
-  MWDATUnregistrationErrorUnknown = 4,
+  MWDATUnregistrationErrorUnknown = 3,
 };
 static NSString * _Nonnull const MWDATUnregistrationErrorDomain = @"MWDATCore.UnregistrationError";
 
 /// Errors that can occur during Device Access Toolkit configuration.
-typedef SWIFT_ENUM_NAMED(NSInteger, MWDATWearablesError, "WearablesError", closed) {
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATWearablesError, "WearablesError", open) {
 /// An unexpected internal error occurred during configuration.
   MWDATWearablesErrorInternalError = 0,
 /// The Device Access Toolkit has already been configured.
   MWDATWearablesErrorAlreadyConfigured = 1,
-/// The configuration provided is invalid or incomplete.
+/// The app bundle configuration is invalid for an unspecified reason.
   MWDATWearablesErrorConfigurationError = 2,
+/// The app bundle’s Info.plist dictionary is unavailable.
+  MWDATWearablesErrorMissingInfoDictionary = 3,
+/// The app bundle does not provide a nonempty string for <code>CFBundleIdentifier</code>.
+  MWDATWearablesErrorMissingBundleIdentifier = 4,
+/// The app name could not be read from <code>CFBundleDisplayName</code> or <code>CFBundleName</code>.
+  MWDATWearablesErrorMissingAppName = 5,
+/// The app bundle does not provide a nonempty string for <code>CFBundleShortVersionString</code>.
+  MWDATWearablesErrorMissingAppVersion = 6,
+/// The app bundle does not provide a nonempty string for <code>CFBundleVersion</code>.
+  MWDATWearablesErrorMissingBuildNumber = 7,
 };
 static NSString * _Nonnull const MWDATWearablesErrorDomain = @"MWDATCore.WearablesError";
 
 /// Errors that can occur during URL handling.
-typedef SWIFT_ENUM_NAMED(NSInteger, MWDATWearablesHandleURLError, "WearablesHandleURLError", closed) {
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATWearablesHandleURLError, "WearablesHandleURLError", open) {
 /// An unexpected internal error occurred during registration URL handling.
   MWDATWearablesHandleURLErrorRegistrationError = 0,
 /// An unexpected internal error occurred during unregistration URL handling.

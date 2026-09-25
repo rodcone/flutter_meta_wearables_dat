@@ -75,9 +75,9 @@ Communication:
 | `timeout` | Operation timed out |
 | `videoStreamingError` | Video stream failed |
 | `permissionDenied` | Camera permission denied |
-| `hingesClosed` | Glasses folded shut **or taken off**. The SDK does not auto-resume — the user puts them back on, then you start a new session |
+| `hingesClosed` | SDK reports closed hinges; some device/firmware combinations also emit it on removal. Removal alone does not always stop streaming. When this error occurs, clear the ended preview and start a new session once the glasses are ready; no auto-resume |
 | `thermalCritical` | Device thermal state is critical — streaming pauses |
-| `thermalEmergency` | Device thermal state is emergency — streaming stopped. **iOS only**; on Android this arrives as `deviceThermalEmergency` |
+| `thermalEmergency` | Legacy stream code; DAT 1.0.0 reports session emergencies as `deviceThermalEmergency` on both platforms |
 | `peakPowerShutdown` | Device exceeded peak power limit — streaming stopped |
 | `batteryCritical` | Device battery critically low — streaming stopped |
 | `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants of the above — the session itself goes down, not just the stream |
@@ -87,11 +87,14 @@ Communication:
 | `datAppOnTheGlassesUpdateRequired` | The on-device DAT app needs updating. Call `MetaWearablesDat.openDATGlassesAppUpdate()` to prompt the user. |
 | `dwaUnavailable` | The DAT Wearables App is unavailable on the glasses |
 | `stoppedForBackground` | The app was backgrounded without background streaming enabled, so the plugin ended the session on purpose. A terminal `stopped` follows. Not a fault |
+| `insufficientSDKVersion` | Terminal: the app must update to a supported DAT SDK. Do not retry the same session. |
+| `dwaOutOfStuRange` | Nonblocking compatibility warning; keep streaming and optionally suggest an app update. |
+| `audioStreamingError` | iOS SDK audio error; camera audio streaming is not enabled by this plugin. |
 | `frameStalled` | The stream still reports `streaming` but no frame has arrived for ~1.5s — the preview is frozen. Raised by the plugin, not the SDK. Recover with `stopStreamSession()` then `startStreamSession()`, and use the new texture ID |
 
 Photo-capture failure never appears here — it rejects the `capturePhoto()` future instead (`CAPTURE_PHOTO_FAILED`, with `details` carrying the granular reason).
 
-Codes that leave the stream dead with no auto-resume need a **teardown**, not a retry: clear your texture ID and streaming flag, or the `Texture` widget freezes on its last frame. Those are `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical` and `sessionEndedByDevice`.
+Codes that leave the stream dead with no auto-resume need a **teardown**, not a retry: clear your texture ID and streaming flag, or the `Texture` widget freezes on its last frame. Those are `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical`, `sessionEndedByDevice` and `insufficientSDKVersion`.
 
 `frameStalled` is not in that list either, but it needs the opposite of a teardown-and-stop: the stream was never stopped, so nothing will ever clear it. Restart — `stopStreamSession()` then `startStreamSession()` — and take the new texture ID. The plugin deliberately does not restart for you, because that would change the texture ID under a widget still rendering the old one. Do **not** try to detect this yourself by rasterising frames and comparing pixels: a frozen stream and a motionless scene produce identical bytes.
 
@@ -302,39 +305,20 @@ Switching transport is a **config-only change** — no plugin update or Dart cod
 </application>
 ```
 
-**settings.gradle.kts** — Add GitHub Packages repository:
+**settings.gradle.kts** — Use Maven Central (no token required):
 
 ```kotlin
-import java.util.Properties
-import kotlin.io.path.div
-import kotlin.io.path.exists
-import kotlin.io.path.inputStream
-
-val localProperties =
-    Properties().apply {
-        val localPropertiesPath = rootDir.toPath() / "local.properties"
-        if (localPropertiesPath.exists()) {
-            load(localPropertiesPath.inputStream())
-        }
-    }
-
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
-            credentials {
-                username = ""
-                password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
-            }
-        }
+        maven("https://storage.googleapis.com/download.flutter.io")
     }
 }
 ```
 
-Set a GitHub token with `read:packages` scope via `GITHUB_TOKEN` env var or `github_token` in `local.properties`.
+DAT 1.0.0 uses Maven Central; no GitHub Packages token is required.
 
 **MainActivity** — Must extend `FlutterFragmentActivity` (not `FlutterActivity`):
 
@@ -533,8 +517,8 @@ Develop and test without physical Meta glasses. Mock support lives in the option
 ```yaml
 # pubspec.yaml — add only in dev/staging configs
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.2
-  flutter_meta_wearables_dat_mock_device: ^0.9.2
+  flutter_meta_wearables_dat: ^1.0.0-rc.1
+  flutter_meta_wearables_dat_mock_device: ^1.0.0-rc.1
 ```
 
 ```dart
@@ -587,7 +571,7 @@ Stream not starting?
 ├── Check streamSessionStateStream() for current state
 ├── Check streamSessionErrorStream() for errors
 ├── On Android: MainActivity extends FlutterFragmentActivity?
-├── On Android: GitHub token configured for Maven dependency?
+├── On Android: mavenCentral() configured for DAT dependencies?
 └── Try restarting glasses: power off → hold capture button → power on → release when LED turns red
 
 iOS: Wi-Fi never prompts, or one transport streams unreliably?

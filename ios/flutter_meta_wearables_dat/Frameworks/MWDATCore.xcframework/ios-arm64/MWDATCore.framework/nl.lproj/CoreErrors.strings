@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "Deregistratieproces is mislukt vanwege een niet opgegeven reden";
 "dat_error_registration_meta_ai_not_installed" = "De Meta AI-app is niet geïnstalleerd op het apparaat. Zonder deze app werkt de registratie niet";
 "dat_error_registration_network_unavailable" = "Geen internetverbinding beschikbaar. Controleer je verbinding en probeer het opnieuw";
-"dat_error_registration_timeout" = "Time-out voor registratie verlopen, geen reactie van Meta AI";
 "dat_error_registration_unknown" = "Er is een onbekende fout opgetreden tijdens het registratieproces";
 "dat_error_session_already_exists" = "Er bestaat al een sessie voor dit apparaat";
 "dat_error_session_already_stopped" = "Sessie is al gestopt";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "Registratie van gebruiker is al ongedaan gemaakt bij nieuwe poging om registratie ongedaan te maken";
 "dat_error_unregistration_configuration_invalid" = "De configuratie van de Wearables Device Access Toolkit is ongeldig of onvolledig";
 "dat_error_unregistration_meta_ai_not_installed" = "De Meta AI-app is niet geïnstalleerd op het apparaat, wat is vereist om de registratie ongedaan te kunnen maken";
-"dat_error_unregistration_timeout" = "Time-out voor deregistratie verlopen, geen reactie van Meta AI";
 "dat_error_unregistration_unknown" = "Er is een onbekende fout opgetreden tijdens het proces voor het ongedaan maken van registratie";
 "dat_error_wearables_already_configured" = "Al geconfigureerd";
 "dat_error_wearables_already_initialized" = "Wearables is al geïnitialiseerd.";

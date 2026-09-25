@@ -123,12 +123,12 @@ The iOS side supports CocoaPods and Swift Package Manager from the same on-disk 
 
 ## Android
 
-The Android implementation uses Maven dependencies from GitHub Packages. Follow these steps to update the DAT version.
+The Android implementation uses Maven dependencies from Maven Central. Follow these steps to update the DAT version.
 
 ### 1. Check Latest Version
 
 - Check the [official Android repository](https://github.com/facebook/meta-wearables-dat-android) for the latest release version
-- Review the [GitHub Packages](https://github.com/orgs/facebook/packages?repo_name=meta-wearables-dat-android) to verify available versions
+- Review the [Maven Central](https://central.sonatype.com/namespace/com.meta.wearable) to verify available versions
 
 ### 2. Update Plugin Version
 
@@ -151,9 +151,9 @@ Keep the two values in sync — mixing versions across the two plugins risks ABI
 2. Sync Gradle: Run `./gradlew build --refresh-dependencies` or use Android Studio's "Sync Project with Gradle Files"
 3. Verify the new dependencies are resolved correctly
 
-If Gradle fails with `401 Unauthorized` resolving `com.meta.wearable:mwdat-*`, your GitHub token (`GITHUB_TOKEN` or `github_token` in `local.properties`) is expired — regenerate one with `read:packages` scope.
+If dependency resolution fails, verify `mavenCentral()` and the target release coordinates. DAT 1.x does not need a GitHub Packages token.
 
-**The same applies in CI.** The `android-build` job in [`ci.yml`](../.github/workflows/ci.yml) builds the example APK, which is the only job that compiles either plugin's Kotlin. It reads the token from `MWDAT_PACKAGES_TOKEN` (a repo secret — a PAT with `read:packages`) and falls back to the workflow's built-in `GITHUB_TOKEN`. The built-in token is scoped to this repository and is not reliably accepted for `facebook/meta-wearables-dat-android`, so **if `android-build` starts failing with `401 Unauthorized`, add or refresh the `MWDAT_PACKAGES_TOKEN` secret** (Settings → Secrets and variables → Actions). The job is skipped on fork PRs, where no secrets are available.
+**CI:** the Android build resolves public Maven Central artifacts and runs on fork PRs without package credentials.
 
 ### 4. Implement API Changes
 
@@ -180,7 +180,19 @@ Key Android-specific implementation files:
 
 ## Releasing a new version
 
-The two packages release **in lockstep at the same version number**. CI enforces this on PRs (the `versions-in-sync` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) fails if the two pubspecs drift), and the publish workflow ([`.github/workflows/publish.yml`](../.github/workflows/publish.yml)) publishes both packages to pub.dev when you push a tag of the form `v<x>.<y>.<z>`.
+The two packages release **in lockstep at the same version number**. CI enforces this on PRs (the `versions-in-sync` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) fails if the two pubspecs drift), and the publish workflow ([`.github/workflows/publish.yml`](../.github/workflows/publish.yml)) publishes both packages to pub.dev when you push a tag of the form `v<x>.<y>.<z>`, optionally with a prerelease suffix such as `-rc.1`.
+
+### Release candidates
+
+The DAT 1.0.0 migration targets plugin `1.0.0-rc.1` first. Set this exact version in all four
+version locations and both changelog headings. Install snippets should use `^1.0.0-rc.1`:
+`^1.0.0` excludes the earlier release candidate. Increment candidates to `-rc.2`, `-rc.3`, etc.,
+then remove the suffix for stable `1.0.0` after validation. Plugin semver still governs later API
+changes; matching DAT's version now does not require matching every future SDK release.
+
+An RC tag triggers real publication of both packages. GitHub releases with a prerelease suffix
+are marked prerelease and are not marked latest. Creating or pushing a tag is a separate release
+action, never part of preparing the version. See [Dart prerelease guidance](https://dart.dev/tools/pub/publishing#publish-prerelease-versions).
 
 ### When to release
 
@@ -255,7 +267,7 @@ The core package (`flutter_meta_wearables_dat`) is already live on pub.dev and p
 The publish job runs sequentially: core first, then mock. pub.dev versions are **immutable** — you can't re-upload the same version after fixing a problem. So if core publishes successfully but the mock add-on step fails:
 
 1. Fix the cause of the mock-publish failure on a hotfix branch.
-2. Bump both packages to the next patch version (e.g. `0.4.0` → `0.4.1`) — all four version locations + both CHANGELOGs. The core CHANGELOG entry can be a one-liner like *"Republish to align with `flutter_meta_wearables_dat_mock_device 0.4.1`"*.
+2. Bump both packages to the next patch version (e.g. `0.4.0` → `0.4.1`), or the next candidate for an RC (`1.0.0-rc.1` → `1.0.0-rc.2`) — all four version locations + both CHANGELOGs. The core CHANGELOG entry can be a one-liner explaining the lockstep republish.
 3. Merge, tag `v0.4.1`, push.
 
 This should be rare in practice — both publishes have already passed `dart pub publish --dry-run` in CI by the time you tag — but the failure mode exists and forward-bump is the only recovery path.

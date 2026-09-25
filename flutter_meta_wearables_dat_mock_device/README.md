@@ -14,8 +14,8 @@ Optional **MockDeviceKit** add-on for [`flutter_meta_wearables_dat`](https://pub
 ```yaml
 # pubspec.yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.2
-  flutter_meta_wearables_dat_mock_device: ^0.9.2
+  flutter_meta_wearables_dat: ^1.0.0-rc.1
+  flutter_meta_wearables_dat_mock_device: ^1.0.0-rc.1
 ```
 
 Apps using this package **must** declare the camera permission strings the simulated feed needs:
@@ -25,7 +25,7 @@ Apps using this package **must** declare the camera permission strings the simul
 
 **Since DAT 0.9.0, mock devices also require the same transport declarations as real hardware.** MockDeviceKit now runs the same `Info.plist`-based link-availability check, so a mock-only app that skipped these will fail exactly as a real device would: `NSBluetoothAlwaysUsageDescription` at minimum, plus `NSLocalNetworkUsageDescription` and `NSBonjourServices` if you exercise the Wi-Fi transport.
 
-See the [core plugin's README](https://github.com/rodcone/flutter_meta_wearables_dat#readme) for the rest of the integration setup (Bluetooth, deep links, GitHub Packages repo, MainActivity).
+See the [core plugin's README](https://github.com/rodcone/flutter_meta_wearables_dat#readme) for the rest of the integration setup (Bluetooth, deep links, Maven Central repository, MainActivity).
 
 ## Usage
 

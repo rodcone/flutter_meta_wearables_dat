@@ -449,6 +449,24 @@ SWIFT_CLASS_PROPERTY(@property (nonatomic, class, readonly) NSNotificationName _
 + (NSNotificationName _Nonnull)streamErrorOccurred SWIFT_WARN_UNUSED_RESULT;
 @end
 
+/// Audio codec configuration for streaming sessions.
+/// @Unpublishable
+SWIFT_CLASS_NAMED("ObjC_AudioCodec")
+@interface MWDATAudioCodec : NSObject
+/// The sample rate in Hz.
+@property (nonatomic, readonly) NSUInteger sampleRate;
+/// The number of audio channels.
+@property (nonatomic, readonly) uint32_t numberOfChannels;
+/// Creates a PCM audio codec configuration.
+/// \param sampleRate The sample rate in Hz (e.g., 44100).
+///
+/// \param numberOfChannels The number of audio channels (e.g., 2 for stereo).
+///
+- (nonnull instancetype)initWithSampleRate:(NSUInteger)sampleRate numberOfChannels:(uint32_t)numberOfChannels OBJC_DESIGNATED_INITIALIZER;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
 @class MWDATStream;
 /// Objective-C wrapper for the consolidated <code>Camera</code> capability.
 /// Obtain one via <code>-[MWDATDeviceSession addCameraWithError:]</code> /
@@ -643,10 +661,21 @@ SWIFT_CLASS_NAMED("ObjC_StreamConfiguration")
 /// \param frameRate The target frame rate for streaming.
 ///
 - (nonnull instancetype)initWithVideoCodec:(enum MWDATVideoCodec)videoCodec resolution:(enum MWDATStreamingResolution)resolution frameRate:(NSInteger)frameRate OBJC_DESIGNATED_INITIALIZER;
+/// Creates a new stream session configuration with specified parameters including audio.
+/// @Unpublishable
+/// \param videoCodec The video codec to use for streaming.
+///
+/// \param resolution The resolution for video streaming.
+///
+/// \param frameRate The target frame rate for streaming.
+///
+/// \param audioCodec The audio codec to use for streaming. Pass nil to disable audio.
+///
+- (nonnull instancetype)initWithVideoCodec:(enum MWDATVideoCodec)videoCodec resolution:(enum MWDATStreamingResolution)resolution frameRate:(NSInteger)frameRate audioCodec:(MWDATAudioCodec * _Nullable)audioCodec OBJC_DESIGNATED_INITIALIZER;
 @end
 
 /// Errors that can occur during streaming sessions.
-typedef SWIFT_ENUM_NAMED(NSInteger, MWDATStreamError, "ObjC_StreamError", closed) {
+typedef SWIFT_ENUM_NAMED(NSInteger, MWDATStreamError, "ObjC_StreamError", open) {
 /// An internal error occurred.
   MWDATStreamErrorInternalError = 0,
 /// The specified device could not be found.
@@ -657,18 +686,19 @@ typedef SWIFT_ENUM_NAMED(NSInteger, MWDATStreamError, "ObjC_StreamError", closed
   MWDATStreamErrorTimeout = 3,
 /// Video streaming encountered an error.
   MWDATStreamErrorVideoStreamingError = 4,
+/// Audio streaming encountered an error.
+/// @Unpublishable
+  MWDATStreamErrorAudioStreamingError = 5,
 /// Camera permission was denied.
-  MWDATStreamErrorPermissionDenied = 5,
+  MWDATStreamErrorPermissionDenied = 6,
 /// The device hinges were closed during streaming.
-  MWDATStreamErrorHingesClosed = 6,
-/// The device thermal state has reached a critical level that may affect streaming performance.
-  MWDATStreamErrorThermalCritical = 7,
-/// The device thermal state has reached an emergency level and the device is shutting down.
-  MWDATStreamErrorThermalEmergency = 8,
-/// The device has entered peak power shutdown.
-  MWDATStreamErrorPeakPowerShutdown = 9,
-/// The device battery has reached a critically low level.
-  MWDATStreamErrorBatteryCritical = 10,
+  MWDATStreamErrorHingesClosed = 7,
+/// Device thermal level is too high for streaming.
+  MWDATStreamErrorThermalHot = 8,
+/// Device battery is too low for streaming.
+  MWDATStreamErrorBatteryLow = 9,
+/// Device peak power limit reached.
+  MWDATStreamErrorPeakPowerLimit = 10,
 /// A photo capture did not complete — no image was returned in time (e.g. low device storage).
   MWDATStreamErrorPhotoCaptureFailed = 11,
 };

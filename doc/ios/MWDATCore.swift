@@ -8,6 +8,167 @@ import Foundation
 import MachO
 import UIKit
 
+/// Errors raised while preparing the Airship transport for standalone photo capture.
+///
+/// @Unpublishable
+public enum AirshipError : Int, Error, Sendable {
+
+    case setupError
+
+    case unknownError
+
+    /// Retrieve the localized description for this error.
+    public var localizedDescription: String { get }
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: Int)
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = Int
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: Int { get }
+}
+
+extension AirshipError : Equatable {
+}
+
+extension AirshipError : Hashable {
+}
+
+extension AirshipError : RawRepresentable {
+}
+
+/// Metadata and local delivery state for a file received through the Airship transport.
+///
+/// @Unpublishable
+public struct AirshipFileRecord : Sendable {
+
+    public let uuid: UUID
+
+    public let name: String
+
+    public let size: UInt64
+
+    public let bytesReceived: UInt64?
+
+    public let status: MWDATCore.AirshipTransferStatus
+
+    public let error: (any Error)?
+
+    public let path: URL?
+
+    public init(uuid: UUID, name: String, size: UInt64, status: MWDATCore.AirshipTransferStatus, error: (any Error)?, path: URL?, bytesReceived: UInt64? = nil)
+}
+
+/// Manages the Airship receiver used by standalone photo capture for one or more device scopes.
+///
+/// Most applications should use `Camera.photo` instead of interacting with this transport object
+/// directly.
+///
+/// @Unpublishable
+final public class AirshipSession : Sendable {
+
+    final public var fileRecordPublisher: any MWDATCore.Announcer<MWDATCore.AirshipFileRecord> { get }
+
+    public convenience init()
+
+    final public func start(scopeUUID: UUID, namespace: String = "ACDCAirship") throws(MWDATCore.AirshipError)
+
+    final public func stop(scopeUUID: UUID)
+
+    @objc deinit
+}
+
+/// The lifecycle state of a photo transfer received through the Airship transport.
+///
+/// @Unpublishable
+public enum AirshipTransferStatus : Sendable {
+
+    case inProgress
+
+    case stopped
+
+    case completed
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.AirshipTransferStatus, b: MWDATCore.AirshipTransferStatus) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension AirshipTransferStatus : Equatable {
+}
+
+extension AirshipTransferStatus : Hashable {
+}
+
 /// A protocol for objects that can announce events to registered listeners.
 public protocol Announcer<T> {
 
@@ -141,6 +302,65 @@ extension CapabilityState : Hashable {
 }
 
 extension CapabilityState : BitwiseCopyable {
+}
+
+/// Represents whether the glasses battery is charging.
+///
+/// Reported by the connected device and surfaced on ``Device`` alongside
+/// ``Device/batteryLevel``.
+@frozen public enum ChargingState : Sendable, Equatable {
+
+    /// The charging state is unknown or has not been reported.
+    case unknown
+
+    /// The battery is charging.
+    case charging
+
+    /// The battery is not charging.
+    case notCharging
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.ChargingState, b: MWDATCore.ChargingState) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension ChargingState : Hashable {
+}
+
+extension ChargingState : BitwiseCopyable {
 }
 
 /// Indicates the compatibility status between AI glasses and the Wearables Device Access Toolkit.
@@ -293,6 +513,31 @@ final public class Device : Sendable {
     /// The current connection state of the device.
     final public var linkState: MWDATCore.LinkState { get }
 
+    /// The battery charge level, from 0 to 100, or `nil` if it has not been reported.
+    ///
+    /// Populated from the connected device's state. Observe ``addDeviceStateListener(_:)`` for changes.
+    final public var batteryLevel: Int? { get }
+
+    /// Whether the device battery is charging.
+    final public var chargingState: MWDATCore.ChargingState { get }
+
+    /// Whether the glasses are being worn.
+    final public var donState: MWDATCore.DonState { get }
+
+    /// Whether the glasses arms are open or folded.
+    final public var hingeState: MWDATCore.HingeState { get }
+
+    /// The current thermal level of the device.
+    final public var thermalLevel: MWDATCore.ThermalLevel { get }
+
+    /// Adds a listener that fires immediately with the current ``DeviceState`` and again whenever the
+    /// device's state changes — battery, charging, don/doff, hinge, or thermal. Each callback receives
+    /// an immutable ``DeviceState`` snapshot. To observe raw connection transitions, use
+    /// ``addLinkStateListener(_:)``.
+    /// - Parameter listener: The callback to execute with the updated device state.
+    /// - Returns: A token that can be used to cancel the listener.
+    final public func addDeviceStateListener(_ listener: @escaping @Sendable (MWDATCore.DeviceState) -> Void) -> any MWDATCore.AnyListenerToken
+
     /// Adds a listener to receive notifications when the device's link state changes.
     /// - Parameter listener: The callback to execute when the link state changes.
     /// - Returns: A token that can be used to cancel the listener.
@@ -348,7 +593,7 @@ public protocol DeviceSelector : Sendable {
 /// 4. Attach capabilities (e.g., `addCamera()`)
 /// 5. Call ``stop()`` to disconnect (cascades to all attached capabilities)
 ///
-/// Sessions are not reusable — after reaching ``DeviceSessionState/stopped``,
+/// Sessions are not reusable — after a session reaches ``DeviceSessionState/stopped``,
 /// create a new session via the factory.
 final public class DeviceSession : Sendable {
 
@@ -363,6 +608,17 @@ final public class DeviceSession : Sendable {
 
     /// The current state of this session.
     final public var state: MWDATCore.DeviceSessionState { get }
+
+    /// The live ``Device`` this session is bound to, or `nil` if the device is no longer known to the
+    /// SDK (e.g. it was unpaired). The returned device reflects the device's current state; observe
+    /// ``Device/addDeviceStateListener(_:)`` for battery / charging / don / hinge / thermal changes. Mirrors
+    /// Android's `DeviceSession.deviceInfo`.
+    ///
+    /// Each access returns a fresh lightweight wrapper over the same underlying device, so don't rely
+    /// on reference identity across accesses. Observation lifetime is governed by the token returned
+    /// from ``Device/addDeviceStateListener(_:)`` (the listener is held by the underlying device), not
+    /// by the wrapper's lifetime.
+    final public var device: MWDATCore.Device? { get }
 
     @objc deinit
 
@@ -399,7 +655,7 @@ final public class DeviceSession : Sendable {
 }
 
 /// Errors that can occur during ``DeviceSession`` operations.
-@frozen public enum DeviceSessionError : MWDATCore.DatError, Equatable {
+public enum DeviceSessionError : MWDATCore.DatError, Equatable {
 
     /// No device is available (not connected, powered off, or incompatible).
     case noEligibleDevice
@@ -437,8 +693,14 @@ final public class DeviceSession : Sendable {
     /// The app on the glasses needs an update before the session can start.
     case datAppOnTheGlassesUpdateRequired
 
-    /// The DAT Wearables App on the glasses is not reachable.
+    /// The companion component on the glasses is unavailable.
     case dwaUnavailable
+
+    /// The app uses an SDK version that is no longer supported by the glasses firmware.
+    case insufficientSDKVersion
+
+    /// The app and glasses use versions outside the recommended compatibility range. Your app may show a rate-limited suggestion to update the app, but should otherwise continue normally.
+    case dwaOutOfStuRange
 
     /// A description of the error for debugging and logging.
     public var description: String { get }
@@ -525,18 +787,36 @@ extension DeviceSessionState : Hashable {
 extension DeviceSessionState : BitwiseCopyable {
 }
 
-/// Represents the current state of a connected device.
+/// A snapshot of a connected device's state.
 ///
-/// Contains observable device state metrics such as the device's thermal level.
-/// Use ``WearablesInterface/deviceStateStream(for:)`` to observe changes.
+/// Delivered by ``Device/addDeviceStateListener(_:)`` immediately and again on every change. Each
+/// value captures the device's link state, compatibility, battery, charging, don/doff, hinge, and
+/// thermal state at the time of the callback.
 public struct DeviceState : Sendable, Equatable {
 
-    /// The current thermal level of the device.
-    public var thermalLevel: MWDATCore.ThermalLevel { get }
+    /// Whether the device is connected, connecting, or disconnected.
+    public var linkState: MWDATCore.LinkState
 
-    /// Creates a new device state with the specified thermal level.
-    /// - Parameter thermalLevel: The thermal level of the device. Defaults to ``ThermalLevel/unknown``.
-    public init(thermalLevel: MWDATCore.ThermalLevel = .unknown)
+    /// Whether the device's firmware is compatible with this SDK.
+    public var compatibility: MWDATCore.Compatibility
+
+    /// The battery charge level, from 0 to 100, or `nil` if it has not been reported.
+    public var batteryLevel: Int?
+
+    /// Whether the device battery is charging.
+    public var chargingState: MWDATCore.ChargingState
+
+    /// Whether the glasses are being worn (donned) or not (doffed).
+    public var donState: MWDATCore.DonState
+
+    /// Whether the glasses arms (hinge) are open or folded closed.
+    public var hingeState: MWDATCore.HingeState
+
+    /// The current thermal level of the device.
+    public var thermalLevel: MWDATCore.ThermalLevel
+
+    /// Creates a new device state.
+    public init(linkState: MWDATCore.LinkState = .disconnected, compatibility: MWDATCore.Compatibility = .undefined, batteryLevel: Int? = nil, chargingState: MWDATCore.ChargingState = .unknown, donState: MWDATCore.DonState = .unknown, hingeState: MWDATCore.HingeState = .unknown, thermalLevel: MWDATCore.ThermalLevel = .unknown)
 
     /// Returns a Boolean value indicating whether two values are equal.
     ///
@@ -641,6 +921,152 @@ extension DeviceType : Hashable {
 extension DeviceType : RawRepresentable {
 }
 
+/// Represents whether the glasses are currently being worn (donned) or not (doffed).
+///
+/// Reported by the connected device and surfaced on ``Device``. Use it to react to the
+/// user putting the glasses on or taking them off.
+@frozen public enum DonState : Sendable, Equatable {
+
+    /// The don state is unknown or has not been reported.
+    case unknown
+
+    /// The glasses are not being worn.
+    case doffed
+
+    /// The glasses are being worn.
+    case donned
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.DonState, b: MWDATCore.DonState) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension DonState : Hashable {
+}
+
+extension DonState : BitwiseCopyable {
+}
+
+/// Represents whether the glasses arms are open or folded.
+///
+/// Reported by the connected device and surfaced on ``Device``. Folding the glasses
+/// typically powers them down, so this often coincides with a disconnect.
+@frozen public enum HingeState : Sendable, Equatable {
+
+    /// The hinge state is unknown or has not been reported.
+    case unknown
+
+    /// The glasses arms are folded (closed).
+    case closed
+
+    /// The glasses arms are open.
+    case open
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.HingeState, b: MWDATCore.HingeState) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension HingeState : Hashable {
+}
+
+extension HingeState : BitwiseCopyable {
+}
+
+/// Represents the action to launch the partner app triggered by a "Hey Meta" voice command.
+///
+/// This action is emitted when the user says "Hey Meta, open [app name]" and the voice assistant
+/// determines that this app should be launched. Apps should handle this action by bringing their
+/// main UI to the foreground, then call ``ResponseHandle/sendSuccess(actionOutput:)`` on
+/// ``responseHandle`` to acknowledge the launch back to the glasses.
+///
+/// Example usage:
+/// ```swift
+/// stream.invocationsPublisher.listen { invocation in
+///     guard let launchApp = invocation as? LaunchApp else { return }
+///     navigateToMainScreen()
+///     Task {
+///         _ = await launchApp.responseHandle.sendSuccess(actionOutput: nil)
+///     }
+/// }
+/// ```
+///
+/// @Unpublishable
+public struct LaunchApp : MWDATCore.VoiceInvocation {
+
+    public let responseHandle: any MWDATCore.ResponseHandle
+
+    public let deviceIdentifier: MWDATCore.DeviceIdentifier
+
+    public init(responseHandle: any MWDATCore.ResponseHandle, deviceIdentifier: MWDATCore.DeviceIdentifier)
+}
+
 /// Represents the connection state between a device and the Wearables Device Access Toolkit.
 @frozen public enum LinkState : Equatable, Sendable {
 
@@ -724,7 +1150,7 @@ public actor ListenerTokenBag {
     /// Cancels every stored token, in the order it was added, then empties the bag.
     ///
     /// Each token's cancellation is awaited before the next begins, so once this
-    /// method returns every subscription has been torn down. Calling it on an
+    /// method returns, every subscription has been torn down. Calling it on an
     /// already-empty bag is a no-op.
     public func cancelAll() async
 
@@ -749,8 +1175,8 @@ public actor ListenerTokenBag {
     nonisolated final public var unownedExecutor: UnownedSerialExecutor { get }
 }
 
-/// Errors that can occur when navigating to a screen in the Meta AI companion app.
-@objc(MWDATNavigationError) @frozen public enum NavigationError : Int, Error {
+/// Errors that can occur when navigating to a screen in the Meta AI app.
+@objc(MWDATNavigationError) public enum NavigationError : Int, MWDATCore.DatError {
 
     /// The Meta AI app is not installed on the device.
     case metaAINotInstalled
@@ -758,7 +1184,12 @@ public actor ListenerTokenBag {
     /// The app is not registered with AI glasses.
     case notRegistered
 
+    /// A human-readable description of the error suitable for logging, debugging,
+    /// and display to developers. This should return the English version of the error.
     public var description: String { get }
+
+    /// A localized message describing what error occurred.
+    public var errorDescription: String? { get }
 
     /// Creates a new instance with the specified raw value.
     ///
@@ -814,9 +1245,6 @@ extension NavigationError : Hashable {
 }
 
 extension NavigationError : RawRepresentable {
-}
-
-extension NavigationError : BitwiseCopyable {
 }
 
 @objc public class ObjC_AnyListenerToken : NSObject {
@@ -1128,6 +1556,8 @@ extension ObjC_LinkState : BitwiseCopyable {
 
     case camera
 
+    case microphone
+
     /// Provides a human-readable description of the permission.
     public var description: String { get }
 
@@ -1313,6 +1743,10 @@ public enum Permission : Sendable, CaseIterable {
 
     /// Permission to access camera functionality on the connected wearable device.
     case camera
+
+    /// Permission to access microphone functionality on the connected wearable device. Required by the
+    /// Speech capability.
+    case microphone
 
     /// Returns a Boolean value indicating whether two values are equal.
     ///
@@ -1505,7 +1939,7 @@ extension PermissionStatus : Hashable {
 }
 
 /// Error conditions that can occur during the registration process.
-@objc(MWDATRegistrationError) @frozen public enum RegistrationError : Int, MWDATCore.DatError {
+@objc(MWDATRegistrationError) public enum RegistrationError : Int, MWDATCore.DatError {
 
     /// User is already registered when attempting to register again.
     case alreadyRegistered
@@ -1518,9 +1952,6 @@ extension PermissionStatus : Hashable {
 
     /// Network connection is unavailable. Please check your internet connection and try again.
     case networkUnavailable
-
-    /// The registration process timed out. Please try again.
-    case timeout
 
     /// An unknown error occurred during the registration process.
     case unknown
@@ -1588,7 +2019,102 @@ extension RegistrationError : Hashable {
 extension RegistrationError : RawRepresentable {
 }
 
-extension RegistrationError : BitwiseCopyable {
+/// A pending registration request initiated by the Meta AI app.
+///
+/// Receiving this object does not start registration. The host application may present its own
+/// confirmation or education UI before calling ``continueRegistration()``. Applications that do
+/// not need an intermediate UI can call ``continueRegistration()`` immediately.
+///
+/// A request is single-use. After either decision method is called, subsequent calls throw
+/// ``RegistrationRequestError/alreadyHandled``.
+final public class RegistrationRequest : Sendable {
+
+    /// The identifier created by Meta AI for this registration attempt.
+    final public let flowID: String
+
+    /// The version of the MWA-initiated registration protocol used by this request.
+    final public let protocolVersion: Int
+
+    /// Accepts the request, prepares the application's secure registration state and attestation,
+    /// and returns control to Meta AI to finish registration.
+    final public func continueRegistration() async throws(MWDATCore.RegistrationRequestError)
+
+    /// Declines the request and returns a cancellation response to Meta AI.
+    final public func cancelRegistration() async throws(MWDATCore.RegistrationRequestError)
+
+    @objc deinit
+}
+
+/// Errors that can occur while responding to a Meta AI-initiated registration request.
+@frozen public enum RegistrationRequestError : MWDATCore.DatError, Equatable {
+
+    /// The incoming URL is a DAT registration request but is malformed or unsupported.
+    case invalidRequest
+
+    /// The request has already been continued or cancelled.
+    case alreadyHandled
+
+    /// The Device Access Toolkit configuration is invalid or incomplete.
+    case configurationInvalid
+
+    /// Network connectivity is required to prepare platform attestation.
+    case networkUnavailable
+
+    /// The Meta AI app could not be opened to finish the request.
+    case metaAINotInstalled
+
+    /// Registration preparation failed.
+    case registrationFailed
+
+    /// Cancellation could not be returned to Meta AI.
+    case cancellationFailed
+
+    /// A human-readable description of the error suitable for logging, debugging,
+    /// and display to developers. This should return the English version of the error.
+    public var description: String { get }
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.RegistrationRequestError, b: MWDATCore.RegistrationRequestError) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension RegistrationRequestError : Hashable {
+}
+
+extension RegistrationRequestError : BitwiseCopyable {
 }
 
 /// Represents the current state of user registration with the Meta Wearables platform.
@@ -1666,6 +2192,28 @@ extension RegistrationState : Sendable {
 }
 
 extension RegistrationState : BitwiseCopyable {
+}
+
+/// Type-safe handle for sending responses to voice invocations.
+///
+/// This protocol provides strong coupling between a ``VoiceInvocation`` and its response, ensuring
+/// that responses can only be sent for the specific invocation they're associated with. The handle
+/// also tracks response delivery status and prevents duplicate responses.
+///
+/// @Unpublishable
+public protocol ResponseHandle : Sendable {
+
+    /// Sends a successful response for the associated action.
+    ///
+    /// - Parameter actionOutput: Optional output data to include with the response.
+    /// - Returns: `true` if the response was sent successfully, `false` otherwise.
+    func sendSuccess(actionOutput: String?) async -> Bool
+
+    /// Sends a failure response for the associated action.
+    ///
+    /// - Parameter actionOutput: Optional error details or diagnostic information.
+    /// - Returns: `true` if the response was sent successfully, `false` otherwise.
+    func sendFailure(actionOutput: String?) async -> Bool
 }
 
 /// A device selector that always selects a specific, predetermined device.
@@ -1761,7 +2309,7 @@ extension ThermalLevel : BitwiseCopyable {
 }
 
 /// Error conditions that can occur during the unregistration process.
-@objc(MWDATUnregistrationError) @frozen public enum UnregistrationError : Int, MWDATCore.DatError {
+@objc(MWDATUnregistrationError) public enum UnregistrationError : Int, MWDATCore.DatError {
 
     /// User is already unregistered when attempting to unregister again.
     case alreadyUnregistered
@@ -1771,9 +2319,6 @@ extension ThermalLevel : BitwiseCopyable {
 
     /// The Meta AI app is not installed on the device, which is required for unregistration.
     case metaAINotInstalled
-
-    /// The registration process timed out. Please try again.
-    case timeout
 
     /// An unknown error occurred during the unregistration process.
     case unknown
@@ -1841,7 +2386,175 @@ extension UnregistrationError : Hashable {
 extension UnregistrationError : RawRepresentable {
 }
 
-extension UnregistrationError : BitwiseCopyable {
+/// Base protocol for all voice invocations that can be received from Meta Wearables devices.
+///
+/// Voice invocations are events triggered by voice commands to the "Hey Meta" voice assistant.
+/// Implementations of this protocol represent specific action types that apps can handle.
+///
+/// - SeeAlso: ``LaunchApp``
+/// - SeeAlso: ``VoiceInvocationsStream``
+///
+/// @Unpublishable
+public protocol VoiceInvocation : Sendable {
+}
+
+/// Errors that can occur while receiving or responding to voice invocations from Meta Wearables
+/// devices.
+///
+/// Surfaced through ``VoiceInvocationsStream/errorPublisher`` and thrown from
+/// ``VoiceInvocationsStream/start(deviceIdentifier:)``. Inspect the specific case to decide whether
+/// to retry, reconnect, or surface a message to the user.
+///
+/// @Unpublishable
+public enum VoiceInvocationError : MWDATCore.DatError, Equatable {
+
+    /// No connected device matched the requested identifier.
+    case deviceNotFound
+
+    /// The provided Wearables instance is not a supported type.
+    case invalidWearablesInterface
+
+    /// The voice invocation channel is not connected.
+    case channelNotConnected
+
+    /// An unspecified channel error occurred during voice invocation.
+    case channelError
+
+    /// Failed to send the voice invocation init request.
+    case failToSendInitRequest
+
+    /// Failed to send a voice invocation message.
+    case failToSendMessage
+
+    /// The voice invocation init request returned an error.
+    case initRequestError
+
+    /// An invalid action message proto was received.
+    case invalidActionMessageProto
+
+    /// An unknown voice invocation message type was received.
+    case unknownMessageType
+
+    /// A voice invocation action failed.
+    case actionFailed
+
+    /// A voice invocation operation was attempted in an invalid session state.
+    case invalidSessionState
+
+    /// A human-readable description of the error suitable for logging, debugging,
+    /// and display to developers. This should return the English version of the error.
+    public var description: String { get }
+
+    /// A localized message describing what error occurred.
+    public var errorDescription: String? { get }
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.VoiceInvocationError, b: MWDATCore.VoiceInvocationError) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension VoiceInvocationError : Hashable {
+}
+
+/// A stream that delivers voice invocations from Meta Wearables devices.
+///
+/// A voice invocations stream listens for AI-initiated actions triggered by the "Hey Meta" voice
+/// assistant on a connected device — for example launching your app — and surfaces them through
+/// ``invocationsPublisher``. Communication errors are reported separately through
+/// ``errorPublisher``. Create one instance per app, call ``start(deviceIdentifier:)`` to begin
+/// listening for a device, and ``stop()`` to tear the stream down and release its connection.
+///
+/// ## Example
+/// ```swift
+/// let stream = try VoiceInvocationsStream(wearables: wearables)
+/// stream.invocationsPublisher.listen { invocation in
+///     guard let launchApp = invocation as? LaunchApp else { return }
+///     navigateToMainScreen()
+///     Task { _ = await launchApp.responseHandle.sendSuccess(actionOutput: nil) }
+/// }
+/// try stream.start(deviceIdentifier: deviceIdentifier)
+/// ```
+///
+/// - SeeAlso: ``VoiceInvocation``
+/// - SeeAlso: ``ResponseHandle``
+///
+/// @Unpublishable
+@MainActor final public class VoiceInvocationsStream {
+
+    /// Publishes voice invocations as they arrive from the connected device.
+    ///
+    /// Register a listener to handle each ``VoiceInvocation`` (such as ``LaunchApp``). Events are
+    /// delivered on the main actor.
+    @MainActor final public var invocationsPublisher: any MWDATCore.Announcer<any MWDATCore.VoiceInvocation> { get }
+
+    /// Publishes errors that occur while communicating with the connected device.
+    ///
+    /// Register a listener to observe ``VoiceInvocationError`` values; these are reported
+    /// independently of ``invocationsPublisher``.
+    @MainActor final public var errorPublisher: any MWDATCore.Announcer<MWDATCore.VoiceInvocationError> { get }
+
+    /// Creates a voice invocations stream backed by the given Wearables instance.
+    ///
+    /// - Parameter wearables: The configured ``WearablesInterface`` used to resolve and connect to
+    ///   devices.
+    /// - Throws: ``VoiceInvocationError/invalidWearablesInterface`` if `wearables` is not a supported
+    ///   Wearables instance.
+    @MainActor public init(wearables: any MWDATCore.WearablesInterface) throws
+
+    /// Begins listening for voice invocations from the specified device.
+    ///
+    /// Tears down any previously active stream first, so calling this again switches the stream to a
+    /// new device. Invocations are delivered through ``invocationsPublisher`` and errors through
+    /// ``errorPublisher``.
+    ///
+    /// - Parameter deviceIdentifier: Identifies the connected device to listen to.
+    /// - Throws: ``VoiceInvocationError/deviceNotFound`` if no device matches `deviceIdentifier`, or
+    ///   ``VoiceInvocationError/channelNotConnected`` if the device has no active connection.
+    @MainActor final public func start(deviceIdentifier: MWDATCore.DeviceIdentifier) throws
+
+    /// Stops listening and releases the underlying device connection.
+    ///
+    /// Safe to call when no stream is active. After stopping, call ``start(deviceIdentifier:)`` to
+    /// listen again.
+    @MainActor final public func stop()
+
+    @objc deinit
+}
+
+extension VoiceInvocationsStream : Sendable {
 }
 
 /// The entry point for configuring and accessing the Wearables Device Access Toolkit.
@@ -1856,7 +2569,11 @@ public enum Wearables {
     /// Subsequent calls will throw ``WearablesError/alreadyConfigured``.
     ///
     /// - Throws: ``WearablesError/alreadyConfigured`` if `configure()` has already been called.
-    /// - Throws: ``WearablesError/configurationError`` if the app bundle configuration is invalid.
+    /// - Throws: ``WearablesError/missingInfoDictionary`` if the app bundle's Info.plist dictionary is unavailable.
+    /// - Throws: ``WearablesError/missingBundleIdentifier`` if `CFBundleIdentifier` is unavailable or empty.
+    /// - Throws: ``WearablesError/missingAppName`` if an app name cannot be read from `CFBundleDisplayName` or `CFBundleName`.
+    /// - Throws: ``WearablesError/missingAppVersion`` if `CFBundleShortVersionString` is unavailable or empty.
+    /// - Throws: ``WearablesError/missingBuildNumber`` if `CFBundleVersion` is unavailable or empty.
     /// - Throws: ``WearablesError/internalError`` if an unexpected error occurs during configuration.
     public static func configure() throws(MWDATCore.WearablesError)
 
@@ -1865,16 +2582,31 @@ public enum Wearables {
 }
 
 /// Errors that can occur during Device Access Toolkit configuration.
-@objc(MWDATWearablesError) @frozen public enum WearablesError : Int, MWDATCore.DatError {
+@objc(MWDATWearablesError) public enum WearablesError : Int, MWDATCore.DatError {
 
     /// An unexpected internal error occurred during configuration.
-    case internalError
+    case internalError = 0
 
     /// The Device Access Toolkit has already been configured.
-    case alreadyConfigured
+    case alreadyConfigured = 1
 
-    /// The configuration provided is invalid or incomplete.
-    case configurationError
+    /// The app bundle configuration is invalid for an unspecified reason.
+    case configurationError = 2
+
+    /// The app bundle's Info.plist dictionary is unavailable.
+    case missingInfoDictionary = 3
+
+    /// The app bundle does not provide a nonempty string for `CFBundleIdentifier`.
+    case missingBundleIdentifier = 4
+
+    /// The app name could not be read from `CFBundleDisplayName` or `CFBundleName`.
+    case missingAppName = 5
+
+    /// The app bundle does not provide a nonempty string for `CFBundleShortVersionString`.
+    case missingAppVersion = 6
+
+    /// The app bundle does not provide a nonempty string for `CFBundleVersion`.
+    case missingBuildNumber = 7
 
     /// A human-readable description of the error suitable for logging, debugging,
     /// and display to developers. This should return the English version of the error.
@@ -1939,11 +2671,8 @@ extension WearablesError : Hashable {
 extension WearablesError : RawRepresentable {
 }
 
-extension WearablesError : BitwiseCopyable {
-}
-
 /// Errors that can occur during URL handling.
-@objc(MWDATWearablesHandleURLError) @frozen public enum WearablesHandleURLError : Int, MWDATCore.DatError {
+@objc(MWDATWearablesHandleURLError) public enum WearablesHandleURLError : Int, MWDATCore.DatError {
 
     /// An unexpected internal error occurred during registration URL handling.
     case registrationError
@@ -2014,9 +2743,6 @@ extension WearablesHandleURLError : Hashable {
 extension WearablesHandleURLError : RawRepresentable {
 }
 
-extension WearablesHandleURLError : BitwiseCopyable {
-}
-
 /// The primary interface for Wearables Device Access Toolkit.
 public protocol WearablesInterface : Sendable {
 
@@ -2025,7 +2751,7 @@ public protocol WearablesInterface : Sendable {
 
     /// Adds a listener to receive callbacks when the registration state changes. The listener is immediately called with the current state.
     /// - Parameter listener: The callback to execute when the registration state changes.
-    /// - Returns: A token that can be used to cancel the listener. When the token deinits the listener is also canceled.
+    /// - Returns: A token that can be used to cancel the listener. When the token deinits, the listener is also canceled.
     func addRegistrationStateListener(_ listener: @escaping @Sendable (MWDATCore.RegistrationState) -> Void) -> any MWDATCore.AnyListenerToken
 
     /// Creates an ``AsyncStream`` for observing registration state changes.
@@ -2044,8 +2770,8 @@ public protocol WearablesInterface : Sendable {
 
     /// Handles callback URLs from the Meta AI app during registration and permission flows.
     ///
-    /// This method must be called when your app receives a URL callback after the user completes
-    /// an action in the Meta AI app. This includes callbacks from ``startRegistration()``,
+    /// This method must be called when your app receives a URL from the Meta AI app. This includes
+    /// registration requests initiated by Meta AI and callbacks from ``startRegistration()``,
     /// ``startUnregistration()``, and permission requests.
     ///
     /// The SDK will determine if the URL is relevant to the Wearables Device Access Toolkit.
@@ -2059,8 +2785,23 @@ public protocol WearablesInterface : Sendable {
     ///
     /// - Parameter url: The incoming URL to handle.
     /// - Returns: `true` if the URL was handled by the Wearables Device Access Toolkit, `false` if it's not relevant to the Wearables Device Access Toolkit.
-    /// - Throws: ``RegistrationError`` if there is an error processing a relevant URL.
+    /// - Throws: ``WearablesHandleURLError`` if there is an error processing a relevant URL or this
+    ///   overload receives an MWA registration request without a request callback.
     func handleUrl(_ url: URL) async throws(MWDATCore.WearablesHandleURLError) -> Bool
+
+    /// Handles incoming URLs and delivers registration requests initiated by the Meta AI app.
+    ///
+    /// Use this overload when forwarding URLs that may contain an MWA-initiated registration
+    /// request. The callback receives a single-use ``RegistrationRequest`` that the application
+    /// can continue or cancel. The callback is invoked only for the URL passed to this call.
+    ///
+    /// - Parameters:
+    ///   - url: The incoming URL to handle.
+    ///   - callback: The callback to execute if the URL contains an MWA registration request.
+    /// - Returns: `true` if the URL was handled by the Wearables Device Access Toolkit, `false` if it
+    ///   is not relevant to the Wearables Device Access Toolkit.
+    /// - Throws: ``WearablesHandleURLError`` if there is an error processing a relevant URL.
+    func handleUrl(_ url: URL, onRegistrationRequest callback: @escaping @Sendable (MWDATCore.RegistrationRequest) -> Void) async throws(MWDATCore.WearablesHandleURLError) -> Bool
 
     /// Initiates the unregistration process with AI glasses.
     ///
@@ -2096,7 +2837,7 @@ public protocol WearablesInterface : Sendable {
 
     /// Adds a listener to receive callbacks when the device list changes. The listener is immediately called with the current devices.
     /// - Parameter listener: The callback to execute when the device list changes.
-    /// - Returns: A token that can be used to cancel the listener. When the token deinits the listener is also canceled.
+    /// - Returns: A token that can be used to cancel the listener. When the token deinits, the listener is also canceled.
     func addDevicesListener(_ listener: @escaping @Sendable ([MWDATCore.DeviceIdentifier]) -> Void) -> any MWDATCore.AnyListenerToken
 
     /// Creates an ``AsyncStream`` for observing device list changes.
@@ -2109,7 +2850,7 @@ public protocol WearablesInterface : Sendable {
 
     /// Checks if a specific permission is granted for the current application.
     /// - Parameter permission: The type of permission to check.
-    /// - Returns: ``PermissionStatus`` The status of the permission.
+    /// - Returns: The status of the permission, as a ``PermissionStatus``.
     /// - Throws: ``PermissionError`` if the operation fails.
     func checkPermissionStatus(_ permission: MWDATCore.Permission) async throws(MWDATCore.PermissionError) -> MWDATCore.PermissionStatus
 
@@ -2136,12 +2877,23 @@ public protocol WearablesInterface : Sendable {
     /// - Throws: ``DeviceSessionError/noEligibleDevice`` if no device is resolved by the selector.
     /// - Throws: ``DeviceSessionError/sessionAlreadyExists`` if an active session already exists for this device.
     func createSession(deviceSelector: any MWDATCore.DeviceSelector) throws(MWDATCore.DeviceSessionError) -> MWDATCore.DeviceSession
+}
 
-    /// Creates an ``AsyncStream`` for observing device state changes on a specific device.
+extension WearablesInterface {
+
+    /// Handles incoming URLs and delivers registration requests initiated by the Meta AI app.
     ///
-    /// - Parameter identifier: The device to observe.
-    /// - Returns: A stream that yields ``DeviceState`` values when the device state changes (e.g. thermal level).
-    func deviceStateStream(for identifier: MWDATCore.DeviceIdentifier) -> AsyncStream<MWDATCore.DeviceState>
+    /// Use this overload when forwarding URLs that may contain an MWA-initiated registration
+    /// request. The callback receives a single-use ``RegistrationRequest`` that the application
+    /// can continue or cancel. The callback is invoked only for the URL passed to this call.
+    ///
+    /// - Parameters:
+    ///   - url: The incoming URL to handle.
+    ///   - callback: The callback to execute if the URL contains an MWA registration request.
+    /// - Returns: `true` if the URL was handled by the Wearables Device Access Toolkit, `false` if it
+    ///   is not relevant to the Wearables Device Access Toolkit.
+    /// - Throws: ``WearablesHandleURLError`` if there is an error processing a relevant URL.
+    public func handleUrl(_ url: URL, onRegistrationRequest _: @escaping @Sendable (MWDATCore.RegistrationRequest) -> Void) async throws(MWDATCore.WearablesHandleURLError) -> Bool
 }
 
 extension WearablesInterface {
@@ -2151,6 +2903,54 @@ extension WearablesInterface {
 
     /// Creates an ``AsyncStream`` for observing device list changes.
     public func devicesStream() -> AsyncStream<[MWDATCore.DeviceIdentifier]>
+}
+
+/// A handle to an in-flight WiFi Aware pairing: the code to show the user, the device it belongs
+/// to, and the two ways to resolve it. Both actions are bound to this specific pairing, so a host
+/// juggling more than one device resolves each independently.
+///
+/// ``confirm()`` and ``cancel()`` are idempotent and become no-ops once the pairing has ended.
+public struct WiFiAwarePairingHandle : Sendable {
+
+    /// Identifier of the device being paired.
+    public let deviceIdentifier: MWDATCore.DeviceIdentifier
+
+    /// The pairing code to present to the user.
+    public let pairingCode: String
+
+    /// Proceed with pairing once the user has seen the code and accepted: the system pairing flow is
+    /// launched.
+    @MainActor public func confirm()
+
+    /// Decline pairing: the connection falls back to SoftAP.
+    @MainActor public func cancel()
+}
+
+/// Outcome of a WiFi Aware pairing attempt.
+public enum WiFiAwarePairingResult : Sendable, Equatable {
+
+    case succeeded(MWDATCore.DeviceIdentifier)
+
+    case failed(MWDATCore.DeviceIdentifier)
+
+    case cancelled(MWDATCore.DeviceIdentifier)
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCore.WiFiAwarePairingResult, b: MWDATCore.WiFiAwarePairingResult) -> Bool
+}
+
+public enum WiFiAwarePairingState : Sendable {
+
+    case awaitingConfirmation(handle: MWDATCore.WiFiAwarePairingHandle)
+
+    case finished(result: MWDATCore.WiFiAwarePairingResult)
 }
 
 @objc extension NSNotification {

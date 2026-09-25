@@ -155,13 +155,12 @@ class StreamSessionError {
   /// **Stream-level codes** (originate from the DAT SDK's `StreamError`):
   /// `internalError`, `deviceNotFound`, `deviceNotConnected`, `timeout`,
   /// `videoStreamingError`, `permissionDenied`, `hingesClosed`,
-  /// `thermalCritical`, `thermalEmergency`, `peakPowerShutdown`,
-  /// `batteryCritical`. Two are **iOS only**:
-  /// - `deviceNotFound` — the Android SDK's `StreamError` has no equivalent
-  ///   case, so a not-found device surfaces as `videoStreamingError` there.
-  /// - `thermalEmergency` — DAT 0.9.0 removed the Android SDK's
-  ///   `StreamError.THERMAL_EMERGENCY`, so on Android a thermal emergency
-  ///   arrives as the device-session code `deviceThermalEmergency` instead.
+  /// `thermalCritical`, `peakPowerShutdown`, `batteryCritical`.
+  /// iOS also exposes `deviceNotFound` and `audioStreamingError` (audio streaming
+  /// is not enabled by this plugin). DAT 1.0 maps iOS `thermalHot`, `batteryLow`,
+  /// and `peakPowerLimit` to the existing cross-platform codes above.
+  /// The legacy `thermalEmergency` code is no longer emitted by DAT 1.0;
+  /// thermal emergencies arrive as `deviceThermalEmergency` on both platforms.
   ///
   /// Photo-capture failure is deliberately **not** on this channel on either
   /// platform — it resolves [MetaWearablesDat.capturePhoto] instead.
@@ -173,7 +172,10 @@ class StreamSessionError {
   /// `capabilityNotFound`, `unexpectedError`, `deviceThermalCritical`,
   /// `deviceThermalEmergency`, `devicePeakPowerShutdown`,
   /// `deviceBatteryCritical`, `datAppOnTheGlassesUpdateRequired`,
-  /// `dwaUnavailable`. Two more are **Android only** — iOS's
+  /// `dwaUnavailable`, `insufficientSDKVersion` (terminal; requires an app
+  /// update), and `dwaOutOfStuRange` (nonblocking compatibility warning;
+  /// continue normally, optionally show a rate-limited update suggestion).
+  /// Two more are **Android only** — iOS's
   /// `DeviceSessionError` is `@frozen` with no equivalent cases:
   /// `sessionEndedByDevice` (the device ended the session; the stream stops
   /// with it) and `capabilityDenied`.
@@ -208,12 +210,13 @@ class StreamSessionError {
   /// Returns true if the device's thermal state has reached a critical level.
   bool get isThermalCritical => code == 'thermalCritical';
 
-  /// Returns true if the glasses were folded shut **or taken off**.
+  /// Whether the SDK reported a `hingesClosed` error.
   ///
-  /// Since DAT 0.9.0 taking the glasses off (doff) raises this too, so treat it
-  /// as "the glasses are no longer being worn" rather than specifically as a
-  /// hinge event. The SDK does not auto-resume — the user has to put them back
-  /// on and the app has to start a new session.
+  /// Folding the glasses can raise this error. Removing them can also raise it
+  /// on some device/firmware combinations, but removal does not always stop
+  /// streaming. When this error is emitted, clear the ended session's preview
+  /// and start a new session once the glasses are ready; do not expect automatic
+  /// resumption.
   bool get isHingesClosed => code == 'hingesClosed';
 
   /// Returns true if camera permission was denied.
@@ -1019,22 +1022,25 @@ class MetaWearablesDat {
   /// audio session and Android forbids starting a foreground service from the
   /// background on API 31+. Call it before you background.
   ///
-  /// **Bluetooth Classic cost (iOS).** The keep-alive audio session shares the
-  /// Bluetooth radio with the camera transport, so on the Bluetooth Classic
-  /// transport expect reduced frame rates the whole time it is enabled —
-  /// foreground included. Measured on hardware: a 24 fps medium-quality stream
-  /// averages roughly 14 fps with the keep-alive active, and under marginal
-  /// radio conditions high-fps streams can stall outright. Prefer 15 fps or
-  /// lower while enabled, or the Wi-Fi camera transport, which does not share
-  /// the Bluetooth radio. Android is unaffected — its keep-alive is a
-  /// foreground service with no radio cost. The plugin logs the audio route on
-  /// activation and on every route change (`[MWDAT-ROUTE]` in the console) so
-  /// contention like this is diagnosable from logs alone. Safe to call again to reconfigure the Android
-  /// notification; safe to call after [startStreamSession] too — the
-  /// keep-alive mechanism engages immediately.
+  /// **Known iOS lock limitation (DAT 1.0.0).** On iPhone 17 / iOS 27.0 with
+  /// Meta Ray-Ban Display over Bluetooth Classic, RAW streaming intermittently
+  /// ended after 8–15 seconds locked with "Session ended by device", although
+  /// other 20–30-second attempts passed. HVC1 testing passed but is not a
+  /// confirmed workaround. The cause and regression status remain unknown.
+  /// Continue handling [streamSessionErrorStream] and terminal
+  /// [StreamSessionState.stopped] events when this option is enabled.
+  ///
+  /// The plugin logs audio routes on activation and changes (`[MWDAT-ROUTE]`)
+  /// for diagnosis; those logs alone do not identify a failure's cause.
+  /// Earlier advice to limit Bluetooth Classic streaming to 15 fps was based
+  /// on incorrect measurements and has been retracted.
+  ///
+  /// Safe to call again to reconfigure the Android notification; safe to call
+  /// after [startStreamSession] too, while the app is still in foreground.
   ///
   /// **iOS** — activates an `AVAudioSession` in `.playAndRecord` /
-  /// `.videoRecording` mode to keep the process scheduled while backgrounded.
+  /// `.videoRecording` mode with `.mixWithOthers` for background execution.
+  /// Bluetooth HFP is not enabled by this method.
   /// The hardware HEVC decoder is invalidated on background entry (iOS forbids
   /// GPU access from backgrounded apps) and lazily recreated on the first frame
   /// after foreground, so resume incurs a brief keyframe-wait stall. The host

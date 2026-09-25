@@ -494,8 +494,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           errorMessage = "Meta AI app is not installed. Please install it to proceed with registration."
         case .networkUnavailable:
           errorMessage = "Network connection is unavailable. Please check your internet connection and try again."
-        case .timeout:
-          errorMessage = "Registration timed out. Please try again."
         case .unknown:
           errorMessage = "An unknown error occurred during registration."
         @unknown default:
@@ -522,8 +520,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           errorMessage = "SDK configuration is invalid or incomplete."
         case .metaAINotInstalled:
           errorMessage = "Meta AI app is not installed. Please install it to proceed with unregistration."
-        case .timeout:
-          errorMessage = "Unregistration timed out. Please try again."
         case .unknown:
           errorMessage = "An unknown error occurred during unregistration."
         @unknown default:

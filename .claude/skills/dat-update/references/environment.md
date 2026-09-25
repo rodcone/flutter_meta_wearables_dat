@@ -139,9 +139,13 @@ a bare `flutter test` runs the *mock* package's tests, which look superficially 
 Use absolute paths or subshells (`(cd x && …)`) for anything where the wrong cwd would be silently
 wrong rather than an error.
 
-## Trap: Android needs a GitHub Packages token
+## Trap: Android artifact repository depends on the DAT version
 
-The DAT Android artifacts come from GitHub Packages. A `401 Unauthorized` on
+DAT 1.0.0 moved the unchanged `com.meta.wearable:mwdat-*` coordinates to Maven Central.
+Use `mavenCentral()` without credentials for 1.x. Check the target release README if an artifact
+returns 404; a repository move is not proof of an unpublished release.
+
+Pre-1.0 DAT Android artifacts come from GitHub Packages. A `401 Unauthorized` on
 `com.meta.wearable:mwdat-*` means the token expired — it's `GITHUB_TOKEN` in the environment or
 `github_token` in `example/android/local.properties`, and needs `read:packages` scope. CI reads the
 `MWDAT_PACKAGES_TOKEN` repo secret for the same reason.
@@ -177,3 +181,43 @@ whether `@unknown default` is valid) and the exact deployment target the binary 
 Strings in the binary are occasionally the only way to confirm a behaviour change — e.g. finding
 `NSBluetoothAlwaysUsageDescription` inside `MWDATCore` confirmed 0.9.0's mock-device Info.plist
 enforcement.
+
+## Release comparison refs and generated interfaces
+
+Android does not necessarily publish Git release tags. Use the verified `Release <version>` commit
+from `git log` when a version ref is absent; record both comparison SHAs in the plan. iOS release
+tags still provide the framework payload.
+
+For SourceKitten, use `source.request.editor.open.interface` with quoted string values for
+`key.name` and `key.modulename`, `key.synthesizedextensions: 1`, and compiler arguments `-sdk`
+(the `xcrun --sdk iphoneos --show-sdk-path` result), `-target arm64-apple-ios17.2`, and `-F` for
+each staged framework's `ios-arm64` directory. Keep the request kind as a YAML UID (unquoted).
+Read `key.sourcetext` from the JSON response, validate doc comments and declarations, and preserve
+the existing reference-snapshot header before writing the tracked dump.
+
+A changelog can omit removed enum cases or inserted constructor parameters: DAT 1.0 removed iOS
+registration timeout cases and inserted Android StreamConfiguration.audioCodec. Compare the
+used symbols against binary interfaces before assuming unchanged call sites still compile.
+
+## Physical iOS log evidence
+
+Flutter stdout can omit native SDK details. Capture only the example app process with
+`idevicesyslog -u <udid> -p Runner --no-colors`, and stop the collector after reproduction.
+Use `xcrun devicectl device copy from --device <udid> --domain-type appDataContainer
+--domain-identifier <example-bundle-id> --source Library/Caches/MetaWearablesDAT/Logs/MetaWearablesDAT.log
+--destination <scratch-log>` for the SDK's own log. It can contain old, untimestamped entries:
+compare before/after copies around one bounded reproduction before attributing an error to it.
+Keep raw logs out of git and redact device identifiers from reports. A returned texture ID only
+confirms startup acceptance; require streaming state and frame evidence before calling video verified.
+
+Record whether hardware QA used an upgrade in place or a clean installation. During the DAT 1.0.0
+run, the maintainer recovered streaming by deleting and reinstalling the example without changing
+its Bluetooth Classic configuration. A clean-install comparison can help isolate persisted state,
+but does not prove its cause or validate upgrades in place. Preserve failing logs first and obtain
+the maintainer's agreement before deleting an app and its local data; never make reinstalling an
+automatic prerequisite or call it a confirmed SDK fix.
+
+Record removal (doff) separately from folding: do not assume both end the stream on every model or
+firmware. DAT 1.0.0 QA on Meta Ray-Ban Display observed continued streaming after removal and
+successful terminal cleanup after folding. Preserve repeated failures alongside passing attempts;
+one successful background/lock cycle does not clear an intermittent session termination.

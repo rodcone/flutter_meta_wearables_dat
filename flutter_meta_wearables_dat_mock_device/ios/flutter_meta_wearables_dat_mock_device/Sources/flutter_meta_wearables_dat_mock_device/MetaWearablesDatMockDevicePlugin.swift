@@ -91,7 +91,7 @@ public class MetaWearablesDatMockDevicePlugin: NSObject, FlutterPlugin {
       // The core plugin's activeDeviceStream observer will tear down any
       // running stream session when the underlying mock device disappears.
       if MockDeviceKit.shared.isEnabled {
-        MockDeviceKit.shared.disable()
+        await MockDeviceKit.shared.disable()
       }
       MockDeviceKit.shared.enable(config: mockDeviceConfig)
       result(true)
@@ -101,7 +101,7 @@ public class MetaWearablesDatMockDevicePlugin: NSObject, FlutterPlugin {
   private func disable(result: @escaping FlutterResult) {
     Task { @MainActor in
       if MockDeviceKit.shared.isEnabled {
-        MockDeviceKit.shared.disable()
+        await MockDeviceKit.shared.disable()
       }
       result(true)
     }
@@ -150,7 +150,7 @@ public class MetaWearablesDatMockDevicePlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "DEVICE_NOT_FOUND", message: "No mock device with uuid \(uuidString)", details: nil))
         return
       }
-      MockDeviceKit.shared.unpairDevice(device)
+      await MockDeviceKit.shared.unpairDevice(device)
       result(true)
     }
   }
