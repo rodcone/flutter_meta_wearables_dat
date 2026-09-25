@@ -1,6 +1,6 @@
 # DAT 1.0.0 migration plan
 
-Status: implemented; local verification passed where listed below; PR review pending. DAT 0.9.0 → 1.0.0; both Flutter packages 0.9.2 → 0.10.0.
+Status: implemented; local verification passed where listed below; PR #48 open; independent review in progress. DAT 0.9.0 → 1.0.0; both Flutter packages 0.9.2 → 0.10.0.
 
 ## Evidence
 
@@ -111,5 +111,7 @@ Each upstream bullet is represented below. New experimental capabilities are def
 - iOS SwiftPM release build passed without signing; CocoaPods throwaway consumer release build passed without signing.
 - Android release APK build passed. Flutter warns existing Gradle/AGP/Kotlin versions will lose support in a future Flutter release; no toolchain bump needed for this migration.
 - Flutter SwiftPM global setting restored to true. Example lockfile changes only the two path package versions.
-- Publishing dry-runs found only expected uncommitted-file warnings; repeat after commit.
+- Both publishing dry-runs passed with zero warnings on the committed tree.
 - No physical-device or live backend verification performed.
+
+Android native verification executed 8 tests with zero failures/skips. Example regression tests are included in the CI test matrix.

@@ -94,7 +94,7 @@ Communication:
 
 Photo-capture failure never appears here — it rejects the `capturePhoto()` future instead (`CAPTURE_PHOTO_FAILED`, with `details` carrying the granular reason).
 
-Codes that leave the stream dead with no auto-resume need a **teardown**, not a retry: clear your texture ID and streaming flag, or the `Texture` widget freezes on its last frame. Those are `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical` and `sessionEndedByDevice`.
+Codes that leave the stream dead with no auto-resume need a **teardown**, not a retry: clear your texture ID and streaming flag, or the `Texture` widget freezes on its last frame. Those are `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical`, `sessionEndedByDevice` and `insufficientSDKVersion`.
 
 `frameStalled` is not in that list either, but it needs the opposite of a teardown-and-stop: the stream was never stopped, so nothing will ever clear it. Restart — `stopStreamSession()` then `startStreamSession()` — and take the new texture ID. The plugin deliberately does not restart for you, because that would change the texture ID under a widget still rendering the old one. Do **not** try to detect this yourself by rasterising frames and comparing pixels: a frozen stream and a motionless scene produce identical bytes.
 

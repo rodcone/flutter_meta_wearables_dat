@@ -51,6 +51,7 @@ jobs:
         package:
           - .
           - flutter_meta_wearables_dat_mock_device
+          - example
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
