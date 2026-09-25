@@ -1,3 +1,11 @@
+## 0.10.0
+
+- Upgrade Meta Wearables DAT to 1.0.0 on iOS and Android. Android dependencies now use Maven Central without a GitHub token.
+- Migrate native thermal monitoring to the new device-state APIs while preserving the Dart contract.
+- Preserve existing Dart error codes for renamed iOS stream errors. Forward `insufficientSDKVersion` (terminal) and `dwaOutOfStuRange` (nonblocking compatibility warning).
+- Update the example to handle SDK compatibility errors without restarting on warnings.
+- Experimental DAT 1.0 capabilities and Meta-AI-initiated registration are not exposed; existing app-initiated registration, streaming, and in-stream photo capture remain supported.
+
 ## 0.9.2
 
 **Breaking:** Replace `startStreamSession(fps: 24)` with

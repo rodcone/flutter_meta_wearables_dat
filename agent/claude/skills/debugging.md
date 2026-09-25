@@ -22,8 +22,8 @@ Stream not starting?
 ├── Check streamSessionErrorStream() — any errors?
 ├── On Android: MainActivity extends FlutterFragmentActivity?
 │   └── FlutterActivity will NOT work — permission sheets fail
-├── On Android: GitHub token configured?
-│   └── GITHUB_TOKEN env var or github_token in local.properties
+├── On Android: Maven Central configured?
+│   └── DAT 1.0.0 needs mavenCentral(), no token
 └── Try restarting glasses:
     1. Power switch OFF
     2. Press and hold capture button
@@ -45,7 +45,7 @@ If `startRegistration()` opens Meta AI but the app never returns:
 | Error code | Meaning | Action |
 |------------|---------|--------|
 | `thermalCritical` | Device thermal state critical | Streaming pauses automatically. Wait for device to cool down. |
-| `thermalEmergency` | Device thermal emergency (**iOS only** — Android reports `deviceThermalEmergency`) | Stream stopped. Wait for cool down before retrying. |
+| `thermalEmergency` | Legacy code; DAT 1.0 uses `deviceThermalEmergency` on both platforms | Stream stopped. Wait for cool down before retrying. |
 | `peakPowerShutdown` | Device exceeded peak power limit | Stream stopped. Reduce streaming intensity / wait. |
 | `batteryCritical` | Device battery critically low | Stream stopped. Charge the glasses. |
 | `deviceThermalEmergency` / `devicePeakPowerShutdown` / `deviceBatteryCritical` | Device-session-level variants (the session itself went down, not just the stream) | Same actions as the stream-level variants; the plugin recreates the session on the next `startStreamSession()`. |
@@ -81,7 +81,7 @@ Do **not** tear down on `thermalCritical` / `deviceThermalCritical`: those pause
 ## Android-specific issues
 
 - **FlutterFragmentActivity required:** `FlutterActivity` does not extend `ComponentActivity`, so `ActivityResultLauncher` cannot register. Camera permissions will fail silently.
-- **GitHub token missing:** Build will fail with dependency resolution errors. Set `GITHUB_TOKEN` env var or add `github_token` to `android/local.properties`.
+- **Dependency resolution:** DAT 1.0.0 uses Maven Central; no GitHub token is required.
 - **SDK not initialized:** If `requestAndroidPermissions()` is not called (and granted) before other DAT calls, device discovery will not work.
 
 ## iOS-specific issues
@@ -101,3 +101,5 @@ Do **not** tear down on `thermalCritical` / `deviceThermalCritical`: those pause
 - [Version Dependencies](https://wearables.developer.meta.com/docs/version-dependencies)
 - [FAQ](https://developers.meta.com/wearables/faq/)
 - [Report a bug](https://wearables.developer.meta.com/devcenter/feedback/)
+
+DAT 1.0 compatibility: `insufficientSDKVersion` is terminal and requires an app update; `dwaOutOfStuRange` is a nonblocking warning and must not stop or restart the stream. The plugin retains app-initiated registration; Meta-AI-initiated registration requests and new experimental capabilities are not exposed.

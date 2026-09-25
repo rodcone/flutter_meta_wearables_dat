@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "Se ha producido un error en el proceso de cancelación del registro por un motivo no especificado";
 "dat_error_registration_meta_ai_not_installed" = "La aplicación de Meta AI no está instalada en el dispositivo y es necesaria para el registro";
 "dat_error_registration_network_unavailable" = "No hay conexión a internet. Comprueba la conexión y vuelve a intentarlo.";
-"dat_error_registration_timeout" = "Se ha agotado el tiempo de espera del registro, no hay respuesta de Meta AI";
 "dat_error_registration_unknown" = "Se ha producido un error desconocido durante el proceso de registro";
 "dat_error_session_already_exists" = "Ya existe una sesión para este dispositivo";
 "dat_error_session_already_stopped" = "La sesión ya se ha detenido";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "Cancelación del registro del usuario ya realizada al intentar cancelarlo de nuevo";
 "dat_error_unregistration_configuration_invalid" = "La configuración del kit de acceso para wearables no es válida o está incompleta";
 "dat_error_unregistration_meta_ai_not_installed" = "La aplicación de Meta AI no está instalada en el dispositivo y es necesaria para la cancelación del registro";
-"dat_error_unregistration_timeout" = "Se ha agotado el tiempo de espera para la cancelación del registro. No hay respuesta de Meta AI.";
 "dat_error_unregistration_unknown" = "Se ha producido un error desconocido durante el proceso de cancelación del registro";
 "dat_error_wearables_already_configured" = "Ya se ha configurado";
 "dat_error_wearables_already_initialized" = "Wearables ya se han inicializado.";

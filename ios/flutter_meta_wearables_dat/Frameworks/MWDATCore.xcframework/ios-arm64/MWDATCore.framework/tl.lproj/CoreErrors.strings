@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "Nabigo ang proseso ng pag-unregister para sa hindi tinukoy na dahilan";
 "dat_error_registration_meta_ai_not_installed" = "Hindi naka-install ang Meta AI app sa device, na kinakailangan para sa pagre-register";
 "dat_error_registration_network_unavailable" = "Walang available na koneksyon sa internet. Pakisuri ang koneksyon mo at subukang muli";
-"dat_error_registration_timeout" = "Nag-expire ang registration timeout, walang tugon mula sa Meta AI";
 "dat_error_registration_unknown" = "Nagkaroon ng hindi alam na error sa proseso ng pagre-register";
 "dat_error_session_already_exists" = "Mayroon nang session para sa device na ito";
 "dat_error_session_already_stopped" = "Itinigil na ang session";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "Naka-unregister na ang user kapag sinusubukang mag-unregister ulit";
 "dat_error_unregistration_configuration_invalid" = "Invalid o hindi kumpleto ang configuration ng Wearables Device Access Toolkit";
 "dat_error_unregistration_meta_ai_not_installed" = "Hindi naka-install ang Meta AI app sa device, na kinakailangan para sa pag-unregister";
-"dat_error_unregistration_timeout" = "Nag-expire ang unregistration timeout, walang tugon mula sa Meta AI";
 "dat_error_unregistration_unknown" = "Nagkaroon ng hindi alam na error sa proseso ng pag-unregister";
 "dat_error_wearables_already_configured" = "Na-configure na";
 "dat_error_wearables_already_initialized" = "Na-initialize na ang Wearables.";

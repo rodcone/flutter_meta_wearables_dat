@@ -33,8 +33,7 @@ Audit and configure this Flutter project for flutter_meta_wearables_dat integrat
    Report any missing entries and offer to add them.
 
 5. **Android Gradle audit** — Read `android/settings.gradle.kts` and verify:
-   - GitHub Packages repository for `maven.pkg.github.com/facebook/meta-wearables-dat-android`
-   - Credential configuration using `GITHUB_TOKEN` or `local.properties`
+   - `mavenCentral()` repository for DAT 1.0.0 (no credentials needed)
 
    Report if missing and offer to add it.
 
@@ -43,4 +42,3 @@ Audit and configure this Flutter project for flutter_meta_wearables_dat integrat
 7. **Summary** — Report what was found, what was missing, and what was fixed. Remind the user to:
    - Set their URL scheme consistently across iOS and Android
    - Configure their MetaAppID in the Meta Wearables Developer Center (or use `0` for Developer Mode)
-   - Set a GitHub token with `read:packages` scope for Android builds

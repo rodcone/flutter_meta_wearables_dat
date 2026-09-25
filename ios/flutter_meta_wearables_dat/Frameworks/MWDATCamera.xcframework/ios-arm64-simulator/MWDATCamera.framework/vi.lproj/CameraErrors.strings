@@ -4,7 +4,6 @@
    DO NOT EDIT MANUALLY. Run `string-resources-sync --source android` to update. */
 
 "dat_error_photo_capture_failed" = "Không chụp được ảnh";
-"dat_error_photo_capture_timeout" = "Đã hết thời gian chờ chụp ảnh";
 "dat_error_stream_battery_low" = "Thiết bị có mức pin quá thấp nên không thể phát trực tiếp";
 "dat_error_stream_critical_error" = "Lỗi nghiêm trọng, phiên phát trực tiếp nên kết thúc";
 "dat_error_stream_device_not_connected" = "Chưa kết nối thiết bị";

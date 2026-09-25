@@ -3,7 +3,6 @@ package io.rodcone.flutter_meta_wearables_dat
 import android.util.Log
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
-import com.meta.wearable.dat.core.types.DeviceState
 import com.meta.wearable.dat.core.types.ThermalLevel
 import io.flutter.plugin.common.EventChannel
 import kotlinx.coroutines.CoroutineScope
@@ -13,19 +12,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
-/**
- * Stream handler for per-device state updates (currently: thermal level).
- *
- * 0.7.0 added `Wearables.getDeviceState(deviceIdentifier): StateFlow<DeviceState>`
- * keyed by `DeviceIdentifier`. The plugin's Dart-facing API exposes a single
- * `deviceStateStream()` that tracks the *active* device, so this handler
- * wraps the per-device flow in an outer subscription to
- * `deviceSelector.activeDeviceFlow()` and switches its inner subscription
- * whenever the active device changes.
- *
- * Mirrors the iOS `DeviceStateStreamHandler.swift` design exactly so the
- * Dart-side `Stream<DeviceState>` API behaves identically on both platforms.
- */
+/** Observes the selected device's thermal state through DAT 1.0 metadata. */
 internal class DeviceStateStreamHandler(
         private val deviceSelectorProvider: () -> DeviceSelector,
         private val isInitialized: () -> Boolean,
@@ -92,7 +79,7 @@ internal class DeviceStateStreamHandler(
                         // `activeDeviceFlow()` replays the current value to
                         // new collectors. The SDK's
                         // `Wearables.getDeviceState(...)` doesn't tolerate
-                        // rapid cancel+resubscribe for the same device, so
+                        // unnecessary cancel+resubscribe for the same device, so
                         // only tear down + restart when the device actually
                         // changes (mirrors the iOS handler's behaviour).
                         if (deviceId == currentDeviceId) return@collect
@@ -111,7 +98,7 @@ internal class DeviceStateStreamHandler(
             events: EventChannel.EventSink,
     ): Job {
         return scope.launch {
-            Wearables.getDeviceState(deviceId).collect { state ->
+            Wearables.devicesMetadata[deviceId]?.collect { state ->
                 events.success(mapOf("thermalLevel" to thermalLevelToInt(state.thermalLevel)))
             }
         }

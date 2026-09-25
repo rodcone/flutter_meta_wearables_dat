@@ -21,7 +21,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 - `activeDeviceStream()` — bool, device availability
 - `getDevices()` → `List<WearableDevice>` (id, name, type, linkState, compatibility, supportsDisplay, isActive, isStreamingDevice). Pass an `id` to `startStreamSession` to pin that pair; requesting a *different* device while one is streaming throws `PlatformException` `STREAM_ACTIVE`. Android throws `NOT_INITIALIZED` if called before Bluetooth permission.
 - `streamSessionStateStream()` — stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
-- `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, thermalEmergency (iOS only; Android reports deviceThermalEmergency), peakPowerShutdown, batteryCritical, hingesClosed (glasses closed **or taken off**), permissionDenied, deviceNotConnected, datAppOnTheGlassesUpdateRequired (recover via `openDATGlassesAppUpdate()`), dwaUnavailable, plus device-session variants (deviceThermalCritical etc.) and the Android-only sessionEndedByDevice / capabilityDenied. Capture failures are not on this stream — they reject the `capturePhoto()` future.
+- `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, thermalEmergency (legacy; DAT 1.0 uses deviceThermalEmergency on both platforms), peakPowerShutdown, batteryCritical, hingesClosed (glasses closed **or taken off**), permissionDenied, deviceNotConnected, datAppOnTheGlassesUpdateRequired (recover via `openDATGlassesAppUpdate()`), dwaUnavailable, plus device-session variants (deviceThermalCritical etc.) and the Android-only sessionEndedByDevice / capabilityDenied. Capture failures are not on this stream — they reject the `capturePhoto()` future.
 - Two codes are raised by the plugin, not the SDK: `stoppedForBackground` (deliberate background stop — not a fault) and `frameStalled` (the stream still reports streaming but no frame has arrived for ~1.5s, so the preview is frozen). `frameStalled` never clears itself: stop the session, start a new one, use the new textureId. The plugin will not restart for you, because that would change the textureId underneath a live widget.
 - Errors with no auto-resume (hingesClosed, permissionDenied, thermalEmergency, peakPowerShutdown, batteryCritical, deviceThermalEmergency, devicePeakPowerShutdown, deviceBatteryCritical, sessionEndedByDevice) need a teardown, not a retry — clear textureId + streaming flag or the Texture widget freezes on its last frame. Excluded: thermalCritical / deviceThermalCritical, which pause the stream and leave the session up — warn and keep rendering.
 - `deviceStateStream()` — `Stream<DeviceState>` of live `ThermalLevel` (unknown, none, light, moderate, severe, critical, emergency, shutdown). Use to warn the user *before* a thermal error stops the stream.
@@ -39,7 +39,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 
 Mock support lives in the optional add-on `flutter_meta_wearables_dat_mock_device` (since 0.4.0). Production builds that omit it skip `MWDATMockDevice` linkage and don't need `NSCameraUsageDescription` / `CAMERA`.
 
-- Add `flutter_meta_wearables_dat_mock_device: ^0.9.2` to dev/staging `pubspec.yaml`.
+- Add `flutter_meta_wearables_dat_mock_device: ^0.10.0` to dev/staging `pubspec.yaml`.
 - Import: `import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';`
 - Optional bypass for registration/permission flows: `MetaWearablesDatMockDevice.configure(initiallyRegistered: true, initialPermissionsGranted: true)`
 - Lifecycle: `MetaWearablesDatMockDevice.pairGlasses({model})` → UUID (`model` defaults to `GlassesModel.rayBanMeta`; other values: `oakleyMetaHSTN`, `oakleyMetaVanguard`, `rayBanMetaOptics`, `metaGlasses`), then `.powerOn(uuid)` + `.don(uuid)`, optionally `.setCameraFacing(uuid, CameraFacing.back)`
@@ -60,7 +60,7 @@ Mock support lives in the optional add-on `flutter_meta_wearables_dat_mock_devic
 ## Setup
 
 - iOS: Info.plist needs Bluetooth usage string, URL scheme, MWDAT dict, and `bluetooth-peripheral` background mode. **Camera transport — pick one:** Wi‑Fi (recommended; `NSLocalNetworkUsageDescription` + `NSBonjourServices` + `HotspotConfiguration`/`wifi-info` entitlements — higher bandwidth, but `startStreamSession()` is ~10s slower to first frame since the phone must associate with the glasses' AP first) **or** Bluetooth Classic (`com.meta.ar.wearable` + `external-accessory` background mode — connects almost instantly, no Wi‑Fi prompt, works offline). On a fresh project, ask the user which they prefer rather than picking silently. Transport doesn't affect App Store eligibility (SDK links ExternalAccessory either way; Meta limits publishing until GA). Switching later is config-only (swap the keys/entitlements, rebuild, no code change) — useful both for migrating an older app and for troubleshooting a transport that isn't working; if migrating to Wi‑Fi, verify `CODE_SIGN_ENTITLEMENTS` in `project.pbxproj` actually points at the `.entitlements` file. For background streaming also add `audio` and `bluetooth-central` to `UIBackgroundModes`.
-- Android: AndroidManifest permissions, GitHub Packages repo in settings.gradle.kts, GITHUB_TOKEN. No manifest changes needed for background streaming (permissions auto-merge from plugin).
+- Android: AndroidManifest permissions, Maven Central repository in settings.gradle.kts; no token required. No manifest changes needed for background streaming (permissions auto-merge from plugin).
 - Deep links: `app_links` package, forward all URIs to `handleUrl()`
 
 ## Streams
@@ -70,3 +70,5 @@ Subscribe BEFORE starting operations. Cancel in dispose(). Always handle errors.
 ## Full reference
 
 See AGENTS.md at repository root for complete API signatures, configuration XML/Kotlin snippets, and debugging guide.
+
+DAT 1.0 compatibility: `insufficientSDKVersion` is terminal and requires an app update; `dwaOutOfStuRange` is a nonblocking warning and must not stop or restart the stream. The plugin retains app-initiated registration; Meta-AI-initiated registration requests and new experimental capabilities are not exposed.

@@ -4,7 +4,6 @@
    DO NOT EDIT MANUALLY. Run `string-resources-sync --source android` to update. */
 
 "dat_error_photo_capture_failed" = "फ़ोटो कैप्चर नहीं की जा सकी";
-"dat_error_photo_capture_timeout" = "फ़ोटो कैप्चर करने का समय समाप्त हो गया";
 "dat_error_stream_battery_low" = "स्ट्रीम करने के लिए डिवाइस की बैटरी बहुत कम है";
 "dat_error_stream_critical_error" = "गंभीर गड़बड़ी, स्ट्रीम समाप्त होना चाहिए";
 "dat_error_stream_device_not_connected" = "डिवाइस कनेक्ट नहीं किया गया है";

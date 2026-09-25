@@ -1,22 +1,15 @@
 import Flutter
 import MWDATCore
 
-/// Stream handler for per-device state updates (currently: thermal level).
-///
-/// 0.7.0 added `Wearables.deviceStateStream(for:)` keyed by `DeviceIdentifier`.
-/// The plugin's Dart-facing API exposes a single `deviceStateStream()` that
-/// tracks the *active* device, so this handler wraps the per-device stream in
-/// an outer subscription to `activeDeviceStream()` and switches its inner
-/// subscription whenever the active device changes.
+/// Observes the selected device's thermal state through DAT 1.0 Device listeners.
 class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
   private let deviceSelectorProvider: @MainActor () -> AutoDeviceSelector
   private var outerTask: Task<Void, Never>?
+  private var listenerToken: AnyListenerToken?
   private var eventSink: FlutterEventSink?
-  // See `ActiveDeviceStreamHandler`: the outer `activeDeviceStream()` loop dies
-  // on unregister, taking thermal updates with it. These let
-  // `restartMonitoring()` relaunch the loop exactly once after re-registration.
   private var isMonitoring = false
   private var monitoringGeneration = 0
+  private var deviceGeneration = 0
 
   init(deviceSelectorProvider: @escaping @MainActor () -> AutoDeviceSelector) {
     self.deviceSelectorProvider = deviceSelectorProvider
@@ -30,79 +23,67 @@ class DeviceStateStreamHandler: NSObject, FlutterStreamHandler {
   }
 
   public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    monitoringGeneration &+= 1
     outerTask?.cancel()
     outerTask = nil
+    cancelDeviceListener()
     eventSink = nil
     isMonitoring = false
     return nil
   }
 
-  /// Relaunch the active-device tracking loop after a disconnect/re-register
-  /// cycle so thermal updates resume. Mirrors
-  /// `ActiveDeviceStreamHandler.restartMonitoring()`; the `!isMonitoring` guard
-  /// also keeps us from a rapid cancel+resubscribe of `deviceStateStream(for:)`
-  /// for a still-active device (which the SDK answers with an empty stream).
-  ///
-  /// Pass `force: true` when the plugin has swapped its `AutoDeviceSelector`
-  /// so the loop re-binds to the new instance. The rapid-resubscribe hazard
-  /// doesn't apply there: the selector is only swapped while it reports no
-  /// active device, so no inner `deviceStateStream(for:)` subscription exists.
   func restartMonitoring(force: Bool = false) {
     guard eventSink != nil else { return }
     if !force, isMonitoring { return }
     startMonitoring()
   }
 
+  private func cancelDeviceListener() {
+    // Cancellation is async: invalidate queued callbacks before scheduling it.
+    deviceGeneration &+= 1
+    if let token = listenerToken {
+      listenerToken = nil
+      Task { await token.cancel() }
+    }
+  }
+
   private func startMonitoring() {
     outerTask?.cancel()
-    guard let events = eventSink else { return }
-    monitoringGeneration += 1
+    cancelDeviceListener()
+    guard eventSink != nil else { return }
+    monitoringGeneration &+= 1
     let generation = monitoringGeneration
     isMonitoring = true
     outerTask = Task { @MainActor in
       defer {
-        if self.monitoringGeneration == generation { self.isMonitoring = false }
-      }
-      let selector = self.deviceSelectorProvider()
-      var innerTask: Task<Void, Never>?
-      var currentDeviceId: DeviceIdentifier?
-
-      // Seed: if a device is already active, attach the inner subscription
-      // immediately so Dart subscribers see the first thermal value without
-      // waiting for an `activeDeviceStream` tick.
-      if let deviceId = selector.activeDevice {
-        currentDeviceId = deviceId
-        innerTask = Self.subscribe(toDevice: deviceId, events: events)
-      }
-
-      for await deviceId in selector.activeDeviceStream() {
-        // `activeDeviceStream()` replays the current value to new collectors,
-        // so we'll get an emit for the device we just seeded. The SDK's
-        // `deviceStateStream(for:)` doesn't tolerate rapid cancel+resubscribe
-        // for the same device (the second subscription closes immediately
-        // with 0 emits), so only tear down + restart when the device
-        // actually changes.
-        if deviceId == currentDeviceId { continue }
-        innerTask?.cancel()
-        innerTask = nil
-        currentDeviceId = deviceId
-        if let deviceId = deviceId {
-          innerTask = Self.subscribe(toDevice: deviceId, events: events)
+        if self.monitoringGeneration == generation {
+          self.isMonitoring = false
+          self.cancelDeviceListener()
         }
       }
-
-      innerTask?.cancel()
+      guard !Task.isCancelled, self.monitoringGeneration == generation else { return }
+      let selector = self.deviceSelectorProvider()
+      var currentDeviceId = selector.activeDevice
+      if let deviceId = currentDeviceId { self.subscribe(toDevice: deviceId) }
+      for await deviceId in selector.activeDeviceStream() {
+        guard !Task.isCancelled, self.monitoringGeneration == generation else { return }
+        if deviceId == currentDeviceId { continue }
+        self.cancelDeviceListener()
+        currentDeviceId = deviceId
+        if let deviceId = deviceId { self.subscribe(toDevice: deviceId) }
+      }
     }
   }
 
   @MainActor
-  private static func subscribe(
-    toDevice deviceId: DeviceIdentifier,
-    events: @escaping FlutterEventSink
-  ) -> Task<Void, Never> {
-    return Task { @MainActor in
-      for await state in Wearables.shared.deviceStateStream(for: deviceId) {
-        events(Self.stateToMap(state))
+  private func subscribe(toDevice deviceId: DeviceIdentifier) {
+    guard let device = Wearables.shared.deviceForIdentifier(deviceId) else { return }
+    let generation = deviceGeneration
+    // The SDK delivers a snapshot immediately, then on each device-state change.
+    listenerToken = device.addDeviceStateListener { [weak self] state in
+      Task { @MainActor in
+        guard let self, self.deviceGeneration == generation else { return }
+        self.eventSink?(Self.stateToMap(state))
       }
     }
   }

@@ -177,6 +177,9 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     case .videoStreamingError:
       code = "videoStreamingError"
       message = "Video streaming encountered an error."
+    case .audioStreamingError:
+      code = "audioStreamingError"
+      message = error.description
     case .permissionDenied:
       code = "permissionDenied"
       message = "Camera permission was denied."
@@ -185,16 +188,13 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
       // DAT 0.9.0 also raises this when the glasses are taken off (doff), not
       // just when the arms are folded.
       message = "The glasses were closed or taken off."
-    case .thermalCritical:
+    case .thermalHot:
       code = "thermalCritical"
-      message = "Device is overheating. Streaming has been paused to protect the device."
-    case .thermalEmergency:
-      code = "thermalEmergency"
-      message = "Device thermal state is emergency — streaming stopped."
-    case .peakPowerShutdown:
+      message = error.description
+    case .peakPowerLimit:
       code = "peakPowerShutdown"
       message = "Device exceeded peak power limit and shut down streaming."
-    case .batteryCritical:
+    case .batteryLow:
       code = "batteryCritical"
       message = "Device battery is critically low — streaming stopped."
     @unknown default:
@@ -234,6 +234,10 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
         "datAppOnTheGlassesUpdateRequired",
         "The DAT app on the glasses needs to be updated. Call MetaWearablesDat.openDATGlassesAppUpdate() to prompt the user."
       )
+    case .insufficientSDKVersion:
+      return ("insufficientSDKVersion", error.description)
+    case .dwaOutOfStuRange:
+      return ("dwaOutOfStuRange", error.description)
     case .dwaUnavailable:
       return ("dwaUnavailable", "The DAT Wearables App is unavailable.")
     @unknown default:

@@ -420,25 +420,9 @@ jobs:
   # Building the example APK covers both plugins at once, since it depends on
   # the core and the mock add-on.
   #
-  # Resolving `com.meta.wearable:mwdat-*` needs a token: Maven packages on
-  # GitHub Packages require authentication even when public, and
-  # example/android/settings.gradle.kts reads it from GITHUB_TOKEN. The
-  # workflow's built-in token is scoped to this repository and is not reliably
-  # accepted for facebook/meta-wearables-dat-android, so a repo secret
-  # MWDAT_PACKAGES_TOKEN (a PAT with `read:packages`) takes precedence when
-  # present. See doc/MAINTAINERS.md.
-  #
-  # Fork PRs get no secrets at all, so skip there rather than showing a
-  # permanently red check that a contributor cannot fix.
+  # DAT 1.0.0 artifacts are public on Maven Central; fork PRs need no token.
   android-build:
     runs-on: ubuntu-latest
-    # Skipped for fork PRs, which cannot read the GitHub Packages token the
-    # Android build needs. `github.event.pull_request` is null on a manual
-    # dispatch, so without the first clause this job would silently skip on
-    # every `workflow_dispatch` run — a green CI that never built Android.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -453,8 +437,6 @@ jobs:
         run: flutter pub get
       - name: Build Android example
         working-directory: example
-        env:
-          GITHUB_TOKEN: ${{ secrets.MWDAT_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: flutter build apk --release
       # The plugin's Kotlin unit tests. They cover the process-wide foreground
       # detection rules, which are pure logic and the only part of the
@@ -463,6 +445,4 @@ jobs:
       # resolvable in the context of a host app.
       - name: Android unit tests
         working-directory: example/android
-        env:
-          GITHUB_TOKEN: ${{ secrets.MWDAT_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: ./gradlew :flutter_meta_wearables_dat:testDebugUnitTest

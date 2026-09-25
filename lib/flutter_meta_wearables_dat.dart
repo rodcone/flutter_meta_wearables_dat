@@ -155,13 +155,12 @@ class StreamSessionError {
   /// **Stream-level codes** (originate from the DAT SDK's `StreamError`):
   /// `internalError`, `deviceNotFound`, `deviceNotConnected`, `timeout`,
   /// `videoStreamingError`, `permissionDenied`, `hingesClosed`,
-  /// `thermalCritical`, `thermalEmergency`, `peakPowerShutdown`,
-  /// `batteryCritical`. Two are **iOS only**:
-  /// - `deviceNotFound` — the Android SDK's `StreamError` has no equivalent
-  ///   case, so a not-found device surfaces as `videoStreamingError` there.
-  /// - `thermalEmergency` — DAT 0.9.0 removed the Android SDK's
-  ///   `StreamError.THERMAL_EMERGENCY`, so on Android a thermal emergency
-  ///   arrives as the device-session code `deviceThermalEmergency` instead.
+  /// `thermalCritical`, `peakPowerShutdown`, `batteryCritical`.
+  /// iOS also exposes `deviceNotFound` and `audioStreamingError` (audio streaming
+  /// is not enabled by this plugin). DAT 1.0 maps iOS `thermalHot`, `batteryLow`,
+  /// and `peakPowerLimit` to the existing cross-platform codes above.
+  /// The legacy `thermalEmergency` code is no longer emitted by DAT 1.0;
+  /// thermal emergencies arrive as `deviceThermalEmergency` on both platforms.
   ///
   /// Photo-capture failure is deliberately **not** on this channel on either
   /// platform — it resolves [MetaWearablesDat.capturePhoto] instead.
@@ -173,7 +172,10 @@ class StreamSessionError {
   /// `capabilityNotFound`, `unexpectedError`, `deviceThermalCritical`,
   /// `deviceThermalEmergency`, `devicePeakPowerShutdown`,
   /// `deviceBatteryCritical`, `datAppOnTheGlassesUpdateRequired`,
-  /// `dwaUnavailable`. Two more are **Android only** — iOS's
+  /// `dwaUnavailable`, `insufficientSDKVersion` (terminal; requires an app
+  /// update), and `dwaOutOfStuRange` (nonblocking compatibility warning;
+  /// continue normally, optionally show a rate-limited update suggestion).
+  /// Two more are **Android only** — iOS's
   /// `DeviceSessionError` is `@frozen` with no equivalent cases:
   /// `sessionEndedByDevice` (the device ended the session; the stream stops
   /// with it) and `capabilityDenied`.

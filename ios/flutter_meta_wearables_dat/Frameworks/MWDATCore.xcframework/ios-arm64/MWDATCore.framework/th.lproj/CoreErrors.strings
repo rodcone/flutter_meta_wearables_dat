@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "กระบวนการยกเลิกการลงทะเบียนล้มเหลวเนื่องจากสาเหตุที่ไม่ระบุ";
 "dat_error_registration_meta_ai_not_installed" = "ไม่ได้ติดตั้งแอพ Meta AI บนอุปกรณ์ ซึ่งจำเป็นสำหรับการลงทะเบียน";
 "dat_error_registration_network_unavailable" = "ไม่มีการเชื่อมต่ออินเทอร์เน็ต โปรดตรวจสอบการเชื่อมต่อของคุณแล้วลองอีกครั้ง";
-"dat_error_registration_timeout" = "หมดเวลาการลงทะเบียนแล้ว โดยไม่มีการตอบกลับจาก Meta AI";
 "dat_error_registration_unknown" = "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุในระหว่างกระบวนการลงทะเบียน";
 "dat_error_session_already_exists" = "มีเซสชั่นสำหรับอุปกรณ์นี้อยู่แล้ว";
 "dat_error_session_already_stopped" = "เซสชั่นถูกหยุดไปแล้ว";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "ผู้ใช้ยกเลิกการลงทะเบียนแล้วตอนที่พยายามยกเลิกการลงทะเบียนอีกครั้ง";
 "dat_error_unregistration_configuration_invalid" = "การกำหนดค่าชุดเครื่องมือการเข้าถึงอุปกรณ์ที่สวมใส่ได้ไม่ถูกต้องหรือไม่สมบูรณ์";
 "dat_error_unregistration_meta_ai_not_installed" = "ไม่ได้ติดตั้งแอพ Meta AI บนอุปกรณ์ ซึ่งจำเป็นสำหรับการยกเลิกการลงทะเบียน";
-"dat_error_unregistration_timeout" = "การยกเลิกการลงทะเบียนหมดเวลาแล้ว โดยไม่มีการตอบกลับจาก Meta AI";
 "dat_error_unregistration_unknown" = "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุในระหว่างกระบวนการยกเลิกการลงทะเบียน";
 "dat_error_wearables_already_configured" = "กำหนดค่าไว้แล้ว";
 "dat_error_wearables_already_initialized" = "เริ่มต้นการทำงานของอุปกรณ์สวมใส่ไปแล้ว";

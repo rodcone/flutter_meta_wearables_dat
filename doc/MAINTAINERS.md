@@ -123,12 +123,12 @@ The iOS side supports CocoaPods and Swift Package Manager from the same on-disk 
 
 ## Android
 
-The Android implementation uses Maven dependencies from GitHub Packages. Follow these steps to update the DAT version.
+The Android implementation uses Maven dependencies from Maven Central. Follow these steps to update the DAT version.
 
 ### 1. Check Latest Version
 
 - Check the [official Android repository](https://github.com/facebook/meta-wearables-dat-android) for the latest release version
-- Review the [GitHub Packages](https://github.com/orgs/facebook/packages?repo_name=meta-wearables-dat-android) to verify available versions
+- Review the [Maven Central](https://central.sonatype.com/namespace/com.meta.wearable) to verify available versions
 
 ### 2. Update Plugin Version
 
@@ -151,9 +151,9 @@ Keep the two values in sync — mixing versions across the two plugins risks ABI
 2. Sync Gradle: Run `./gradlew build --refresh-dependencies` or use Android Studio's "Sync Project with Gradle Files"
 3. Verify the new dependencies are resolved correctly
 
-If Gradle fails with `401 Unauthorized` resolving `com.meta.wearable:mwdat-*`, your GitHub token (`GITHUB_TOKEN` or `github_token` in `local.properties`) is expired — regenerate one with `read:packages` scope.
+If dependency resolution fails, verify `mavenCentral()` and the target release coordinates. DAT 1.x does not need a GitHub Packages token.
 
-**The same applies in CI.** The `android-build` job in [`ci.yml`](../.github/workflows/ci.yml) builds the example APK, which is the only job that compiles either plugin's Kotlin. It reads the token from `MWDAT_PACKAGES_TOKEN` (a repo secret — a PAT with `read:packages`) and falls back to the workflow's built-in `GITHUB_TOKEN`. The built-in token is scoped to this repository and is not reliably accepted for `facebook/meta-wearables-dat-android`, so **if `android-build` starts failing with `401 Unauthorized`, add or refresh the `MWDAT_PACKAGES_TOKEN` secret** (Settings → Secrets and variables → Actions). The job is skipped on fork PRs, where no secrets are available.
+**CI:** the Android build resolves public Maven Central artifacts and runs on fork PRs without package credentials.
 
 ### 4. Implement API Changes
 

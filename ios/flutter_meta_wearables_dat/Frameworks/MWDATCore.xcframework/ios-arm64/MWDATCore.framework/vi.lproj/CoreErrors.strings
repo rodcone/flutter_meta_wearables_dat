@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "Quy trình hủy đăng ký không thành công mà không rõ lý do";
 "dat_error_registration_meta_ai_not_installed" = "Chưa cài đặt ứng dụng Meta AI trên thiết bị. Bạn phải cài đặt ứng dụng này thì mới có thể đăng ký";
 "dat_error_registration_network_unavailable" = "Không có kết nối Internet. Vui lòng kiểm tra kết nối rồi thử lại";
-"dat_error_registration_timeout" = "Đã hết thời gian chờ đăng ký, không có phản hồi từ Meta AI";
 "dat_error_registration_unknown" = "Đã xảy ra lỗi không xác định trong quá trình đăng ký";
 "dat_error_session_already_exists" = "Thiết bị này đã có phiên rồi";
 "dat_error_session_already_stopped" = "Đã dừng phiên này rồi";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "Người dùng cố gắng hủy đăng ký lần nữa nhưng đã hủy đăng ký rồi";
 "dat_error_unregistration_configuration_invalid" = "Cấu hình Bộ công cụ truy cập thiết bị đeo thông minh không hợp lệ hoặc chưa hoàn chỉnh";
 "dat_error_unregistration_meta_ai_not_installed" = "Chưa cài đặt ứng dụng Meta AI trên thiết bị. Bạn phải cài đặt ứng dụng này thì mới có thể hủy đăng ký";
-"dat_error_unregistration_timeout" = "Đã hết thời gian chờ hủy đăng ký, không có phản hồi từ Meta AI";
 "dat_error_unregistration_unknown" = "Đã xảy ra lỗi không xác định trong quá trình hủy đăng ký";
 "dat_error_wearables_already_configured" = "Đã đặt cấu hình rồi";
 "dat_error_wearables_already_initialized" = "Đã khởi tạo thiết bị đeo rồi.";

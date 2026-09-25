@@ -4,8 +4,109 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import ImageIO
 import MWDATCore
 import UIKit
+
+/// Specifies how decoded audio is delivered with a camera streaming session.
+///
+/// @Unpublishable
+public enum AudioCodec : Sendable {
+
+    /// Apple Standard PCM (Float32 native-endian) with specified sample rate and number of channels.
+    case pcm(sampleRate: MWDATCamera.AudioSampleRate, numberOfChannels: UInt32)
+}
+
+/// Represents a single frame of audio data from a Meta Wearables device.
+/// Contains a PCM buffer with audio samples and timing information.
+///
+/// @Unpublishable
+public struct AudioFrame : @unchecked Sendable {
+
+    /// The PCM buffer containing the audio sample data.
+    public let pcmBuffer: AVAudioPCMBuffer
+
+    /// The presentation timestamp for synchronizing audio with video.
+    public let presentationTimeStamp: CMTime
+}
+
+/// Supported audio sample rates for streaming from Meta Wearables devices.
+///
+/// The available sample rates are constrained to values supported by the device hardware.
+///
+/// @Unpublishable
+@frozen public enum AudioSampleRate : UInt, Sendable, CaseIterable {
+
+    /// 16,000 Hz — suitable for speech/voice applications.
+    case rate16000
+
+    /// 44,100 Hz — CD-quality audio.
+    case rate44100
+
+    /// 48,000 Hz — professional audio quality.
+    case rate48000
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: UInt)
+
+    /// A type that can represent a collection of all values of this type.
+    public typealias AllCases = [MWDATCamera.AudioSampleRate]
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = UInt
+
+    /// A collection of all values of this type.
+    nonisolated public static var allCases: [MWDATCamera.AudioSampleRate] { get }
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: UInt { get }
+}
+
+extension AudioSampleRate : Equatable {
+}
+
+extension AudioSampleRate : Hashable {
+}
+
+extension AudioSampleRate : RawRepresentable {
+}
+
+extension AudioSampleRate : BitwiseCopyable {
+}
 
 /// Consolidated camera capability for a Meta Wearables device.
 ///
@@ -16,20 +117,32 @@ import UIKit
 ///
 /// The child features are owned by the camera and share its lifecycle:
 /// - ``stream`` — video streaming (and in-stream photo capture).
+/// - ``photo`` — standalone high-quality photo capture for development and beta release channels.
 ///
 /// Stream and Photo compete for the camera hardware and cannot capture simultaneously; the
 /// developer is responsible for stopping one before starting the other.
 ///
 /// In Swift, create a ``Camera`` by first creating and starting a ``DeviceSession``, then calling
 /// ``DeviceSession/addCamera(config:)``. The returned camera is attached to that device session
-/// and stops automatically when the parent device session stops.
+/// and stops automatically when the parent device session stops or its stream fails terminally.
+/// A terminal stream failure also detaches the camera so a replacement can be added to the same
+/// device session.
 final public class Camera : Sendable {
 
     /// The video streaming child feature, owned by this camera.
     ///
     /// Use it to receive real-time camera frames. Its lifecycle is bound to this camera: stopping
-    /// the camera stops the stream.
+    /// the camera stops the stream. Stopping only the stream does not stop or detach the camera.
     final public let stream: MWDATCamera.Stream
+
+    /// The high-quality photo capture child feature, owned by this camera.
+    ///
+    /// Its lifecycle is bound to this camera: stopping the camera stops photo capture. Photo and
+    /// Stream compete for the camera hardware and cannot capture simultaneously — stop one before
+    /// starting the other. This API is available in development and beta release channels.
+    ///
+    /// @Unpublishable
+    final public let photo: MWDATCamera.Photo
 
     /// The current lifecycle state of this camera.
     final public var state: MWDATCamera.CameraState { get }
@@ -116,6 +229,26 @@ extension CameraState : Hashable {
 }
 
 extension CameraState : BitwiseCopyable {
+}
+
+/// Audio codec configuration for streaming sessions.
+///
+/// @Unpublishable
+@objc(MWDATAudioCodec) final public class ObjC_AudioCodec : NSObject, Sendable {
+
+    /// The sample rate in Hz.
+    @objc final public var sampleRate: UInt { get }
+
+    /// The number of audio channels.
+    @objc final public var numberOfChannels: UInt32 { get }
+
+    /// Creates a PCM audio codec configuration.
+    /// - Parameters:
+    ///   - sampleRate: The sample rate in Hz (e.g., 44100).
+    ///   - numberOfChannels: The number of audio channels (e.g., 2 for stereo).
+    @objc public init(sampleRate: UInt, numberOfChannels: UInt32)
+
+    @objc deinit
 }
 
 /// Objective-C wrapper for the consolidated ``Camera`` capability.
@@ -354,11 +487,21 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
     ///   - frameRate: The target frame rate for streaming.
     @objc public init(videoCodec: MWDATCamera.ObjC_VideoCodec, resolution: MWDATCamera.ObjC_StreamingResolution, frameRate: Int)
 
+    /// Creates a new stream session configuration with specified parameters including audio.
+    /// - Parameters:
+    ///   - videoCodec: The video codec to use for streaming.
+    ///   - resolution: The resolution for video streaming.
+    ///   - frameRate: The target frame rate for streaming.
+    ///   - audioCodec: The audio codec to use for streaming. Pass nil to disable audio.
+    ///
+    /// @Unpublishable
+    @objc public init(videoCodec: MWDATCamera.ObjC_VideoCodec, resolution: MWDATCamera.ObjC_StreamingResolution, frameRate: Int, audioCodec: MWDATCamera.ObjC_AudioCodec?)
+
     @objc deinit
 }
 
 /// Errors that can occur during streaming sessions.
-@objc(MWDATStreamError) @frozen public enum ObjC_StreamError : Int, Sendable {
+@objc(MWDATStreamError) public enum ObjC_StreamError : Int, Sendable {
 
     /// An internal error occurred.
     case internalError
@@ -375,23 +518,25 @@ extension ObjC_PhotoCaptureFormat : BitwiseCopyable {
     /// Video streaming encountered an error.
     case videoStreamingError
 
+    /// Audio streaming encountered an error.
+    ///
+    /// @Unpublishable
+    case audioStreamingError
+
     /// Camera permission was denied.
     case permissionDenied
 
     /// The device hinges were closed during streaming.
     case hingesClosed
 
-    /// The device thermal state has reached a critical level that may affect streaming performance.
-    case thermalCritical
+    /// Device thermal level is too high for streaming.
+    case thermalHot
 
-    /// The device thermal state has reached an emergency level and the device is shutting down.
-    case thermalEmergency
+    /// Device battery is too low for streaming.
+    case batteryLow
 
-    /// The device has entered peak power shutdown.
-    case peakPowerShutdown
-
-    /// The device battery has reached a critically low level.
-    case batteryCritical
+    /// Device peak power limit reached.
+    case peakPowerLimit
 
     /// A photo capture did not complete — no image was returned in time (e.g. low device storage).
     case photoCaptureFailed
@@ -447,9 +592,6 @@ extension ObjC_StreamError : Hashable {
 }
 
 extension ObjC_StreamError : RawRepresentable {
-}
-
-extension ObjC_StreamError : BitwiseCopyable {
 }
 
 /// Represents the current state of a media streaming session.
@@ -686,6 +828,84 @@ extension ObjC_VideoCodec : BitwiseCopyable {
     @objc deinit
 }
 
+/// Captures high-quality still photos from a connected wearable device.
+///
+/// `Photo` is the entry point for photo capture. It provides ``start()`` and ``stop()`` to control
+/// the capability lifecycle, ``capturePhoto(resolution:quality:)`` to trigger a photo capture on
+/// the device, and publishers for observing state transitions, incoming photo data, transfer
+/// progress, and errors.
+///
+/// > Important: Calling ``stop()`` while the capability is in the ``PhotoState/starting``
+/// > state records the request and tears it down as soon as startup resolves, so a stop
+/// > issued mid-startup is honored rather than dropped.
+///
+/// This class is `Sendable` and safe to use from any thread or task.
+///
+/// @Unpublishable
+final public class Photo : Sendable {
+
+    /// Publishes session lifecycle state changes, delivered asynchronously and in order. Retain the
+    /// session until you observe the terminal ``PhotoState/stopped`` transition; a
+    /// transition queued just before deallocation may not be delivered.
+    final public var statePublisher: any MWDATCore.Announcer<MWDATCamera.PhotoState> { get }
+
+    /// Publishes captured photo data received from the device.
+    final public var photoDataPublisher: any MWDATCore.Announcer<MWDATCamera.PhotoCaptureData> { get }
+
+    /// Publishes errors encountered during the session lifecycle or photo capture.
+    final public var errorPublisher: any MWDATCore.Announcer<MWDATCamera.PhotoError> { get }
+
+    /// Publishes file transfer progress for incoming captured photos.
+    final public var transferProgressPublisher: any MWDATCore.Announcer<MWDATCamera.PhotoTransferProgress> { get }
+
+    @objc deinit
+
+    final public func start()
+
+    /// Stops photo capture and tears down internal transports.
+    ///
+    /// When the session is ``PhotoState/started``, this tears down immediately.
+    /// When it is still ``PhotoState/starting`` (the device has not yet confirmed
+    /// capability activation), the stop is recorded and honored as soon as startup resolves — the
+    /// session then transitions to ``PhotoState/stopped`` instead of
+    /// ``PhotoState/started``, rather than the stop being dropped. Calling `stop()`
+    /// while already ``PhotoState/stopping`` or ``PhotoState/stopped``
+    /// is a no-op.
+    final public func stop()
+
+    /// Triggers a photo capture on the connected device.
+    ///
+    /// The session must be in the ``PhotoState/started`` state. If it is not,
+    /// a ``PhotoError/notReady`` error is published.
+    ///
+    /// Both `resolution` and `quality` default to ``PhotoResolution/medium`` and
+    /// ``PhotoQuality/medium`` respectively, which provides a good balance between
+    /// image quality and battery consumption on the glasses. Higher settings increase
+    /// processing time, file size, and battery drain.
+    ///
+    /// - Parameters:
+    ///   - resolution: The capture resolution (size). Defaults to ``PhotoResolution/medium`` (720p).
+    ///   - quality: The compression quality. Defaults to ``PhotoQuality/medium``.
+    final public func capturePhoto(resolution: MWDATCamera.PhotoResolution = .medium, quality: MWDATCamera.PhotoQuality = .medium)
+}
+
+/// A photo captured from the connected wearable device.
+///
+/// @Unpublishable
+public struct PhotoCaptureData : Sendable {
+
+    /// The raw image bytes (e.g. JPEG or HEIC).
+    public let imageData: Data
+
+    /// Optional metadata associated with the capture (e.g. camera settings, orientation).
+    public let metadata: Data?
+
+    /// The time the photo was received.
+    public let timestamp: Date
+
+    public init(imageData: Data, metadata: Data?, timestamp: Date)
+}
+
 /// Supported formats for capturing photos from Meta Wearables devices.
 public enum PhotoCaptureFormat : Sendable {
 
@@ -751,8 +971,274 @@ public struct PhotoData : Sendable {
     public init(data: Data, format: MWDATCamera.PhotoCaptureFormat)
 }
 
+/// Errors that can occur during the lifecycle of a ``Photo``.
+///
+/// @Unpublishable
+public enum PhotoError : MWDATCore.DatError {
+
+    /// The session is not in a valid state to perform the requested operation.
+    case notReady
+
+    /// A photo capture attempt failed. The `underlying` error contains transport-level details, if available.
+    case captureFailure(underlying: (any Error)?)
+
+    /// The session could not be started due to a transport setup failure.
+    case sessionSetupFailed(underlying: (any Error)?)
+
+    /// The device rejected the request because a capture is already in progress.
+    case busy
+
+    /// The device reported that its capture service is unavailable.
+    case serviceUnavailable
+
+    /// The device denied the capture because camera permission was not granted.
+    case permissionDenied
+
+    /// The device refused the capture because its thermal, power, or battery state is critical.
+    case deviceHealthCritical
+
+    /// The device disconnected.
+    ///
+    /// - Note: Not emitted yet. The case exists so the published API matches Android, which reports
+    ///   this from its disconnect handler; the iOS emission path is tracked separately. Until then a
+    ///   disconnect surfaces as ``captureFailure(underlying:)`` once the capture watchdog expires.
+    case deviceDisconnected
+
+    /// A human-readable description of the error suitable for logging, debugging,
+    /// and display to developers. This should return the English version of the error.
+    public var description: String { get }
+
+    /// A localized message describing what error occurred.
+    public var errorDescription: String? { get }
+}
+
+/// The compression quality to use when capturing a photo from the glasses camera.
+///
+/// - ``low``: Highest compression, smallest file size.
+/// - ``medium``: Balanced compression and image quality.
+/// - ``high``: Lowest compression, best image quality.
+///
+/// @Unpublishable
+public enum PhotoQuality : String, CaseIterable, Sendable {
+
+    case low
+
+    case medium
+
+    case high
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: String)
+
+    /// A type that can represent a collection of all values of this type.
+    public typealias AllCases = [MWDATCamera.PhotoQuality]
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = String
+
+    /// A collection of all values of this type.
+    nonisolated public static var allCases: [MWDATCamera.PhotoQuality] { get }
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: String { get }
+}
+
+extension PhotoQuality : Equatable {
+}
+
+extension PhotoQuality : Hashable {
+}
+
+extension PhotoQuality : RawRepresentable {
+}
+
+/// The resolution (size) to use when capturing a photo from the glasses camera.
+///
+/// - ``small``: 480p — smallest file size, fastest transfer.
+/// - ``medium``: 720p — balanced size and transfer speed.
+/// - ``large``: 1080p — high resolution capture.
+/// - ``full``: Native sensor resolution (4032×3024) — highest resolution available.
+///
+/// @Unpublishable
+public enum PhotoResolution : String, CaseIterable, Sendable {
+
+    case small
+
+    case medium
+
+    case large
+
+    case full
+
+    /// Creates a new instance with the specified raw value.
+    ///
+    /// If there is no value of the type that corresponds with the specified raw
+    /// value, this initializer returns `nil`. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     print(PaperSize(rawValue: "Legal"))
+    ///     // Prints "Optional(PaperSize.Legal)"
+    ///
+    ///     print(PaperSize(rawValue: "Tabloid"))
+    ///     // Prints "nil"
+    ///
+    /// - Parameter rawValue: The raw value to use for the new instance.
+    public init?(rawValue: String)
+
+    /// A type that can represent a collection of all values of this type.
+    public typealias AllCases = [MWDATCamera.PhotoResolution]
+
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    ///
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    public typealias RawValue = String
+
+    /// A collection of all values of this type.
+    nonisolated public static var allCases: [MWDATCamera.PhotoResolution] { get }
+
+    /// The corresponding value of the raw type.
+    ///
+    /// A new instance initialized with `rawValue` will be equivalent to this
+    /// instance. For example:
+    ///
+    ///     enum PaperSize: String {
+    ///         case A4, A5, Letter, Legal
+    ///     }
+    ///
+    ///     let selectedSize = PaperSize.Letter
+    ///     print(selectedSize.rawValue)
+    ///     // Prints "Letter"
+    ///
+    ///     print(selectedSize == PaperSize(rawValue: selectedSize.rawValue)!)
+    ///     // Prints "true"
+    public var rawValue: String { get }
+}
+
+extension PhotoResolution : Equatable {
+}
+
+extension PhotoResolution : Hashable {
+}
+
+extension PhotoResolution : RawRepresentable {
+}
+
+/// The lifecycle state of a ``Photo``.
+///
+/// @Unpublishable
+public enum PhotoState : Sendable {
+
+    /// The capability is idle and not connected to the device.
+    case stopped
+
+    /// The capability is setting up internal transports.
+    case starting
+
+    /// The capability is active and ready to receive photos or accept capture commands.
+    case started
+
+    /// The capability is tearing down internal transports.
+    case stopping
+
+    /// Returns a Boolean value indicating whether two values are equal.
+    ///
+    /// Equality is the inverse of inequality. For any values `a` and `b`,
+    /// `a == b` implies that `a != b` is `false`.
+    ///
+    /// - Parameters:
+    ///   - lhs: A value to compare.
+    ///   - rhs: Another value to compare.
+    public static func == (a: MWDATCamera.PhotoState, b: MWDATCamera.PhotoState) -> Bool
+
+    /// Hashes the essential components of this value by feeding them into the
+    /// given hasher.
+    ///
+    /// Implement this method to conform to the `Hashable` protocol. The
+    /// components used for hashing must be the same as the components compared
+    /// in your type's `==` operator implementation. Call `hasher.combine(_:)`
+    /// with each of these components.
+    ///
+    /// - Important: In your implementation of `hash(into:)`,
+    ///   don't call `finalize()` on the `hasher` instance provided,
+    ///   or replace it with a different instance.
+    ///   Doing so may become a compile-time error in the future.
+    ///
+    /// - Parameter hasher: The hasher to use when combining the components
+    ///   of this instance.
+    public func hash(into hasher: inout Hasher)
+
+    /// The hash value.
+    ///
+    /// Hash values are not guaranteed to be equal across different executions of
+    /// your program. Do not save hash values to use during a future execution.
+    ///
+    /// - Important: `hashValue` is deprecated as a `Hashable` requirement. To
+    ///   conform to `Hashable`, implement the `hash(into:)` requirement instead.
+    ///   The compiler provides an implementation for `hashValue` for you.
+    public var hashValue: Int { get }
+}
+
+extension PhotoState : Equatable {
+}
+
+extension PhotoState : Hashable {
+}
+
+/// Progress of a file transfer for a captured photo.
+///
+/// @Unpublishable
+public struct PhotoTransferProgress : Sendable {
+
+    public let bytesReceived: UInt64
+
+    public let totalBytes: UInt64
+
+    /// Transfer progress as a fraction between 0.0 and 1.0.
+    public var fraction: Double { get }
+}
+
 /// A class for managing media streaming capabilities with Meta Wearables devices.
-/// Handles video streaming, photo capture, and provides real-time state updates.
+/// Handles video streaming and photo capture, and provides real-time state updates.
 ///
 /// In Swift, create a ``Stream`` by first creating and starting a ``DeviceSession``,
 /// then calling ``DeviceSession/addCamera(config:)`` and using ``Camera/stream``. The stream is attached to that
@@ -770,6 +1256,11 @@ final public class Stream : Sendable {
 
     /// Publisher for video frames received from the streaming session.
     final public var videoFramePublisher: any MWDATCore.Announcer<MWDATCamera.VideoFrame> { get }
+
+    /// Publisher for audio frames received from the streaming session.
+    ///
+    /// @Unpublishable
+    final public var audioFramePublisher: any MWDATCore.Announcer<MWDATCamera.AudioFrame> { get }
 
     /// Publisher for photo data captured during the streaming session.
     final public var photoDataPublisher: any MWDATCore.Announcer<MWDATCamera.PhotoData> { get }
@@ -803,7 +1294,7 @@ final public class Stream : Sendable {
 
     /// Stops video streaming and releases all resources.
     ///
-    /// Shuts down the streaming pipeline and transitions to `.stopped` state.
+    /// Shuts down the streaming pipeline and transitions to the `.stopped` state.
     ///
     /// State transitions: Any state -> `.stopping` -> `.stopped`
     final public func stop()
@@ -829,11 +1320,26 @@ public struct StreamConfiguration : Sendable {
     /// The video codec to use for streaming.
     public let videoCodec: MWDATCamera.VideoCodec
 
+    /// The audio codec (optional) to use for streaming.
+    ///
+    /// @Unpublishable
+    public let audioCodec: MWDATCamera.AudioCodec?
+
     /// The resolution at which to stream video content.
     public let resolution: MWDATCamera.StreamingResolution
 
     /// The target frame rate for the streaming session.
     public let frameRate: UInt
+
+    /// Creates a new stream session configuration with specified parameters including audio.
+    /// - Parameters:
+    ///   - videoCodec: The video codec to use for streaming.
+    ///   - audioCodec: The audio codec to use for streaming.
+    ///   - resolution: The resolution for video streaming.
+    ///   - frameRate: The target frame rate for streaming.
+    ///
+    /// @Unpublishable
+    public init(videoCodec: MWDATCamera.VideoCodec, audioCodec: MWDATCamera.AudioCodec?, resolution: MWDATCamera.StreamingResolution, frameRate: UInt)
 
     /// Creates a new stream session configuration with specified parameters.
     /// - Parameters:
@@ -865,23 +1371,25 @@ public enum StreamError : MWDATCore.DatError, Equatable {
     /// Video streaming encountered an error.
     case videoStreamingError
 
+    /// Audio streaming encountered an error.
+    ///
+    /// @Unpublishable
+    case audioStreamingError
+
     /// Camera permission was denied.
     case permissionDenied
 
     /// The device hinges were closed during streaming.
     case hingesClosed
 
-    /// The device thermal state has reached a critical level that may affect streaming performance.
-    case thermalCritical
+    /// Device thermal level is too high for streaming.
+    case thermalHot
 
-    /// The device thermal state has reached an emergency level and the device is shutting down.
-    case thermalEmergency
+    /// Device battery is too low for streaming.
+    case batteryLow
 
-    /// The device has entered peak power shutdown.
-    case peakPowerShutdown
-
-    /// The device battery has reached a critically low level.
-    case batteryCritical
+    /// Device peak power limit reached.
+    case peakPowerLimit
 
     /// A photo capture did not complete — no image was returned in time. This commonly indicates low
     /// device storage or another capture already in progress; the stream itself continues.
@@ -972,7 +1480,7 @@ extension StreamState : Hashable {
 extension StreamState : BitwiseCopyable {
 }
 
-/// Valid Live Streaming resolutions. We are using 9:16 aspect ratio.
+/// Valid Live Streaming resolutions. We are using a 9:16 aspect ratio.
 public enum StreamingResolution : Sendable, CaseIterable {
 
     /// High resolution streaming at 720x1280 pixels.
@@ -1042,7 +1550,7 @@ public enum VideoCodec : Sendable {
 
     /// Raw decompressed video frames (420v YUV pixel buffers).
     /// - Note: Video frames are only delivered while the app is in the foreground.
-    ///   When the app enters background, frame delivery stops. Use ``hvc1`` if you
+    ///   When the app enters the background, frame delivery stops. Use ``hvc1`` if you
     ///   need to receive frames while backgrounded.
     case raw
 
@@ -1136,8 +1644,10 @@ extension DeviceSession {
     /// Creates and adds a consolidated ``Camera`` to this device session.
     ///
     /// The returned ``Camera`` owns the camera hardware resource and exposes its child features
-    /// (currently ``Camera/stream``). The camera is registered as a capability of this session and
-    /// is automatically stopped when the session stops.
+    /// (``Camera/stream`` and the `@Unpublishable` ``Camera/photo``). The camera is registered as a
+    /// capability of this session and is automatically stopped when the session stops. A terminal
+    /// child-stream failure stops and detaches the camera, allowing a subsequent call to add a
+    /// replacement.
     ///
     /// The device session must be in ``DeviceSessionState/started`` state; adding a camera to a
     /// session that has not started yet returns `nil`.

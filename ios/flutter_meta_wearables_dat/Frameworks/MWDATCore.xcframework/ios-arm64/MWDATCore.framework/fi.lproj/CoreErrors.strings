@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "Rekisteröinnin poistamisen käsittely ei onnistunut määrittämättömästä syystä";
 "dat_error_registration_meta_ai_not_installed" = "Meta AI -sovellusta ei ole asennettu laitteelle. Tarvitset sen, jotta voit rekisteröityä";
 "dat_error_registration_network_unavailable" = "Internet-yhteyttä ei ole saatavilla. Tarkista yhteys ja yritä uudelleen";
-"dat_error_registration_timeout" = "Rekisteröinnin aikakatkaisu vanhentui, Meta AI ei antanut vastausta";
 "dat_error_registration_unknown" = "Tuntematon virhe rekisteröitymisen aikana";
 "dat_error_session_already_exists" = "Tälle laitteelle on jo olemassa istunto";
 "dat_error_session_already_stopped" = "Istunto on jo lopetettu";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "Käyttäjän rekisteröinti on jo kumottu, kun hän yrittää kumota rekisteröinnin uudelleen";
 "dat_error_unregistration_configuration_invalid" = "Puettavien laitteiden käyttöoikeustyökalusarjan määritys on virheellinen tai vaillinainen";
 "dat_error_unregistration_meta_ai_not_installed" = "Meta AI -sovellusta ei ole asennettu laitteelle. Tarvitset sen, jotta voit kumota rekisteröinnin";
-"dat_error_unregistration_timeout" = "Rekisteröinnin poiston aikakatkaisu vanhentui. Meta AI ei antanut vastausta";
 "dat_error_unregistration_unknown" = "Tuntematon virhe rekisteröinnin kumoamisen aikana";
 "dat_error_wearables_already_configured" = "On jo määritetty";
 "dat_error_wearables_already_initialized" = "Puettavat laitteet on jo alustettu.";

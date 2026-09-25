@@ -37,7 +37,7 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.2
+  flutter_meta_wearables_dat: ^0.10.0
 ```
 
 ### 2. Configure iOS or Android
@@ -331,48 +331,21 @@ Add the following to your app's `AndroidManifest.xml`:
 
 #### 2. Repository Configuration
 
-Add the GitHub Packages repository to your `settings.gradle.kts`. First, add the necessary imports at the top of the file:
+DAT 1.0.0 is published to Maven Central. No GitHub token is required. In `settings.gradle.kts`:
 
 ```kotlin
-import java.util.Properties
-import kotlin.io.path.div
-import kotlin.io.path.exists
-import kotlin.io.path.inputStream
-```
-
-Then add the repository configuration:
-
-```kotlin
-val localProperties =
-    Properties().apply {
-        val localPropertiesPath = rootDir.toPath() / "local.properties"
-        if (localPropertiesPath.exists()) {
-            load(localPropertiesPath.inputStream())
-        }
-    }
-
 dependencyResolutionManagement {
-    // Flutter's Gradle plugin adds a maven repo at the project level.
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
-            credentials {
-                username = "" // not needed
-                password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
-            }
-        }
+        maven("https://storage.googleapis.com/download.flutter.io")
     }
 }
 ```
 
 **Note:** We use `PREFER_SETTINGS` instead of `FAIL_ON_PROJECT_REPOS` because Flutter's Gradle plugin needs to add repositories at the project level.
 
-Set a GitHub token with `read:packages` scope via:
-- Environment variable: `GITHUB_TOKEN`
-- Or in `local.properties`: `github_token=your_token_here`
 
 #### 3. MainActivity configuration
 
@@ -708,8 +681,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^0.9.2
-  flutter_meta_wearables_dat_mock_device: ^0.9.2
+  flutter_meta_wearables_dat: ^0.10.0
+  flutter_meta_wearables_dat_mock_device: ^0.10.0
 ```
 
 ```dart
@@ -783,3 +756,5 @@ Contributions are welcome! Feel free to open [issues](https://github.com/rodcone
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
+
+DAT 1.0 compatibility: `insufficientSDKVersion` is terminal and requires an app update; `dwaOutOfStuRange` is a nonblocking warning and must not stop or restart the stream. The plugin retains app-initiated registration; Meta-AI-initiated registration requests and new experimental capabilities are not exposed.

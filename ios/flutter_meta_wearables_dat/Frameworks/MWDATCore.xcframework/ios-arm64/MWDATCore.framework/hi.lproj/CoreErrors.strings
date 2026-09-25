@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "बिना किसी वजह के बताए, अनरजिस्ट्रेशन का प्रोसेस पूरा नहीं हो सका";
 "dat_error_registration_meta_ai_not_installed" = "इस डिवाइस पर Meta AI ऐप इंस्टॉल नहीं किया गया है, जो रजिस्ट्रेशन के लिए ज़रूरी है";
 "dat_error_registration_network_unavailable" = "इंटरनेट कनेक्शन उपलब्ध नहीं है. कृपया अपना कनेक्शन जाँचें और फिर से कोशिश करें";
-"dat_error_registration_timeout" = "रजिस्ट्रेशन के लिए दी गई समय-सीमा समाप्त हो गई है, Meta AI की ओर से कोई जवाब नहीं मिला";
 "dat_error_registration_unknown" = "रजिस्ट्रेशन के प्रोसेस के दौरान कोई अज्ञात गड़बड़ी हुई";
 "dat_error_session_already_exists" = "इस डिवाइस के लिए एक सेशन पहले से मौजूद है";
 "dat_error_session_already_stopped" = "सेशन पहले ही रोका जा चुका है";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "रजिस्ट्रेशन हटाने की कोशिश करते समय यूज़र का रजिस्ट्रेशन पहले ही हट चुका है";
 "dat_error_unregistration_configuration_invalid" = "वेयरेबल्स डिवाइस एक्सेस टूलकिट कॉन्फ़िगरेशन अमान्य या अधूरा है";
 "dat_error_unregistration_meta_ai_not_installed" = "डिवाइस पर Meta AI ऐप इंस्टॉल नहीं किया गया है, जो रजिस्ट्रेशन हटाने के लिए ज़रूरी है";
-"dat_error_unregistration_timeout" = "अनरजिस्ट्रेशन की रिक्वेस्ट की समय-सीमा समाप्त हो गई है, Meta AI ने कोई जवाब नहीं दिया है";
 "dat_error_unregistration_unknown" = "रजिस्ट्रेशन हटाने के प्रोसेस के दौरान कोई अज्ञात गड़बड़ी हुई";
 "dat_error_wearables_already_configured" = "पहले से कॉन्फ़िगर किया गया है";
 "dat_error_wearables_already_initialized" = "Wearables को पहले ही इनिशियलाइज़ किया जा चुका है.";

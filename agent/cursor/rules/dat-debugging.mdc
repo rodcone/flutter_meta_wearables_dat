@@ -8,9 +8,9 @@ description: Diagnosing common DAT integration issues — registration failures,
 - **Registration deep link not returning**: URL scheme mismatch between iOS/Android config and Developer Center. Check `CFBundleURLSchemes` (iOS), `<data android:scheme>` (Android).
 - **Stream not starting**: Check `streamSessionStateStream()` state + `streamSessionErrorStream()` errors.
 - **Android: permissions fail silently**: MainActivity must extend `FlutterFragmentActivity`, not `FlutterActivity`.
-- **Android: dependency resolution fails**: Set `GITHUB_TOKEN` env var or `github_token` in `local.properties`.
+- **Android: dependency resolution fails**: Verify `mavenCentral()`; DAT 1.0.0 needs no token.
 - **Android: device not discovered**: `requestAndroidPermissions()` must be called and granted before any DAT call.
-- **thermalCritical / thermalEmergency error**: Device thermal limit reached; streaming pauses (critical) or stops (emergency). Use `deviceStateStream()` to react to `ThermalLevel.severe` *before* the stream gets killed. Note `thermalEmergency` is iOS-only — on Android the emergency tier arrives as `deviceThermalEmergency`.
+- **thermalCritical / thermalEmergency error**: Device thermal limit reached; streaming pauses (critical) or stops (emergency). Use `deviceStateStream()` to react to `ThermalLevel.severe` *before* the stream gets killed. DAT 1.0 reports emergencies as `deviceThermalEmergency` on both platforms; `thermalEmergency` is a legacy code.
 - **batteryCritical / peakPowerShutdown error**: Glasses ran out of power or hit a peak-power limit; stream stopped.
 - **datAppOnTheGlassesUpdateRequired error**: The on-device DAT app needs updating before streaming can work. Call `MetaWearablesDat.openDATGlassesAppUpdate()` to bounce the user to Meta AI.
 - **hingesClosed error**: Glasses folded shut **or taken off** (since DAT 0.9.0 doff raises this too). The SDK does not auto-resume — tear the session down (clear textureId + streaming flag, or the `Texture` freezes on its last frame) and let the user restart after putting them back on.

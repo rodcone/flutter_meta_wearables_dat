@@ -4,7 +4,6 @@
    DO NOT EDIT MANUALLY. Run `string-resources-sync --source android` to update. */
 
 "dat_error_photo_capture_failed" = "Kuvan ottaminen epäonnistui";
-"dat_error_photo_capture_timeout" = "Kuvan ottamisen aikakatkaisu";
 "dat_error_stream_battery_low" = "Laitteen akun varaus on liian matala striimaamiseen";
 "dat_error_stream_critical_error" = "Vakava virhe. Striimin tulisi päättyä";
 "dat_error_stream_device_not_connected" = "Laitetta ei ole yhdistetty";

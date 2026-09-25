@@ -4,7 +4,6 @@
    DO NOT EDIT MANUALLY. Run `string-resources-sync --source android` to update. */
 
 "dat_error_photo_capture_failed" = "Error de captura de foto";
-"dat_error_photo_capture_timeout" = "Se agotó el tiempo de espera de la captura de foto";
 "dat_error_stream_battery_low" = "El dispositivo tiene muy poca batería para realizar un stream";
 "dat_error_stream_critical_error" = "Error crítico, el stream debe finalizar";
 "dat_error_stream_device_not_connected" = "El dispositivo no está conectado";

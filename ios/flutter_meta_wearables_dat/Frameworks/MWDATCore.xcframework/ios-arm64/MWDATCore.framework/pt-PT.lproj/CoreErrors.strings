@@ -18,7 +18,6 @@
 "dat_error_registration_failed_to_unregister" = "O processo de cancelamento do registo falhou devido a um motivo não especificado";
 "dat_error_registration_meta_ai_not_installed" = "A app Meta AI não está instalada no dispositivo, o que é necessário para o registo";
 "dat_error_registration_network_unavailable" = "Nenhuma ligação à Internet disponível, por isso, verifica a tua ligação e tenta novamente";
-"dat_error_registration_timeout" = "Tempo de registo excedido. Sem resposta da Meta AI.";
 "dat_error_registration_unknown" = "Ocorreu um erro desconhecido durante o processo de registo";
 "dat_error_session_already_exists" = "Já existe uma sessão para este dispositivo";
 "dat_error_session_already_stopped" = "A sessão já foi suspensa";
@@ -40,7 +39,6 @@
 "dat_error_unregistration_already_unregistered" = "O/A utilizador/a já não está registado/a ao tentar cancelar o registo novamente";
 "dat_error_unregistration_configuration_invalid" = "A configuração do Kit de Ferramentas de Acesso para Dispositivos Utilizáveis é inválida ou está incompleta";
 "dat_error_unregistration_meta_ai_not_installed" = "A app Meta AI não está instalada no dispositivo, o que é necessário para o cancelamento do registo";
-"dat_error_unregistration_timeout" = "Tempo de cancelamento de registo excedido. Sem resposta da Meta AI.";
 "dat_error_unregistration_unknown" = "Ocorreu um erro desconhecido durante o processo de cancelamento do registo";
 "dat_error_wearables_already_configured" = "Já configurado";
 "dat_error_wearables_already_initialized" = "Os dispositivos utilizáveis já foram iniciados.";
