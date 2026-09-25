@@ -30,6 +30,12 @@ Apply these Codex adaptations:
   If independent review is unavailable, report that limitation rather than calling self-review isolated.
 - Phase 11 process improvements belong in the shared Claude workflow and resources; Codex-only
   adaptations belong here. Re-read changed instructions before relying on them in the current run.
+  The maintainer authorizes ongoing improvements when use or inspection reveals a concrete benefit:
+  fix recurring friction as it is discovered, preserve scope and safety rules, validate the change,
+  and report what changed. Do not wait for a separate request or duplicate the shared workflow.
+- Follow the shared plan-before-mutation sequence: triage Added, Changed, Fixed, and Removed for
+  each platform, inspect staged artifacts, write and present the implementation plan, then implement.
+  Proceed phase by phase and ask about material uncertainty before doing work that depends on it.
 
 Do not run the preflight just to validate this adapter: it updates external SDK clones and queries
 release artifacts. Validate skill structure and links without starting an SDK migration.
