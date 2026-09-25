@@ -139,9 +139,13 @@ a bare `flutter test` runs the *mock* package's tests, which look superficially 
 Use absolute paths or subshells (`(cd x && …)`) for anything where the wrong cwd would be silently
 wrong rather than an error.
 
-## Trap: Android needs a GitHub Packages token
+## Trap: Android artifact repository depends on the DAT version
 
-The DAT Android artifacts come from GitHub Packages. A `401 Unauthorized` on
+DAT 1.0.0 moved the unchanged `com.meta.wearable:mwdat-*` coordinates to Maven Central.
+Use `mavenCentral()` without credentials for 1.x. Check the target release README if an artifact
+returns 404; a repository move is not proof of an unpublished release.
+
+Pre-1.0 DAT Android artifacts come from GitHub Packages. A `401 Unauthorized` on
 `com.meta.wearable:mwdat-*` means the token expired — it's `GITHUB_TOKEN` in the environment or
 `github_token` in `example/android/local.properties`, and needs `read:packages` scope. CI reads the
 `MWDAT_PACKAGES_TOKEN` repo secret for the same reason.

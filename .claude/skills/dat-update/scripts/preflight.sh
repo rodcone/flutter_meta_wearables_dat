@@ -69,24 +69,32 @@ ok "iOS tag $VERSION carries all three xcframeworks"
 # 5. Android artifacts --------------------------------------------------------
 # All three must be published. Discovering a missing mwdat-mockdevice after the
 # iOS work is done costs hours.
-TOKEN="${GITHUB_TOKEN:-$(sed -n 's/^github_token=//p' "$ROOT/example/android/local.properties" 2>/dev/null || true)}"
-if [[ -z "$TOKEN" ]]; then
-  printf '  \033[33m!\033[0m no GitHub Packages token (GITHUB_TOKEN or github_token in example/android/local.properties)\n'
-  printf '    Skipping the Android artifact check — it will surface later as a 401 or a missing version.\n'
+# DAT 1.0.0 moved to Maven Central; pre-1.0 releases use GitHub Packages.
+# Keep credentials confined to the legacy host, and never skip this check.
+CURL_AUTH=()
+if [[ "${VERSION%%.*}" -ge 1 ]]; then
+  BASE="https://repo.maven.apache.org/maven2/com/meta/wearable"
 else
+  TOKEN="${GITHUB_TOKEN:-$(sed -n 's/^github_token=//p' "$ROOT/example/android/local.properties" 2>/dev/null || true)}"
+  [[ -n "$TOKEN" ]] || fail "pre-1.0 DAT requires a GitHub Packages token (read:packages)."
   BASE="https://maven.pkg.github.com/facebook/meta-wearables-dat-android/com/meta/wearable"
-  for art in mwdat-core mwdat-camera mwdat-mockdevice; do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' -u "x:$TOKEN" \
-      "$BASE/$art/$VERSION/$art-$VERSION.pom" || echo 000)"
+  CURL_AUTH=(-u "x:$TOKEN")
+fi
+for art in mwdat-core mwdat-camera mwdat-mockdevice; do
+  for ext in pom aar; do
+    # Check metadata and the actual binary, without downloading the AAR.
+    code="$(curl -sS -I --connect-timeout 15 --max-time 60 -o /dev/null -w '%{http_code}' \
+      "${CURL_AUTH[@]}" "$BASE/$art/$VERSION/$art-$VERSION.$ext")" \
+      || fail "network failure checking $art $VERSION ($ext)."
     case "$code" in
       200) ;;
-      401|403) fail "GitHub Packages rejected the token ($code). Regenerate one with read:packages scope." ;;
-      404) fail "$art $VERSION is not published on GitHub Packages. iOS and Android releases can lag each other — wait or pick another version." ;;
-      *)   fail "unexpected HTTP $code resolving $art $VERSION." ;;
+      401|403) fail "artifact repository rejected access ($code): $BASE. Check authentication for legacy GitHub Packages releases." ;;
+      404) fail "$art $VERSION ($ext) returned 404 at $BASE. Check the target release README for repository or coordinate changes before concluding it is unpublished." ;;
+      *) fail "unexpected HTTP $code resolving $art $VERSION ($ext) at $BASE." ;;
     esac
   done
-  ok "Android artifacts published: mwdat-core, mwdat-camera, mwdat-mockdevice @ $VERSION"
-fi
+done
+ok "Android POMs and AARs published: mwdat-core, mwdat-camera, mwdat-mockdevice @ $VERSION"
 
 # 6. Plugin version consistency -----------------------------------------------
 # All four must already agree, or "bump the minor" produces a split-brain release.
