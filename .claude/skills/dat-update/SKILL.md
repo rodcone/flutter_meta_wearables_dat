@@ -51,7 +51,11 @@ Applied every release unless the maintainer says otherwise:
 - **Don't mirror an SDK enum into Dart when an existing one covers it** (0.9.0's `CameraState`
   duplicates `StreamState` — deliberately unexposed).
 - **Both packages move in lockstep** at the same plugin version.
-- **Plugin version ≠ DAT version.** A DAT bump is a **minor** bump of the plugin (pre-1.0).
+- **Select the plugin version explicitly.** Follow the maintainer's release target, including
+  prerelease suffixes. This migration targets `1.0.0-rc.1` for both packages with DAT `1.0.0`.
+  SDK and plugin versions need not match on future releases; preserve plugin semver compatibility.
+  RC install snippets must opt into the prerelease, CI must compare the suffix, and GitHub releases
+  must be marked prerelease. The no-tag/no-publish rule applies to RCs too.
 
 ---
 
@@ -179,7 +183,8 @@ The SwiftPM build also rewrites two tracked files; the reference has the exact r
 
 ## Phase 7 — Versions, changelogs, docs
 
-1. Version → next minor in all four locations (preflight already proved they agreed).
+1. Version → the selected plugin release target in all four locations, preserving any prerelease
+   suffix (preflight already proved they agreed). Do not infer a stable release from the DAT version.
 2. **Both `CHANGELOG.md` files** need a `## <version>` entry — the release workflow extracts them.
    The mock entry is not boilerplate: 0.9.0 silently made mock devices enforce the same
    `Info.plist` checks as real hardware, a consumer-visible break that reached our own release

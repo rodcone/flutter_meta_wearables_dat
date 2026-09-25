@@ -11,7 +11,7 @@
 #   4. the iOS release tag exists AND carries all three xcframeworks
 #   5. all three Android Maven artifacts are published at that version
 #   6. the four plugin version locations agree with each other
-# Prints a summary (current versions, computed next version, iOS floor) on success.
+# Prints a summary (current versions, explicit release-target reminder, iOS floor) on success.
 
 set -euo pipefail
 
@@ -97,7 +97,7 @@ done
 ok "Android POMs and AARs published: mwdat-core, mwdat-camera, mwdat-mockdevice @ $VERSION"
 
 # 6. Plugin version consistency -----------------------------------------------
-# All four must already agree, or "bump the minor" produces a split-brain release.
+# All four must already agree before selecting the next stable or prerelease version.
 CORE_PUB="$(sed -n 's/^version: *//p' "$ROOT/pubspec.yaml" | head -1)"
 MOCK_PUB="$(sed -n 's/^version: *//p' "$ROOT/flutter_meta_wearables_dat_mock_device/pubspec.yaml" | head -1)"
 CORE_POD="$(sed -n "s/.*s\.version *= *'\([^']*\)'.*/\1/p" "$ROOT/ios/flutter_meta_wearables_dat.podspec" | head -1)"
@@ -111,7 +111,6 @@ MOCK_POD="$(sed -n "s/.*s\.version *= *'\([^']*\)'.*/\1/p" "$ROOT/flutter_meta_w
 ok "plugin version consistent at $CORE_PUB (all four locations)"
 
 # Summary ---------------------------------------------------------------------
-NEXT="$(awk -F. '{print $1"."$2+1".0"}' <<<"$CORE_PUB")"
 FLOOR="$(grep -ho 'target arm64-apple-ios[0-9.]*' \
   "$ROOT"/ios/flutter_meta_wearables_dat/Frameworks/MWDATCamera.xcframework/ios-arm64/*/Modules/*.swiftmodule/*.swiftinterface \
   2>/dev/null | head -1 | sed 's/.*ios//')"
@@ -121,6 +120,6 @@ cat <<EOF
 
 Preflight passed.
   DAT:     $MWDAT_NOW  ->  $VERSION
-  Plugin:  $CORE_PUB  ->  $NEXT   (minor bump; confirm against both CHANGELOGs)
+  Plugin:  $CORE_PUB  ->  select the maintainer's target (preserve any prerelease suffix)
   iOS floor currently ${FLOOR:-unknown} — re-check after swapping the frameworks.
 EOF
