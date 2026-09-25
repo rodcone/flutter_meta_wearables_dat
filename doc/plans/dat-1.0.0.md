@@ -115,3 +115,7 @@ Each upstream bullet is represented below. New experimental capabilities are def
 - No physical-device or live backend verification performed.
 
 Android native verification executed 8 tests with zero failures/skips. Example regression tests are included in the CI test matrix.
+
+## Independent review, round 1
+
+One P2 finding: the example cleared insufficientSDKVersion after the generic 15-second physical-recovery grace or device reappearance. Fixed by preserving its update-required latch across both; an explicit user stop can still reset the session. Focused tests assert the retained app-update hint and disabled Start after 20 seconds and reconnect; both passed, with clean focused analysis. Fresh round 2 pending.

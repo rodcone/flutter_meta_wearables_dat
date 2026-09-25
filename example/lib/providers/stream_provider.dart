@@ -559,13 +559,17 @@ class StreamSessionProvider extends ChangeNotifier {
   void _latchUserAction(StreamSessionError error) {
     _pendingUserAction = error;
     _pendingUserActionTimer?.cancel();
+    _pendingUserActionTimer = null;
+    // A timeout or glasses reconnect cannot update the SDK bundled in this app.
+    if (error.code == 'insufficientSDKVersion') return;
     // Backstop: on doff the link often stays up, so no device event ever
     // arrives to clear this. Re-enable Start rather than strand the user — if
     // they still aren't ready, the next start fails and re-latches.
     _pendingUserActionTimer = Timer(_userActionGrace, _clearPendingUserAction);
   }
 
-  void _clearPendingUserAction() {
+  void _clearPendingUserAction({bool force = false}) {
+    if (!force && _pendingUserAction?.code == 'insufficientSDKVersion') return;
     _pendingUserActionTimer?.cancel();
     _pendingUserActionTimer = null;
     if (_pendingUserAction == null) return;
@@ -748,7 +752,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _recoveryAttempts = 0;
     _cancelRecovery();
     // A deliberate stop supersedes whatever the latch was waiting for.
-    _clearPendingUserAction();
+    _clearPendingUserAction(force: true);
 
     await _teardownSession();
     notifyListeners();

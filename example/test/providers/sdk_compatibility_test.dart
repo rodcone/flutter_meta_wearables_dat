@@ -85,6 +85,16 @@ void main() {
         expect(stops, 1);
         expect(stream.textureId, isNull);
         expect(stream.isStreaming, isFalse);
+        expect(stream.pendingUserAction?.code, 'insufficientSDKVersion');
+        expect(stream.pendingUserActionHint, contains('Update this app'));
+        await messenger.handlePlatformMessage(
+          'flutter_meta_wearables_dat/active_device',
+          const StandardMethodCodec().encodeSuccessEnvelope(true),
+          (_) {},
+        );
+        await tester.pump();
+        expect(stream.pendingUserAction?.code, 'insufficientSDKVersion');
+        expect(stream.canStartSelected, isFalse);
       }
       stream.dispose();
       device.dispose();
