@@ -84,7 +84,7 @@ for art in mwdat-core mwdat-camera mwdat-mockdevice; do
   for ext in pom aar; do
     # Check metadata and the actual binary, without downloading the AAR.
     code="$(curl -sS -I --connect-timeout 15 --max-time 60 -o /dev/null -w '%{http_code}' \
-      "${CURL_AUTH[@]}" "$BASE/$art/$VERSION/$art-$VERSION.$ext")" \
+      ${CURL_AUTH[@]+"${CURL_AUTH[@]}"} "$BASE/$art/$VERSION/$art-$VERSION.$ext")" \
       || fail "network failure checking $art $VERSION ($ext)."
     case "$code" in
       200) ;;
