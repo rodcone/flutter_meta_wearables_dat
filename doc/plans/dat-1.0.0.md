@@ -14,10 +14,10 @@ lockfile. CI must compare prerelease suffixes, release-note extraction must matc
 Validate version consistency, snippet acceptance/rejection, changelog extraction, podspec parsing,
 dependency resolution, and both publishing dry-runs. No tag or publication is authorized here.
 
-The earlier capability deferrals are under reconsideration at the maintainer's request. Recommended
-next scope is motion, inputs, and battery/charging/wear/hinge state, with a separate API and native
-lifecycle implementation plan before code changes. No additional capabilities have been implemented
-or represented as present in this RC. Stable 1.0.0 API scope remains to be agreed.
+The maintainer selected a compatibility-focused 1.0 release and deferred new capabilities to the
+1.1 release series, starting with motion, inputs, and battery/charging/wear/hinge state. Prepare a
+separate API and native lifecycle implementation plan before adding them. No additional capabilities
+have been implemented or represented as present in this RC; the README now includes this roadmap.
 
 ## Evidence
 

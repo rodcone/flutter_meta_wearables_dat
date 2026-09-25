@@ -31,6 +31,8 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 - **Optional mock glasses:** Develop with a simulated pair driven by the phone's camera, without including mock-device dependencies in production.
 - **Reactive API:** Follow registration, availability, session, error, and thermal state with Dart `Stream`s.
 
+**Coming soon:** Support for more DAT capabilities is planned for the 1.1 release series, starting with motion, inputs, and richer device state (battery, charging, wear detection, and hinge state). These APIs are not available yet; the 1.0 release candidates focus on DAT 1.0.0 compatibility and the existing camera workflow.
+
 ## Quick start
 
 ### 1. Install
