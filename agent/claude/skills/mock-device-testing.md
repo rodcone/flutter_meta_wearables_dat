@@ -11,8 +11,8 @@ Since `flutter_meta_wearables_dat` 0.4.0 the mock APIs live in a separate option
 ```yaml
 # pubspec.yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.10.0
-  flutter_meta_wearables_dat_mock_device: ^0.10.0
+  flutter_meta_wearables_dat: ^1.0.0-rc.1
+  flutter_meta_wearables_dat_mock_device: ^1.0.0-rc.1
 ```
 
 ```dart

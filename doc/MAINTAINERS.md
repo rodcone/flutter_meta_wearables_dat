@@ -180,7 +180,19 @@ Key Android-specific implementation files:
 
 ## Releasing a new version
 
-The two packages release **in lockstep at the same version number**. CI enforces this on PRs (the `versions-in-sync` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) fails if the two pubspecs drift), and the publish workflow ([`.github/workflows/publish.yml`](../.github/workflows/publish.yml)) publishes both packages to pub.dev when you push a tag of the form `v<x>.<y>.<z>`.
+The two packages release **in lockstep at the same version number**. CI enforces this on PRs (the `versions-in-sync` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) fails if the two pubspecs drift), and the publish workflow ([`.github/workflows/publish.yml`](../.github/workflows/publish.yml)) publishes both packages to pub.dev when you push a tag of the form `v<x>.<y>.<z>`, optionally with a prerelease suffix such as `-rc.1`.
+
+### Release candidates
+
+The DAT 1.0.0 migration targets plugin `1.0.0-rc.1` first. Set this exact version in all four
+version locations and both changelog headings. Install snippets should use `^1.0.0-rc.1`:
+`^1.0.0` excludes the earlier release candidate. Increment candidates to `-rc.2`, `-rc.3`, etc.,
+then remove the suffix for stable `1.0.0` after validation. Plugin semver still governs later API
+changes; matching DAT's version now does not require matching every future SDK release.
+
+An RC tag triggers real publication of both packages. GitHub releases with a prerelease suffix
+are marked prerelease and are not marked latest. Creating or pushing a tag is a separate release
+action, never part of preparing the version. See [Dart prerelease guidance](https://dart.dev/tools/pub/publishing#publish-prerelease-versions).
 
 ### When to release
 
@@ -255,7 +267,7 @@ The core package (`flutter_meta_wearables_dat`) is already live on pub.dev and p
 The publish job runs sequentially: core first, then mock. pub.dev versions are **immutable** — you can't re-upload the same version after fixing a problem. So if core publishes successfully but the mock add-on step fails:
 
 1. Fix the cause of the mock-publish failure on a hotfix branch.
-2. Bump both packages to the next patch version (e.g. `0.4.0` → `0.4.1`) — all four version locations + both CHANGELOGs. The core CHANGELOG entry can be a one-liner like *"Republish to align with `flutter_meta_wearables_dat_mock_device 0.4.1`"*.
+2. Bump both packages to the next patch version (e.g. `0.4.0` → `0.4.1`), or the next candidate for an RC (`1.0.0-rc.1` → `1.0.0-rc.2`) — all four version locations + both CHANGELOGs. The core CHANGELOG entry can be a one-liner explaining the lockstep republish.
 3. Merge, tag `v0.4.1`, push.
 
 This should be rare in practice — both publishes have already passed `dart pub publish --dry-run` in CI by the time you tag — but the failure mode exists and forward-bump is the only recovery path.

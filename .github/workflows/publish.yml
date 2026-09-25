@@ -138,8 +138,12 @@ jobs:
         id: changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          CORE_NOTES=$(awk "/^## ${VERSION}/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md)
-          MOCK_NOTES=$(awk "/^## ${VERSION}/{flag=1; next} /^## /{flag=0} flag" flutter_meta_wearables_dat_mock_device/CHANGELOG.md)
+          CORE_NOTES=$(awk -v version="$VERSION" '$0 == "## " version {flag=1; next} /^## /{flag=0} flag' CHANGELOG.md)
+          MOCK_NOTES=$(awk -v version="$VERSION" '$0 == "## " version {flag=1; next} /^## /{flag=0} flag' flutter_meta_wearables_dat_mock_device/CHANGELOG.md)
+          if [ -z "$CORE_NOTES" ] || [ -z "$MOCK_NOTES" ]; then
+            echo "ERROR: missing changelog notes for $VERSION"
+            exit 1
+          fi
           {
             echo "notes<<EOF"
             echo "## flutter_meta_wearables_dat $VERSION"
@@ -157,3 +161,5 @@ jobs:
         with:
           body: ${{ steps.changelog.outputs.notes }}
           generate_release_notes: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}

@@ -1,8 +1,23 @@
 # DAT 1.0.0 migration plan
 
-Status: implemented; local verification and all 14 CI checks passed at b40391f; two independent review rounds completed; PR #48 open. DAT 0.9.0 → 1.0.0; both Flutter packages 0.9.2 → 0.10.0. Partial hardware QA is recorded below. Intermittent iOS lock/background session termination remains unresolved; no merge, tag, or publication has occurred.
+Status: implemented; local verification and all 14 CI checks passed at b40391f; two independent review rounds completed; PR #48 open. DAT 0.9.0 → 1.0.0; both Flutter packages 0.9.2 → 1.0.0-rc.1. Partial hardware QA is recorded below. Intermittent iOS lock/background session termination remains unresolved; no merge, tag, or publication has occurred.
 
 Remaining hardware tests are deferred at the maintainer's request: power-off recovery, fresh registration, multi-device switching, mock teardown/permission checks, and Android hardware QA. Deferral does not mark them passed. The initial upgrade-in-place startup failure cleared after reinstalling, but its cause remains unknown.
+
+## Release candidate revision
+
+The maintainer changed the plugin target from the originally planned 0.10.0 to **1.0.0-rc.1**,
+aligning the upcoming stable major with DAT 1.0.0. Both packages remain in lockstep. Preparation
+includes all four version declarations, both changelog headings, install snippets, and the example
+lockfile. CI must compare prerelease suffixes, release-note extraction must match the exact heading
+(rc.1 must not collect rc.10), and GitHub releases must mark RC tags as prerelease, not latest.
+Validate version consistency, snippet acceptance/rejection, changelog extraction, podspec parsing,
+dependency resolution, and both publishing dry-runs. No tag or publication is authorized here.
+
+The earlier capability deferrals are under reconsideration at the maintainer's request. Recommended
+next scope is motion, inputs, and battery/charging/wear/hinge state, with a separate API and native
+lifecycle implementation plan before code changes. No additional capabilities have been implemented
+or represented as present in this RC. Stable 1.0.0 API scope remains to be agreed.
 
 ## Evidence
 
@@ -75,7 +90,7 @@ Each upstream bullet is represented below. New experimental capabilities are def
 3. **Errors.** Update iOS StreamError cases while retaining existing Dart codes used on Android: thermalHot → thermalCritical, batteryLow → batteryCritical, peakPowerLimit → peakPowerShutdown. Use SDK descriptions rather than asserting a new severity from renamed cases. Session-level emergency remains deviceThermalEmergency. Map insufficientSDKVersion and dwaOutOfStuRange on both platforms, checking the latter before Android's generic DWA match. Document warning versus terminal handling.
 4. **Mock teardown.** Await the new iOS async disable/unpair overloads; preserve existing Dart signatures.
 5. **Example.** Handle insufficientSDKVersion as terminal; show the compatibility warning without clearing textures or cancelling recovery. Remove legacy GitHub repository/token plumbing from Android settings. Keep app-initiated registration and current streaming/photo controls.
-6. **Versions/docs/CI.** Bump both pubspecs and podspecs to 0.10.0; both changelogs; update install snippets and DAT version references. Sweep README, llms.txt, AGENTS.md, consumer agent rules, CLAUDE.md and maintainer guide for Maven Central and current errors. Remove Android CI token requirements/fork restriction now that artifacts are public; do not alter remote secrets.
+6. **Versions/docs/CI.** Bump both pubspecs and podspecs to 1.0.0-rc.1; both changelogs; update install snippets and DAT version references. Sweep README, llms.txt, AGENTS.md, consumer agent rules, CLAUDE.md and maintainer guide for Maven Central and current errors. Remove Android CI token requirements/fork restriction now that artifacts are public; do not alter remote secrets.
 7. **Verify.** Dart formatting, analysis and tests for both packages and affected example behavior; iOS release build via SwiftPM and a throwaway CocoaPods app; Android release build; both pub publish dry-runs. Restore any global Flutter setting exactly as found; avoid unrelated lockfile churn. Then PR and isolated review, max three rounds.
 
 ## Scope and open evidence

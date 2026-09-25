@@ -14,8 +14,8 @@ Optional **MockDeviceKit** add-on for [`flutter_meta_wearables_dat`](https://pub
 ```yaml
 # pubspec.yaml
 dependencies:
-  flutter_meta_wearables_dat: ^0.10.0
-  flutter_meta_wearables_dat_mock_device: ^0.10.0
+  flutter_meta_wearables_dat: ^1.0.0-rc.1
+  flutter_meta_wearables_dat_mock_device: ^1.0.0-rc.1
 ```
 
 Apps using this package **must** declare the camera permission strings the simulated feed needs:

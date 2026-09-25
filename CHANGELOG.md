@@ -1,5 +1,6 @@
-## 0.10.0
+## 1.0.0-rc.1
 
+- Release candidate for plugin 1.0.0, aligned with DAT 1.0.0. iOS locked background streaming has an unresolved intermittent session-termination issue; see the README's known limitation.
 - Upgrade Meta Wearables DAT to 1.0.0 on iOS and Android. Android dependencies now use Maven Central without a GitHub token.
 - Migrate native thermal monitoring to the new device-state APIs while preserving the Dart contract.
 - Preserve existing Dart error codes for renamed iOS stream errors. Forward `insufficientSDKVersion` (terminal) and `dwaOutOfStuRange` (nonblocking compatibility warning).

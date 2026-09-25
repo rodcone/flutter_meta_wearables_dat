@@ -148,25 +148,53 @@ jobs:
                   'flutter_meta_wearables_dat_mock_device/pubspec.yaml',
           }
 
-          def core(v, where):
-              m = re.match(r'(\d+)\.(\d+)\.(\d+)', v)
+          VERSION = r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
+
+          def version_key(v, where):
+              m = re.fullmatch(VERSION, v)
               if not m:
                   sys.exit(f'::error::unparseable version {v!r} in {where}')
-              return tuple(int(g) for g in m.groups())
+              core = tuple(int(g) for g in m.groups()[:3])
+              pre = m.group(4)
+              identifiers = []
+              for part in pre.split('.') if pre else []:
+                  if part.isdigit():
+                      if len(part) > 1 and part.startswith('0'):
+                          sys.exit(f'::error::invalid prerelease {v!r} in {where}')
+                      identifiers.append((0, int(part)))
+                  else:
+                      identifiers.append((1, part))
+              # Stable sorts after prereleases of the same core version.
+              return core, pre is None, tuple(identifiers)
 
-          def caret_upper(v):
-              """Upper bound of pub's `^v`, matching dart.dev/tools/pub/dependencies."""
-              x, y, z = v
-              if x > 0:
-                  return (x + 1, 0, 0)
-              if y > 0:
-                  return (0, y + 1, 0)
-              return (0, 0, z + 1)
+          def admits(snippet, actual):
+              lo = version_key(snippet, 'install snippet')
+              current = version_key(actual, 'pubspec')
+              x, y, z = lo[0]
+              hi = (x + 1, 0, 0) if x else ((0, y + 1, 0) if y else (0, 0, z + 1))
+              # Pub caret bounds exclude prereleases of the upper-bound core.
+              return lo <= current and current[0] < hi
+
+          # Regression cases: stable snippets must not silently admit an RC;
+          # RC numeric identifiers compare numerically, not lexicographically.
+          for snippet, actual, expected in [
+              ('1.0.0', '1.0.0-rc.1', False),
+              ('1.0.0-rc.1', '1.0.0-rc.1', True),
+              ('1.0.0-rc.2', '1.0.0-rc.10', True),
+              ('1.0.0-rc.10', '1.0.0-rc.2', False),
+              ('1.0.0-rc.1', '1.0.0', True),
+              ('1.0.0-rc.1', '2.0.0-rc.1', False),
+              ('0.9.0', '0.9.2', True),
+              ('0.9.0', '1.0.0-rc.1', False),
+          ]:
+              if admits(snippet, actual) != expected:
+                  sys.exit(f'::error::caret regression: ^{snippet}, {actual}')
 
           versions = {}
           for pkg, path in PKGS.items():
               txt = pathlib.Path(path).read_text()
-              versions[pkg] = core(re.search(r'^version:\s*(\S+)', txt, re.M).group(1), path)
+              versions[pkg] = re.search(r'^version:\s*(\S+)', txt, re.M).group(1)
+              version_key(versions[pkg], path)
 
           # Scan every doc rather than a hardcoded file list, so a newly added agent
           # file is covered automatically. Changelogs are excluded: their historical
@@ -178,7 +206,7 @@ jobs:
           ]
 
           pattern = re.compile(
-              r'\b(flutter_meta_wearables_dat(?:_mock_device)?)\b\s*:\s*\^(\d+\.\d+\.\d+)')
+              r'\b(flutter_meta_wearables_dat(?:_mock_device)?)\b\s*:\s*\^([0-9A-Za-z.+-]+)')
 
           stale, checked = [], 0
           for p in files:
@@ -188,16 +216,14 @@ jobs:
                       if pkg not in versions:
                           continue
                       checked += 1
-                      lo = core(snippet, p)
-                      hi = caret_upper(lo)
                       actual = versions[pkg]
-                      if not (lo <= actual < hi):
+                      if not admits(snippet, actual):
                           stale.append(
                               f'{p}:{lineno}: ^{snippet} does not admit '
-                              f'{".".join(map(str, actual))} ({pkg})')
+                              f'{actual} ({pkg})')
 
           for pkg, v in versions.items():
-              print(f'  {pkg}: {".".join(map(str, v))}')
+              print(f'  {pkg}: {v}')
           print(f'  checked {checked} constraint(s) across {len(files)} doc file(s)')
 
           # A pattern that matches nothing must fail, not pass silently: a docs reformat
