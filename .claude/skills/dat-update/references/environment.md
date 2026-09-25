@@ -198,3 +198,26 @@ the existing reference-snapshot header before writing the tracked dump.
 A changelog can omit removed enum cases or inserted constructor parameters: DAT 1.0 removed iOS
 registration timeout cases and inserted Android StreamConfiguration.audioCodec. Compare the
 used symbols against binary interfaces before assuming unchanged call sites still compile.
+
+## Physical iOS log evidence
+
+Flutter stdout can omit native SDK details. Capture only the example app process with
+`idevicesyslog -u <udid> -p Runner --no-colors`, and stop the collector after reproduction.
+Use `xcrun devicectl device copy from --device <udid> --domain-type appDataContainer
+--domain-identifier <example-bundle-id> --source Library/Caches/MetaWearablesDAT/Logs/MetaWearablesDAT.log
+--destination <scratch-log>` for the SDK's own log. It can contain old, untimestamped entries:
+compare before/after copies around one bounded reproduction before attributing an error to it.
+Keep raw logs out of git and redact device identifiers from reports. A returned texture ID only
+confirms startup acceptance; require streaming state and frame evidence before calling video verified.
+
+Record whether hardware QA used an upgrade in place or a clean installation. During the DAT 1.0.0
+run, the maintainer recovered streaming by deleting and reinstalling the example without changing
+its Bluetooth Classic configuration. A clean-install comparison can help isolate persisted state,
+but does not prove its cause or validate upgrades in place. Preserve failing logs first and obtain
+the maintainer's agreement before deleting an app and its local data; never make reinstalling an
+automatic prerequisite or call it a confirmed SDK fix.
+
+Record removal (doff) separately from folding: do not assume both end the stream on every model or
+firmware. DAT 1.0.0 QA on Meta Ray-Ban Display observed continued streaming after removal and
+successful terminal cleanup after folding. Preserve repeated failures alongside passing attempts;
+one successful background/lock cycle does not clear an intermittent session termination.
