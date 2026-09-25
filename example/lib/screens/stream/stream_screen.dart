@@ -176,19 +176,15 @@ class _StreamScreenState extends State<StreamScreen> {
                       ),
                     ),
             ),
-            // Thermal indicator (top-left) while streaming. Hidden for
-            // unknown/none levels since those aren't actionable for the user.
-            if (streamProvider.isStreaming &&
-                streamProvider.thermalLevel != null &&
-                streamProvider.thermalLevel != ThermalLevel.unknown &&
-                streamProvider.thermalLevel != ThermalLevel.none)
+            // Keep thermal monitoring visible even before the first reading.
+            if (streamProvider.isStreaming)
               Positioned(
                 top: 0,
                 left: 0,
                 child: SafeArea(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: _ThermalChip(level: streamProvider.thermalLevel!),
+                    child: _ThermalChip(level: streamProvider.thermalLevel),
                   ),
                 ),
               ),
@@ -348,11 +344,9 @@ String _sessionStateLabel(StreamSessionState state) {
   };
 }
 
-/// Compact thermal-level indicator shown while streaming. Color escalates
-/// from amber → red as the SDK reports hotter readings, mirroring the
-/// `ThermalLevel` enum from `MetaWearablesDat.deviceStateStream()`.
+// Shows live thermal readings, distinguishing pending and unknown from normal.
 class _ThermalChip extends StatelessWidget {
-  final ThermalLevel level;
+  final ThermalLevel? level;
 
   const _ThermalChip({required this.level});
 
@@ -385,11 +379,10 @@ class _ThermalChip extends StatelessWidget {
     );
   }
 
-  Color _colorFor(ThermalLevel level) {
+  Color _colorFor(ThermalLevel? level) {
     return switch (level) {
-      ThermalLevel.unknown ||
-      ThermalLevel.none ||
-      ThermalLevel.light => Colors.green.shade700,
+      null || ThermalLevel.unknown => Colors.blueGrey.shade700,
+      ThermalLevel.none || ThermalLevel.light => Colors.green.shade700,
       ThermalLevel.moderate => Colors.amber.shade800,
       ThermalLevel.severe => Colors.orange.shade800,
       ThermalLevel.critical => Colors.red.shade700,
@@ -397,10 +390,11 @@ class _ThermalChip extends StatelessWidget {
     };
   }
 
-  String _labelFor(ThermalLevel level) {
+  String _labelFor(ThermalLevel? level) {
     return switch (level) {
+      null => 'Thermal: waiting…',
       ThermalLevel.unknown => 'Thermal: unknown',
-      ThermalLevel.none => 'Cool',
+      ThermalLevel.none => 'Thermal: normal',
       ThermalLevel.light => 'Warm',
       ThermalLevel.moderate => 'Warming',
       ThermalLevel.severe => 'Hot',
