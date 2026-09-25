@@ -52,9 +52,9 @@ class _StreamScreenState extends State<StreamScreen> {
 
     final isDatUpdate = error.code == 'datAppOnTheGlassesUpdateRequired';
     final isTransient = error.code == 'noEligibleDevice';
-    // Since DAT 0.9.0 this also fires when the glasses are taken off, which is
-    // far more common than folding the arms mid-stream. It's actionable rather
-    // than a failure, so it gets its own wording and a longer read.
+    // Some devices also emit this on removal, but doff need not stop streaming.
+    // An emitted error needs user action, so give it specific wording and time
+    // to read.
     final isHingesClosed = error.isHingesClosed;
 
     ScaffoldMessenger.of(context)

@@ -54,7 +54,7 @@ If `startRegistration()` opens Meta AI but the app never returns:
 | `sessionEndedByDevice` | The device ended the session; the stream stops with it (**Android only**) | Tear the session down and let the user restart it. |
 | `capabilityDenied` | The device refused the requested capability (**Android only**) | Check permissions; re-request camera access. |
 | `dwaUnavailable` | The DAT Wearables App is unavailable on the glasses | Restart the glasses; check firmware. |
-| `hingesClosed` | Glasses closed **or taken off** (since DAT 0.9.0 doff raises this too) | Put them back on and start a new session. The SDK does not auto-resume. |
+| `hingesClosed` | Closed hinges; removal can also trigger it on some device/firmware combinations, but does not always stop streaming | If this error occurs, clear the ended preview and start a new session once the glasses are ready. The SDK does not auto-resume. |
 | `permissionDenied` | Camera permission denied | Request permission again or guide user to settings. |
 | `deviceNotConnected` | Device disconnected | Check Bluetooth connection, restart glasses if needed. |
 | `deviceNotFound` | No matching device | Ensure glasses are paired and in range. |

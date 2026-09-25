@@ -1,6 +1,8 @@
 # DAT 1.0.0 migration plan
 
-Status: implemented; local verification passed where listed below; PR #48 open; independent review in progress. DAT 0.9.0 → 1.0.0; both Flutter packages 0.9.2 → 0.10.0.
+Status: implemented; local verification and all 14 CI checks passed at b40391f; two independent review rounds completed; PR #48 open. DAT 0.9.0 → 1.0.0; both Flutter packages 0.9.2 → 0.10.0. Partial hardware QA is recorded below. Intermittent iOS lock/background session termination remains unresolved; no merge, tag, or publication has occurred.
+
+Remaining hardware tests are deferred at the maintainer's request: power-off recovery, fresh registration, multi-device switching, mock teardown/permission checks, and Android hardware QA. Deferral does not mark them passed. The initial upgrade-in-place startup failure cleared after reinstalling, but its cause remains unknown.
 
 ## Evidence
 
@@ -88,7 +90,7 @@ Each upstream bullet is represented below. New experimental capabilities are def
 1. Register from the app and return through its callback; confirm paired-device discovery on iOS and Android.
 2. Subscribe before starting, start/stop/restart preview, capture a photo, and verify the new texture after restart.
 3. Switch selected glasses and cancel/resubscribe to device state; ensure updates belong only to the selected pair. Mock thermal simulation cannot establish real thermal timing.
-4. Doff/fold and power off while streaming; check terminal cleanup and explicit restart after correction. Do not intentionally overheat hardware.
+4. Test removal, folding, and power-off separately. Removal need not stop streaming: on the tested Meta Ray-Ban Display with DAT 1.0.0 it continues, as expected by the maintainer. Folding/power-off should clear an ended stream and allow restart after correction. Do not intentionally overheat hardware.
 5. Background/lock without opt-in: stoppedForBackground then stopped, no auto-resume. With opt-in: frame delivery continues, preview resumes on foreground.
 6. Exercise mock configure/pair/stream/unpair/disable and missing camera permission; ensure teardown completes before re-pairing.
 7. Compatibility warning must preserve preview; insufficientSDKVersion must require app update rather than repeated restart. Use controlled simulated channel events where hardware cannot produce these conditions safely.
@@ -112,10 +114,40 @@ Each upstream bullet is represented below. New experimental capabilities are def
 - Android release APK build passed. Flutter warns existing Gradle/AGP/Kotlin versions will lose support in a future Flutter release; no toolchain bump needed for this migration.
 - Flutter SwiftPM global setting restored to true. Example lockfile changes only the two path package versions.
 - Both publishing dry-runs passed with zero warnings on the committed tree.
-- No physical-device or live backend verification performed.
+- Physical iPhone verification started; see the hardware results below. Android hardware remains untested.
 
 Android native verification executed 8 tests with zero failures/skips. Example regression tests are included in the CI test matrix.
 
-## Independent review, round 1
+## Independent review
 
-One P2 finding: the example cleared insufficientSDKVersion after the generic 15-second physical-recovery grace or device reappearance. Fixed by preserving its update-required latch across both; an explicit user stop can still reset the session. Focused tests assert the retained app-update hint and disabled Start after 20 seconds and reconnect; both passed, with clean focused analysis. Fresh round 2 pending.
+One P2 finding: the example cleared insufficientSDKVersion after the generic 15-second physical-recovery grace or device reappearance. Fixed by preserving its update-required latch across both; an explicit user stop can still reset the session. Focused tests assert the retained app-update hint and disabled Start after 20 seconds and reconnect; both passed, with clean focused analysis. Fresh round 2 found no actionable issues. All 14 hosted CI checks passed at b40391f.
+
+## Hardware results — 2026-09-25 (remaining tests deferred)
+
+- Installed signed debug example on iPhone 17, iOS 27.0, using the existing Bluetooth Classic configuration and DAT 1.0.0.
+- Restored registration, discovered one real Meta Ray-Ban Display pair, received thermalLevel=none, and confirmed camera permission granted. Device metadata reported connected, compatible, and active. This does not verify a fresh registration callback or live thermal changes.
+- Initial stream attempt and a second attempt after the maintainer confirmed readiness both failed before any video size/frame evidence or streaming state: starting → unexpectedError ("Session ended by device") → stopping → timeout → stopped. The example attempted automatic recovery; testing explicitly stopped it and confirmed streaming intent, texture, and teardown state were cleared.
+- startStreamSession returned a texture while state remained starting. Treat texture allocation as startup acceptance, not proof of working video.
+- Root cause remains undetermined. Do not attribute the failure to the SDK migration, firmware, transport, or wear detection without further evidence. The maintainer confirmed the same error followed by timeout.
+- Lock/unlock with background opt-in has mixed results (see below). Device switching and mock teardown remain unverified on hardware. Green builds alone do not establish release readiness.
+- Launch also logged duplicate Objective-C classes between the upstream MWDATCamera and MWDATMockDevice binaries; no crash was observed. Causality with stream failure has not been established.
+- Process-filtered native logs reproduced texture allocation at 12:20:44.465, then device-session error and SDK camera timeout at 12:20:54.751 (about 10.3 seconds). The timeout is the SDK StreamError.timeout, not the plugin's DeviceSession startup deadline. Native teardown then unregistered the texture.
+- Pulled Library/Caches/MetaWearablesDAT/Logs/MetaWearablesDAT.log from this app's container. An unchanged idle snapshot followed by a bounded reproduction appended 12 DeviceHealthChannel.swift:40 errors: "shared DWA channel error 49153". This confirms the channel errors are current, but the undocumented numeric code does not establish a root cause. Older untimestamped linkNotEstablished/BLE errors did not recur in that delta and must not be attributed to today's attempts.
+- **Recovery confirmed by maintainer:** deleting the example app and rerunning it in debug mode restored working streaming. No transport configuration change was made; the example remains configured for Bluetooth Classic. Reconnected to the new IDE debug session afterward; at inspection it was stopped, with no error and thermalLevel=none. Successful moving video is maintainer-observed, not independently captured by tooling. Reinstallation implicates installation/persisted state as a possibility but does not identify the cause or establish upgrade-in-place reliability.
+- **Stop/restart passed (maintainer-observed):** two consecutive Stop → Start cycles returned moving video successfully after the clean installation. The debug connection was unavailable during these cycles, so texture-ID replacement and native event ordering were not independently inspected.
+- **Photo capture passed (maintainer-observed):** captured a photo during streaming, confirmed it displayed correctly, and confirmed video continued afterward. Photo bytes/format and native event ordering were not independently inspected.
+- **Background without opt-in passed (maintainer-observed):** started video with background streaming disabled, went Home for 5 seconds, and returned. The stream remained stopped; explicit Start restored moving video. Native stoppedForBackground → stopped event ordering was not independently inspected.
+- **Checklist test 1 passed (maintainer-observed):** lock/unlock without background opt-in leaves streaming stopped, and explicit Start restores video.
+- **Checklist test 2 passed (maintainer-observed):** with background streaming enabled, going Home for 15 seconds and returning restores moving preview without manual restart. Continuous background frame delivery was not instrumented.
+- **Checklist test 3 failed (maintainer-observed):** with background streaming enabled, locking the phone loses the stream after approximately 8–10 seconds. Investigating with process-filtered native logs; root cause and exact post-unlock state remain undetermined.
+- **Checklist test 3 repeat passed (maintainer-observed):** video resumed correctly after 20 seconds locked. Before the repeat, VM inspection confirmed background=true, RAW codec, streaming state, texture=11, and no error. After the report, VM inspection showed no active session/texture and no error; native log capture yielded no app events, so neither uninterrupted frame delivery nor event ordering was established. Keep test 3 as intermittent/unresolved; no runtime code was changed between the reported failure and pass. Repeat without an attached debugger before final background acceptance.
+- **Checklist test 3 further repetitions (maintainer-observed):** first 30-second lock passed; the second failed after approximately 15 seconds with "Session ended by device". This confirms intermittent failure; successful repetitions do not close it.
+- **Checklist test 4 passed (maintainer-observed):** HVC1 streaming and background/lock recovery passed. This is not yet sufficient evidence to attribute test 3's intermittent failure to RAW specifically.
+- **Checklist test 5 expected behavior confirmed (maintainer-observed):** removing the glasses leaves the stream running. The earlier checklist expectation was incorrect for this device/setup. Consumer instructions and public API documentation now qualify removal behavior by device/firmware while preserving terminal handling when hingesClosed is actually emitted.
+- **Checklist test 6 passed (maintainer-observed):** folding/unfolding the glasses gives the expected stream cleanup and successful explicit restart.
+
+### Follow-up investigation plan (before runtime changes)
+
+1. Capture a failing lock cycle with verified app-process logs, SDK-log before/after snapshots, frame-arrival timing, audio interruption/route events, and device/stream transitions. Distinguish camera termination from app suspension or preview-only failure.
+2. Compare RAW and HVC1 under the same transport and background settings, then repeat without an attached debugger. Do not infer codec causality from one HVC1 pass.
+3. If failure persists, compare against the pre-migration SDK on the same hardware before selecting a fix. Qualify doff documentation to distinguish observed device behavior from the meaning of an emitted hingesClosed error. Present any runtime fix plan before implementation and rerun the affected lock/background checks afterward.

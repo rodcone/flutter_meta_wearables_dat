@@ -4,6 +4,7 @@
 - Migrate native thermal monitoring to the new device-state APIs while preserving the Dart contract.
 - Preserve existing Dart error codes for renamed iOS stream errors. Forward `insufficientSDKVersion` (terminal) and `dwaOutOfStuRange` (nonblocking compatibility warning).
 - Update the example to handle SDK compatibility errors without restarting on warnings.
+- Clarify that removing glasses does not always end streaming; handle `hingesClosed` when the SDK actually emits it.
 - Experimental DAT 1.0 capabilities and Meta-AI-initiated registration are not exposed; existing app-initiated registration, streaming, and in-stream photo capture remain supported.
 
 ## 0.9.2

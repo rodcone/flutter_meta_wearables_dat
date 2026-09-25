@@ -210,12 +210,13 @@ class StreamSessionError {
   /// Returns true if the device's thermal state has reached a critical level.
   bool get isThermalCritical => code == 'thermalCritical';
 
-  /// Returns true if the glasses were folded shut **or taken off**.
+  /// Whether the SDK reported a `hingesClosed` error.
   ///
-  /// Since DAT 0.9.0 taking the glasses off (doff) raises this too, so treat it
-  /// as "the glasses are no longer being worn" rather than specifically as a
-  /// hinge event. The SDK does not auto-resume — the user has to put them back
-  /// on and the app has to start a new session.
+  /// Folding the glasses can raise this error. Removing them can also raise it
+  /// on some device/firmware combinations, but removal does not always stop
+  /// streaming. When this error is emitted, clear the ended session's preview
+  /// and start a new session once the glasses are ready; do not expect automatic
+  /// resumption.
   bool get isHingesClosed => code == 'hingesClosed';
 
   /// Returns true if camera permission was denied.

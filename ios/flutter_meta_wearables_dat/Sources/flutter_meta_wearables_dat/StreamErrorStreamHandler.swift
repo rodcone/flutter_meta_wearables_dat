@@ -185,8 +185,8 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
       message = "Camera permission was denied."
     case .hingesClosed:
       code = "hingesClosed"
-      // DAT 0.9.0 also raises this when the glasses are taken off (doff), not
-      // just when the arms are folded.
+      // Some device/firmware combinations also emit this on removal (doff).
+      // Removal alone does not always stop streaming; map the emitted error.
       message = "The glasses were closed or taken off."
     case .thermalHot:
       code = "thermalCritical"

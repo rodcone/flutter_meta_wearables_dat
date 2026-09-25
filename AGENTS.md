@@ -75,7 +75,7 @@ Communication:
 | `timeout` | Operation timed out |
 | `videoStreamingError` | Video stream failed |
 | `permissionDenied` | Camera permission denied |
-| `hingesClosed` | Glasses folded shut **or taken off**. The SDK does not auto-resume — the user puts them back on, then you start a new session |
+| `hingesClosed` | SDK reports closed hinges; some device/firmware combinations also emit it on removal. Removal alone does not always stop streaming. When this error occurs, clear the ended preview and start a new session once the glasses are ready; no auto-resume |
 | `thermalCritical` | Device thermal state is critical — streaming pauses |
 | `thermalEmergency` | Legacy stream code; DAT 1.0.0 reports session emergencies as `deviceThermalEmergency` on both platforms |
 | `peakPowerShutdown` | Device exceeded peak power limit — streaming stopped |
