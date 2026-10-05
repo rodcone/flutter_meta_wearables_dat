@@ -1,3 +1,7 @@
+## 1.0.0
+
+- Promote 1.0.0-rc.1 to stable 1.0.0 in lockstep with the core plugin; no runtime changes.
+
 ## 1.0.0-rc.1
 
 - Release candidate, versioned in lockstep with the core plugin's 1.0.0 release candidate.

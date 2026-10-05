@@ -184,8 +184,8 @@ The two packages release **in lockstep at the same version number**. CI enforces
 
 ### Release candidates
 
-The DAT 1.0.0 migration targets plugin `1.0.0-rc.1` first. Set this exact version in all four
-version locations and both changelog headings. Install snippets should use `^1.0.0-rc.1`:
+For a release candidate such as `1.0.0-rc.1`, set the exact version in all four
+version locations and both changelog headings. RC install snippets should use `^1.0.0-rc.1`:
 `^1.0.0` excludes the earlier release candidate. Increment candidates to `-rc.2`, `-rc.3`, etc.,
 then remove the suffix for stable `1.0.0` after validation. Plugin semver still governs later API
 changes; matching DAT's version now does not require matching every future SDK release.
