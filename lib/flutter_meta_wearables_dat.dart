@@ -742,6 +742,9 @@ class VideoFrame {
   final int? bytesPerRow;
 }
 
+/// State of the connection, independently of an attached camera.
+enum DeviceSessionState { idle, starting, started, paused, stopping, stopped }
+
 /// The main class for the Meta Wearables DAT.
 class MetaWearablesDat {
   /// Requests the Android runtime permissions required by the DAT SDK
@@ -785,6 +788,38 @@ class MetaWearablesDat {
   static Future<bool> disconnect() {
     return MetaWearablesDatPlatform.instance.disconnect();
   }
+
+  /// Connects the glasses without attaching a camera or creating a texture.
+  /// Enable background streaming first if the connection must survive backgrounding.
+  static Future<bool> startDeviceSession(String? deviceId) =>
+      MetaWearablesDatPlatform.instance.startDeviceSession(deviceId);
+
+  /// Attaches a camera to an already started device session and starts capture.
+  /// Reattach after [stopCameraStream] using the fresh returned texture ID.
+  static Future<int> startCameraStream(
+    String? deviceId, {
+    StreamFrameRate frameRate = StreamFrameRate.fps30,
+    StreamQuality streamQuality = StreamQuality.high,
+    VideoCodec videoCodec = VideoCodec.raw,
+  }) => MetaWearablesDatPlatform.instance.startCameraStream(
+    deviceId,
+    frameRate: frameRate,
+    streamQuality: streamQuality,
+    videoCodec: videoCodec,
+  );
+
+  /// Stops capture and detaches the camera, retaining the device connection.
+  /// Already detached is a successful no-op. This is not a thermal pause.
+  static Future<bool> stopCameraStream(String? deviceId) =>
+      MetaWearablesDatPlatform.instance.stopCameraStream(deviceId);
+
+  /// Ends the device session, including an attached camera, if any.
+  static Future<bool> stopDeviceSession(String? deviceId) =>
+      MetaWearablesDatPlatform.instance.stopDeviceSession(deviceId);
+
+  /// Connection state remains observable while no camera is attached.
+  static Stream<DeviceSessionState> deviceSessionStateStream() =>
+      MetaWearablesDatPlatform.instance.deviceSessionStateStream();
 
   /// Starts a stream session.
   ///
@@ -1124,9 +1159,7 @@ class MetaWearablesDat {
   /// every 400 ms instead of copying every frame across the platform channel.
   /// Leave it null to receive every frame. Values must be finite, greater than
   /// zero and no greater than 30.
-  static Stream<VideoFrame> videoFramesStream({
-    double? maxFramesPerSecond,
-  }) {
+  static Stream<VideoFrame> videoFramesStream({double? maxFramesPerSecond}) {
     _validateVideoFrameRate(maxFramesPerSecond);
     return MetaWearablesDatPlatform.instance.videoFramesStream(
       maxFramesPerSecond: maxFramesPerSecond,

@@ -762,3 +762,7 @@ Contributions are welcome! Feel free to open [issues](https://github.com/rodcone
 MIT License — see [LICENSE](LICENSE) for details.
 
 DAT 1.0 compatibility: `insufficientSDKVersion` is terminal and requires an app update; `dwaOutOfStuRange` is a nonblocking warning and must not stop or restart the stream. The plugin retains app-initiated registration; Meta-AI-initiated registration requests and new experimental capabilities are not exposed.
+
+### Separate device and camera lifetimes
+
+See [camera-free connected sessions](doc/device-camera-lifecycle.md) for `startDeviceSession`, `startCameraStream`, `stopCameraStream`, `stopDeviceSession`, and `deviceSessionStateStream`. Existing combined stream APIs retain their behavior.

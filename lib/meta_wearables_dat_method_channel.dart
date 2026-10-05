@@ -121,6 +121,59 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
+  Future<bool> startDeviceSession(String? deviceId) async =>
+      await methodChannel.invokeMethod<bool>('startDeviceSession', {
+        'deviceId': ?deviceId,
+      }) ??
+      false;
+
+  @override
+  Future<bool> stopDeviceSession(String? deviceId) async =>
+      await methodChannel.invokeMethod<bool>('stopDeviceSession', {
+        'deviceId': ?deviceId,
+      }) ??
+      false;
+
+  @override
+  Future<bool> stopCameraStream(String? deviceId) async =>
+      await methodChannel.invokeMethod<bool>('stopCameraStream', {
+        'deviceId': ?deviceId,
+      }) ??
+      false;
+
+  @override
+  Future<int> startCameraStream(
+    String? deviceId, {
+    StreamFrameRate frameRate = StreamFrameRate.fps30,
+    StreamQuality streamQuality = StreamQuality.high,
+    VideoCodec videoCodec = VideoCodec.raw,
+  }) async {
+    final texture = await methodChannel.invokeMethod<int>('startCameraStream', {
+      'deviceId': ?deviceId,
+      'fps': frameRate.value,
+      'streamQuality': streamQuality.value,
+      'videoCodec': videoCodec.value,
+    });
+    if (texture == null) {
+      throw PlatformException(code: 'TEXTURE_REGISTRATION_FAILED');
+    }
+    return texture;
+  }
+
+  Stream<DeviceSessionState>? _deviceSessionStates;
+  @override
+  Stream<DeviceSessionState> deviceSessionStateStream() =>
+      _deviceSessionStates ??=
+          const EventChannel(
+            'flutter_meta_wearables_dat/device_session_state',
+          ).receiveBroadcastStream().map(
+            (dynamic value) => DeviceSessionState.values.firstWhere(
+              (state) => state.name == value,
+              orElse: () => DeviceSessionState.stopped,
+            ),
+          );
+
+  @override
   Future<int> startStreamSession(
     String? deviceId, {
     StreamFrameRate frameRate = StreamFrameRate.fps30,

@@ -35,6 +35,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
   // Guards concurrent startStreamSession calls: a second start that tore down
   // the first's in-flight session would leave the first awaiting `.started`.
+  private var lifecycleTask: Task<Void, Never>?
+  private var lifecycleGeneration = 0
+  private let deviceSessionStateHandler = DeviceSessionStateStreamHandler()
   private var isStartingSession = false
   private var deviceSession: DeviceSession?
   private var deviceSessionStateTask: Task<Void, Never>?
@@ -222,6 +225,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     })
     instance.activeDeviceHandler = activeDeviceHandler
     activeDeviceChannel.setStreamHandler(activeDeviceHandler)
+    let deviceSessionChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/device_session_state", binaryMessenger: registrar.messenger())
+    deviceSessionChannel.setStreamHandler(instance.deviceSessionStateHandler)
     // Event channels for stream session state and errors
     let streamStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/stream_session_state", binaryMessenger: registrar.messenger())
     streamStateChannel.setStreamHandler(instance.streamStateHandler)
@@ -303,10 +308,36 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         getCameraPermissionStatus(result: result)
       case "requestCameraPermission":
         requestCameraPermission(result: result)
-      case "startStreamSession":
-        startStreamSession(call: call, result: result)
-      case "stopStreamSession":
-        stopStreamSession(call: call, result: result)
+      case "startDeviceSession", "startCameraStream", "startStreamSession":
+        enqueueLifecycle(call: call, result: result) { reply in
+          self.startStreamSession(call: call, result: reply)
+        }
+      case "stopDeviceSession", "stopCameraStream", "stopStreamSession":
+        lifecycleGeneration += 1
+        enqueueLifecycle(call: call, result: result) { reply in
+          if call.method == "stopStreamSession" {
+            self.stopStreamSession(call: call, result: reply)
+          } else {
+            Task { @MainActor in
+              if call.method == "stopCameraStream" {
+                let stopping = self.streamSession
+                await self.teardownStreamOnly()
+                if let stopping, stopping.state != .stopped {
+                  reply(FlutterError(code: "STOP_TIMEOUT", message: "Camera shutdown did not complete.", details: nil))
+                  return
+                }
+              } else {
+                let stopping = self.deviceSession
+                await self.teardownDeviceSession()
+                if let stopping, stopping.state != .stopped {
+                  reply(FlutterError(code: "STOP_TIMEOUT", message: "Device shutdown did not complete.", details: nil))
+                  return
+                }
+              }
+              reply(true)
+            }
+          }
+        }
       case "capturePhoto":
         capturePhoto(call: call, result: result)
       case "getRegistrationState":
@@ -323,6 +354,25 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         openDATGlassesAppUpdate(result: result)
       default:
         result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func enqueueLifecycle(call: FlutterMethodCall, result: @escaping FlutterResult,
+                                operation: @escaping (@escaping FlutterResult) -> Void) {
+    let previous = lifecycleTask
+    let generation = lifecycleGeneration
+    lifecycleTask = Task { @MainActor in
+      await previous?.value
+      if call.method.hasPrefix("start"), generation != lifecycleGeneration {
+        result(FlutterError(code: "START_CANCELLED", message: "Start superseded by stop.", details: nil))
+        return
+      }
+      await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+        operation { value in
+          result(value)
+          done.resume()
+        }
+      }
     }
   }
 
@@ -848,11 +898,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceSessionStateTask?.cancel()
     deviceSessionStateTask = Task { [weak self] in
       for await state in session.stateStream() {
-        guard let self else { return }
+        guard let self, self.deviceSession === session else { return }
+        self.deviceSessionStateHandler.send(String(describing: state))
         if state == .stopped {
           // DeviceSession stopped externally — tear down associated stream
           // and drop our reference. A fresh session is created on demand.
           await self.teardownStreamOnly()
+          guard self.deviceSession === session else { return }
           self.deviceSession = nil
           self.deviceSessionStateTask?.cancel()
           self.deviceSessionStateTask = nil
@@ -1122,6 +1174,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// config is applied.
   @MainActor
   private func teardownDeviceSession() async {
+    deviceSessionStateHandler.send("stopping")
     await teardownStreamOnly()
     deviceSessionStateTask?.cancel()
     deviceSessionStateTask = nil
@@ -1139,6 +1192,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       session.stop()
       await awaitDeviceSessionStopped(session, stateStream: stateStream)
     }
+    deviceSessionStateHandler.send("stopped")
   }
 
   /// Suspends until `session` reaches `.stopped`, with
@@ -1806,6 +1860,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // specific pair; nil auto-selects. Applied below by rebuilding the shared
     // selector.
     let requestedDeviceId = args["deviceId"] as? String
+    let connectionOnly = call.method == "startDeviceSession"
+    let cameraOnly = call.method == "startCameraStream"
+    let generation = lifecycleGeneration
 
     Task { @MainActor in
       // Reject a concurrent start: a second start that tears down the first's
@@ -1823,6 +1880,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           code: "APP_BACKGROUNDED",
           message: "Cannot start a stream while the app is backgrounded. Call enableBackgroundStreaming() first if you need background capture.",
           details: nil))
+        return
+      }
+      if cameraOnly && (deviceSession?.state != .started || requestedDeviceId != pinnedDeviceId) {
+        result(FlutterError(code: "DEVICE_SESSION_NOT_READY", message: "Start the matching device session first.", details: nil))
+        return
+      }
+      if connectionOnly, let existing = deviceSession,
+         requestedDeviceId == pinnedDeviceId,
+         existing.state == .started || String(describing: existing.state) == "paused" {
+        result(true)
         return
       }
       isStartingSession = true
@@ -1883,15 +1950,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         }
       }
 
-      guard let registry = textureRegistry else {
-        result(FlutterError(code: "TEXTURE_ERROR", message: "Texture registry not available", details: nil))
-        return
-      }
-
       // 1. Ensure a started DeviceSession exists.
       let deviceSession: DeviceSession
       do {
-        deviceSession = try await ensureDeviceSessionStarted()
+        if cameraOnly, let connected = self.deviceSession {
+          deviceSession = connected
+        } else {
+          deviceSession = try await ensureDeviceSessionStarted()
+        }
       } catch let e as DeviceSessionError {
         streamErrorHandler.send(deviceSessionError: e)
         result(FlutterError(code: "DEVICE_SESSION_ERROR", message: "Could not start device session: \(e)", details: nil))
@@ -1901,6 +1967,19 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return
       }
 
+      guard generation == lifecycleGeneration, self.deviceSession === deviceSession,
+            deviceSession.state == .started, !mustNotStreamNow else {
+        result(FlutterError(code: "START_CANCELLED", message: "Device start was cancelled or the session ended.", details: nil))
+        return
+      }
+      if connectionOnly {
+        result(true)
+        return
+      }
+      guard let registry = textureRegistry else {
+        result(FlutterError(code: "TEXTURE_ERROR", message: "Texture registry not available", details: nil))
+        return
+      }
       // 2. Register the Flutter texture.
       let texture = PixelBufferTexture()
       let texId = registry.register(texture)
@@ -1964,12 +2043,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         }
       }
 
+      camera = addedCamera
+      streamSession = session
       // Last commit point. A device session can take up to
       // `deviceSessionStartTimeout` to come up, which is ample time for the
       // user to background the app mid-start. Committing here anyway would
       // install a live stream in a backgrounded app that nothing is going to
       // stop — the one outcome worse than the freeze this all replaces.
-      if mustNotStreamNow {
+      if mustNotStreamNow || generation != lifecycleGeneration || self.deviceSession !== deviceSession {
         NSLog("[MWDAT] app backgrounded during start — abandoning")
         await teardownStreamOnly()
         result(FlutterError(

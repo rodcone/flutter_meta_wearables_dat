@@ -1,3 +1,8 @@
+## Unreleased
+
+- Add separate device connection and camera stream lifecycle APIs, including parent-state events while no camera is attached.
+- Serialize lifecycle commands and cancel pending starts when a stop is requested; retain existing combined streaming APIs.
+
 ## 1.0.0-rc.1
 
 - Release candidate for plugin 1.0.0, aligned with DAT 1.0.0. iOS locked background streaming has an unresolved intermittent session-termination issue; see the README's known limitation.

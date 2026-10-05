@@ -39,6 +39,7 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -106,6 +107,11 @@ class MetaWearablesDatPlugin :
     // the same Flutter event channel that Stream.errorStream uses. Cancelled
     // and recreated alongside the session lifecycle.
     private var sessionErrorsJob: Job? = null
+    private var sessionStateJob: Job? = null
+    private val deviceSessionStateHandler = DeviceSessionStateStreamHandler()
+    private var deviceSessionChannel: EventChannel? = null
+    private var lifecycleJob: Job? = null
+    private var lifecycleGeneration = 0L
 
     // Background streaming — tracks whether the foreground service has been
     // started so we can idempotently re-start / stop it, and so we can tear
@@ -280,6 +286,10 @@ class MetaWearablesDatPlugin :
                 )
         deviceStateChannel.setStreamHandler(deviceStateStreamHandler)
 
+        deviceSessionChannel = EventChannel(flutterPluginBinding.binaryMessenger,
+                "flutter_meta_wearables_dat/device_session_state").also {
+            it.setStreamHandler(deviceSessionStateHandler)
+        }
         textureRegistry = flutterPluginBinding.textureRegistry
 
         val context = flutterPluginBinding.applicationContext
@@ -399,8 +409,42 @@ class MetaWearablesDatPlugin :
                 activeDeviceStreamHandler?.restartMonitoring()
                 result.success(true)
             }
-            "startStreamSession" -> startStreamSession(call, result)
-            "stopStreamSession" -> stopStreamSession(call, result)
+            "startDeviceSession", "startCameraStream", "startStreamSession" ->
+                enqueueLifecycle(call, result) { reply -> startStreamSession(call, reply) }
+            "stopCameraStream", "stopDeviceSession", "stopStreamSession" -> {
+                lifecycleGeneration++
+                enqueueLifecycle(call, result) { reply ->
+                    when (call.method) {
+                        "stopCameraStream" -> scope.launch {
+                            val stoppingStream = stream
+                            val stoppingCamera = camera
+                            teardownStreamOnly()
+                            val stopped = withTimeoutOrNull(3_000L) {
+                                stoppingStream?.state?.first {
+                                    it == com.meta.wearable.dat.camera.types.StreamState.STOPPED ||
+                                    it == com.meta.wearable.dat.camera.types.StreamState.CLOSED
+                                }
+                                true
+                            } ?: false
+                            // Keep capability ownership through the shutdown acknowledgement.
+                            if (!stopped && stoppingCamera != null) {
+                                reply.error("STOP_TIMEOUT", "Camera shutdown did not complete.", null)
+                            } else reply.success(true)
+                        }
+                        "stopDeviceSession" -> scope.launch {
+                            val stopping = session
+                            teardownSession()
+                            val stopped = withTimeoutOrNull(10_000L) {
+                                stopping?.state?.first { it == DeviceSessionState.STOPPED }
+                                true
+                            } ?: false
+                            if (!stopped) reply.error("STOP_TIMEOUT", "Device shutdown did not complete.", null)
+                            else reply.success(true)
+                        }
+                        else -> stopStreamSession(call, reply)
+                    }
+                }
+            }
             "capturePhoto" -> capturePhoto(call, result)
             "enableBackgroundStreaming" -> enableBackgroundStreaming(call, result)
             "disableBackgroundStreaming" -> disableBackgroundStreaming(result)
@@ -411,6 +455,8 @@ class MetaWearablesDatPlugin :
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        deviceSessionChannel?.setStreamHandler(null)
+        deviceSessionChannel = null
         channel.setMethodCallHandler(null)
         activeDeviceChannel.setStreamHandler(null)
         activeDeviceStreamHandler?.dispose()
@@ -1124,7 +1170,31 @@ class MetaWearablesDatPlugin :
     private val mustNotStreamNow: Boolean
         get() = isAppInBackground && !backgroundStreamingStarted
 
+    private fun enqueueLifecycle(call: MethodCall, result: Result, operation: (Result) -> Unit) {
+        val previous = lifecycleJob
+        val generation = lifecycleGeneration
+        lifecycleJob = scope.launch {
+            previous?.join()
+            if (call.method.startsWith("start") && generation != lifecycleGeneration) {
+                result.error("START_CANCELLED", "Start superseded by stop.", null)
+                return@launch
+            }
+            val done = CompletableDeferred<Unit>()
+            operation(object : Result {
+                override fun success(value: Any?) { result.success(value); done.complete(Unit) }
+                override fun error(code: String, message: String?, details: Any?) {
+                    result.error(code, message, details); done.complete(Unit)
+                }
+                override fun notImplemented() { result.notImplemented(); done.complete(Unit) }
+            })
+            done.await()
+        }
+    }
+
     private fun startStreamSession(call: MethodCall, result: Result) {
+        val connectionOnly = call.method == "startDeviceSession"
+        val cameraOnly = call.method == "startCameraStream"
+        val generation = lifecycleGeneration
         val app = application
         if (app == null) {
             result.error("STREAM_ERROR", "Application context is not available.", null)
@@ -1181,6 +1251,15 @@ class MetaWearablesDatPlugin :
         // Same selection → return the existing texture; a *different* device →
         // caller must stop first; a stale (terminal) stream is torn down and
         // recreated below.
+        if (cameraOnly && (session?.state?.value != DeviceSessionState.STARTED || deviceId != pinnedDeviceId)) {
+            result.error("DEVICE_SESSION_NOT_READY", "Start the matching device session first.", null)
+            return
+        }
+        if (connectionOnly && session != null && deviceId == pinnedDeviceId &&
+            session?.state?.value?.name in listOf("STARTED", "PAUSED")) {
+            result.success(true)
+            return
+        }
         val existingStream = stream
         if (existingStream != null) {
             val st = existingStream.state.value
@@ -1280,6 +1359,15 @@ class MetaWearablesDatPlugin :
                     }
                 }
 
+                val connectedSession = if (cameraOnly) session else withTimeoutOrNull(20_000L) { ensureSessionStarted() }
+                if (connectedSession == null || generation != lifecycleGeneration || session !== connectedSession || connectedSession.state.value != DeviceSessionState.STARTED || mustNotStreamNow) {
+                    result.error("DEVICE_SESSION_ERROR", "Device session start failed or was cancelled.", null)
+                    return@launch
+                }
+                if (connectionOnly) {
+                    result.success(true)
+                    return@launch
+                }
                 sessionKey = key
                 frameProcessor.configure(fps)
 
@@ -1302,15 +1390,7 @@ class MetaWearablesDatPlugin :
                 val textureId = entry.id()
                 Log.d(TAG, "Registered texture $textureId for session $key")
 
-                val activeSession = ensureSessionStarted() ?: run {
-                    teardownStreamOnly()
-                    result.error(
-                            "STREAM_ERROR",
-                            "Failed to create or start device session.",
-                            null,
-                    )
-                    return@launch
-                }
+                val activeSession = connectedSession
 
                 // DAT 0.9.0 replaced `addStream` with `addCamera`; the returned
                 // `Camera` owns the stream.
@@ -1419,7 +1499,7 @@ class MetaWearablesDatPlugin :
                 // which is ample time for the user to background the app
                 // mid-start. Committing anyway would leave a live stream
                 // running in a backgrounded app that nothing will stop.
-                if (mustNotStreamNow) {
+                if (mustNotStreamNow || generation != lifecycleGeneration || session !== connectedSession) {
                     Log.d(TAG, "app backgrounded during start — abandoning")
                     teardownStreamOnly()
                     result.error(
@@ -1479,6 +1559,17 @@ class MetaWearablesDatPlugin :
 
         val newSession = created ?: return null
         session = newSession
+        sessionStateJob?.cancel()
+        sessionStateJob = scope.launch {
+            newSession.state.collect { state ->
+                if (session === newSession) {
+                    deviceSessionStateHandler.send(state.name.lowercase())
+                    if (state == DeviceSessionState.STOPPED) {
+                        teardownSession()
+                    }
+                }
+            }
+        }
         newSession.start()
 
         // 0.7.0: subscribe to DeviceSession.errors so session-scoped errors
@@ -1843,6 +1934,9 @@ class MetaWearablesDatPlugin :
      * a fresh Session.
      */
     private fun teardownSession() {
+        deviceSessionStateHandler.send("stopping")
+        sessionStateJob?.cancel()
+        sessionStateJob = null
         teardownStreamOnly()
         sessionErrorsJob?.cancel()
         sessionErrorsJob = null
@@ -1855,6 +1949,7 @@ class MetaWearablesDatPlugin :
         }
         session = null
         sessionDeviceId = null
+        deviceSessionStateHandler.send("stopped")
     }
 
     // endregion
