@@ -1,3 +1,8 @@
+## Unreleased
+
+- Add separate device connection and camera stream lifecycle APIs, including parent-state events while no camera is attached.
+- Serialize lifecycle commands and cancel pending starts when a stop is requested; retain existing combined streaming APIs.
+
 ## 1.0.1
 
 - Upgrade Meta Wearables DAT to 1.0.1 on iOS and Android. Android includes upstream fixes for HEVC buffer corruption and stream lag/stutter; iOS has no developer-facing SDK changes. The known intermittent iOS locked-background session termination remains unresolved.
