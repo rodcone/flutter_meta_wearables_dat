@@ -1,3 +1,9 @@
+## 1.0.0
+
+- Promote the tested release candidate to stable 1.0.0 with DAT 1.0.0 on iOS and Android; no runtime changes from 1.0.0-rc.1.
+- Motion, inputs, and richer device state remain planned for future releases.
+- The documented intermittent iOS locked-background session termination remains a known limitation.
+
 ## 1.0.0-rc.1
 
 - Release candidate for plugin 1.0.0, aligned with DAT 1.0.0. iOS locked background streaming has an unresolved intermittent session-termination issue; see the README's known limitation.

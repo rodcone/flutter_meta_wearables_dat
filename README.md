@@ -31,7 +31,7 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 - **Optional mock glasses:** Develop with a simulated pair driven by the phone's camera, without including mock-device dependencies in production.
 - **Reactive API:** Follow registration, availability, session, error, and thermal state with Dart `Stream`s.
 
-**Coming soon:** Support for more DAT capabilities is planned for the 1.1 release series, starting with motion, inputs, and richer device state (battery, charging, wear detection, and hinge state). These APIs are not available yet; the 1.0 release candidates focus on DAT 1.0.0 compatibility and the existing camera workflow.
+**Coming soon:** Support for more DAT capabilities is planned for future releases, starting with motion, inputs, and richer device state (battery, charging, wear detection, and hinge state). These APIs are not available yet; version 1.0.0 focuses on DAT 1.0.0 compatibility and the existing camera workflow.
 
 ## Quick start
 
@@ -39,7 +39,7 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 
 ```yaml
 dependencies:
-  flutter_meta_wearables_dat: ^1.0.0-rc.1
+  flutter_meta_wearables_dat: ^1.0.0
 ```
 
 ### 2. Configure iOS or Android
@@ -685,8 +685,8 @@ Meta gates registration on real glasses, so during development it's often handy 
 ```yaml
 # pubspec.yaml — add only in dev/staging builds
 dependencies:
-  flutter_meta_wearables_dat: ^1.0.0-rc.1
-  flutter_meta_wearables_dat_mock_device: ^1.0.0-rc.1
+  flutter_meta_wearables_dat: ^1.0.0
+  flutter_meta_wearables_dat_mock_device: ^1.0.0
 ```
 
 ```dart
