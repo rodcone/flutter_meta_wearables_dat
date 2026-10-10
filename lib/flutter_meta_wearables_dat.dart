@@ -794,6 +794,11 @@ class MetaWearablesDat {
   /// `Texture` widget — frames are pushed native→GPU (no encoding, no byte
   /// copying, no Dart-side decoding).
   ///
+  /// Pass `audio: true` to also carry the glasses' microphone on the stream,
+  /// delivered through [audioFramesStream]. It needs the microphone
+  /// permission ([requestMicrophonePermission]). iOS only for now; Android
+  /// ignores it.
+  ///
   /// Throws a `PlatformException` with code `STREAM_ACTIVE` if a stream is
   /// already running on a *different* device — stop it first, then start.
   static Future<int> startStreamSession(
@@ -801,10 +806,11 @@ class MetaWearablesDat {
     StreamFrameRate frameRate = StreamFrameRate.fps30,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
+    bool audio = false,
   }) {
     if (kDebugMode) {
       debugPrint(
-        '[MetaWearablesDAT] Starting stream session with deviceId: $deviceId, FPS: ${frameRate.value}, Stream quality: $streamQuality, Video codec: $videoCodec',
+        '[MetaWearablesDAT] Starting stream session with deviceId: $deviceId, FPS: ${frameRate.value}, Stream quality: $streamQuality, Video codec: $videoCodec, audio: $audio',
       );
     }
     return MetaWearablesDatPlatform.instance.startStreamSession(
@@ -812,8 +818,32 @@ class MetaWearablesDat {
       frameRate: frameRate,
       streamQuality: streamQuality,
       videoCodec: videoCodec,
+      audio: audio,
     );
   }
+
+  /// 16-bit little-endian PCM, mono, 16 kHz, from the glasses' microphones.
+  ///
+  /// Flows only while a stream started with `audio: true` is running, and
+  /// needs the microphone permission ([requestMicrophonePermission]). The audio
+  /// rides on the camera stream, so with background streaming enabled it keeps
+  /// arriving while the app is backgrounded, which the phone's own audio input
+  /// does not: iOS refuses to start an `AVAudioSession` recording from the
+  /// background. It also keeps the glasses on A2DP rather than the 8 kHz
+  /// hands-free link. iOS only for now.
+  static Stream<Uint8List> audioFramesStream() =>
+      MetaWearablesDatPlatform.instance.audioFramesStream();
+
+  /// Asks Meta AI for the glasses' microphone permission. Opens the Meta AI
+  /// app; the answer comes back through the app link, like the camera
+  /// permission, so pass that URL to [handleUrl]. iOS only for now.
+  static Future<bool> requestMicrophonePermission() =>
+      MetaWearablesDatPlatform.instance.requestMicrophonePermission();
+
+  /// Whether the microphone permission is granted. Also `false` when no
+  /// glasses are connected to ask. iOS only for now.
+  static Future<bool> getMicrophonePermissionStatus() =>
+      MetaWearablesDatPlatform.instance.getMicrophonePermissionStatus();
 
   /// Stops the active stream session. [deviceId] is accepted for call symmetry
   /// but isn't required — there is a single active session.

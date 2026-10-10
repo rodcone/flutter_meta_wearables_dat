@@ -1,3 +1,7 @@
+## Unreleased
+
+- iOS: carry the glasses' microphone on the camera stream. `startStreamSession(audio: true)` asks DAT for 16 kHz mono PCM, delivered as `Uint8List` through the new `audioFramesStream()`, in the foreground and, with background streaming enabled, in the background. New `requestMicrophonePermission()` / `getMicrophonePermissionStatus()`. Android ignores `audio` for now.
+
 ## 1.0.0
 
 - Promote the tested release candidate to stable 1.0.0 with DAT 1.0.0 on iOS and Android; no runtime changes from 1.0.0-rc.1.
