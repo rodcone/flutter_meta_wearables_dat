@@ -113,6 +113,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var camera: MWDATCamera.Camera?
   private var streamSession: MWDATCamera.Stream?
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
+  // Microphone audio carried on the camera stream, when `startStreamSession`
+  // is called with `audio: true`. Cancelled before the camera stops, as Meta's
+  // audio-streaming guidance requires.
+  private var audioListenerToken: (any MWDATCore.AnyListenerToken)?
   // Serializes `teardownStreamOnly` — it is reachable from the method channel,
   // the device-session observer and the start-failure paths, and callers must
   // await an in-flight teardown rather than skip it.
@@ -187,6 +191,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // backgrounded apps).
   private let backgroundController = BackgroundStreamingController()
   private let videoFrameHandler = VideoFrameStreamHandler()
+  private let audioFrameHandler = AudioFrameStreamHandler()
   /// Single source of truth for background/foreground transitions. See
   /// `AppLifecycleObserver` for why this does not use `addApplicationDelegate`
   /// or `addSceneDelegate`.
@@ -235,6 +240,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // that don't opt in to background streaming.
     let videoFramesChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/video_frames", binaryMessenger: registrar.messenger())
     videoFramesChannel.setStreamHandler(instance.videoFrameHandler)
+    // Event channel for the glasses' microphone audio (16-bit PCM, mono, 16 kHz).
+    let audioFramesChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/audio_frames", binaryMessenger: registrar.messenger())
+    audioFramesChannel.setStreamHandler(instance.audioFrameHandler)
     // Event channel for per-device state (thermal level). Tracks the active
     // device and switches subscription on device change.
     let deviceStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/device_state", binaryMessenger: registrar.messenger())
@@ -303,6 +311,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         getCameraPermissionStatus(result: result)
       case "requestCameraPermission":
         requestCameraPermission(result: result)
+      case "getMicrophonePermissionStatus":
+        getMicrophonePermissionStatus(result: result)
+      case "requestMicrophonePermission":
+        requestMicrophonePermission(result: result)
       case "startStreamSession":
         startStreamSession(call: call, result: result)
       case "stopStreamSession":
@@ -451,6 +463,41 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       return "INTERNAL_ERROR"
     @unknown default:
       return "INTERNAL_ERROR"
+    }
+  }
+
+  // MARK: - Microphone permission
+
+  /// Whether the app may receive the glasses' microphone on the camera stream.
+  /// `false` also when no glasses are connected to ask.
+  func getMicrophonePermissionStatus(result: @escaping FlutterResult) {
+    Task { @MainActor in
+      let status = try? await Wearables.shared.checkPermissionStatus(.microphone)
+      result(status == .granted)
+    }
+  }
+
+  /// Asks Meta AI for the microphone permission. Opens the Meta AI app, which
+  /// returns through the app link exactly like the camera permission.
+  func requestMicrophonePermission(result: @escaping FlutterResult) {
+    Task { @MainActor in
+      do {
+        if let current = try? await Wearables.shared.checkPermissionStatus(.microphone),
+           current == .granted {
+          result(true)
+          return
+        }
+        let status = try await Wearables.shared.requestPermission(.microphone)
+        result(status == .granted)
+      } catch let e as MWDATCore.PermissionError {
+        result(FlutterError(
+          code: Self.mapPermissionError(e),
+          message: e.description,
+          details: ["errorType": String(describing: e), "rawValue": e.rawValue]
+        ))
+      } catch {
+        result(FlutterError(code: "INTERNAL_ERROR", message: error.localizedDescription, details: nil))
+      }
     }
   }
 
@@ -1016,6 +1063,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // *was* the `Stream` and there was no removal API, so the DeviceSession
     // retained it for its whole life and our nil was never the last release.
     // Under 0.9.0 it is — hence the bounded wait below before letting go.
+    // Meta's audio guidance: cancel the audio listener before stopping the
+    // camera.
+    if let token = audioListenerToken {
+      await token.cancel()
+      audioListenerToken = nil
+    }
+
     camera?.stop()
 
     if let token = videoListenerToken {
@@ -1806,6 +1860,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // specific pair; nil auto-selects. Applied below by rebuilding the shared
     // selector.
     let requestedDeviceId = args["deviceId"] as? String
+    // Carry the glasses' microphone on the stream as 16 kHz mono PCM.
+    let wantsAudio = args["audio"] as? Bool ?? false
 
     Task { @MainActor in
       // Reject a concurrent start: a second start that tears down the first's
@@ -1915,6 +1971,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // `addCamera`; the returned `Camera` owns the stream.
       let streamConfig = StreamConfiguration(
         videoCodec: videoCodec,
+        audioCodec: wantsAudio ? .pcm(sampleRate: .rate16000, numberOfChannels: 1) : nil,
         resolution: Self.resolution(for: streamQuality),
         frameRate: UInt(fps)
       )
@@ -1961,6 +2018,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // before this callback returns.
         self.frameQueue.sync {
           self.processAndSendFrame(videoFrame)
+        }
+      }
+
+      // Registered before `session.start()`, like the video listener, so the
+      // first frames are not lost. The PCM buffer belongs to the SDK and is
+      // copied inside the callback.
+      if wantsAudio {
+        audioFrameHandler.resetSessionState()
+        audioListenerToken = session.audioFramePublisher.listen { [weak self] frame in
+          self?.audioFrameHandler.send(frame.pcmBuffer)
         }
       }
 

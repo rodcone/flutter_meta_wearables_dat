@@ -49,6 +49,13 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     'flutter_meta_wearables_dat/video_frames',
   );
 
+  /// The event channel used to receive the glasses' microphone audio while a
+  /// stream started with `audio: true` is running (iOS).
+  @visibleForTesting
+  final audioFramesEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/audio_frames',
+  );
+
   /// The event channel used to receive per-device state updates
   /// (thermal level). Tracks the active device on the native side.
   @visibleForTesting
@@ -101,6 +108,27 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   }
 
   @override
+  Future<bool> requestMicrophonePermission() async {
+    final ok = await methodChannel.invokeMethod<bool>(
+      'requestMicrophonePermission',
+    );
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> getMicrophonePermissionStatus() async {
+    final ok = await methodChannel.invokeMethod<bool>(
+      'getMicrophonePermissionStatus',
+    );
+    return ok ?? false;
+  }
+
+  @override
+  Stream<Uint8List> audioFramesStream() => audioFramesEventChannel
+      .receiveBroadcastStream()
+      .map((dynamic event) => event as Uint8List);
+
+  @override
   Future<bool> startRegistration() async {
     final ok = await methodChannel.invokeMethod<bool>('startRegistration');
     return ok ?? false;
@@ -126,11 +154,13 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     StreamFrameRate frameRate = StreamFrameRate.fps30,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
+    bool audio = false,
   }) async {
     final args = <String, dynamic>{
       'fps': frameRate.value,
       'streamQuality': streamQuality.value,
       'videoCodec': videoCodec.value,
+      'audio': audio,
     };
     if (deviceId != null) {
       args['deviceId'] = deviceId;

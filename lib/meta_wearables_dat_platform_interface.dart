@@ -1,6 +1,7 @@
 // ignore_for_file: public_member_api_docs
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat/meta_wearables_dat_method_channel.dart';
@@ -45,6 +46,24 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     );
   }
 
+  Future<bool> requestMicrophonePermission() {
+    throw UnimplementedError(
+      'requestMicrophonePermission() has not been implemented.',
+    );
+  }
+
+  Future<bool> getMicrophonePermissionStatus() {
+    throw UnimplementedError(
+      'getMicrophonePermissionStatus() has not been implemented.',
+    );
+  }
+
+  /// 16-bit PCM mono audio from the glasses' microphones, while a stream
+  /// started with `audio: true` is running.
+  Stream<Uint8List> audioFramesStream() {
+    throw UnimplementedError('audioFramesStream() has not been implemented.');
+  }
+
   Future<bool> startRegistration() {
     throw UnimplementedError('startRegistration() has not been implemented.');
   }
@@ -64,6 +83,7 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     StreamFrameRate frameRate = StreamFrameRate.fps30,
     StreamQuality streamQuality = StreamQuality.high,
     VideoCodec videoCodec = VideoCodec.raw,
+    bool audio = false,
   }) {
     throw UnimplementedError('startStreamSession() has not been implemented.');
   }

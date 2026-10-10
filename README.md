@@ -644,6 +644,44 @@ Valid FPS values: 2, 7, 15, 24, 30. Defaults: `StreamQuality.high` at 30 FPS wit
 
 Bandwidth is adaptive: on a constrained link the SDK first steps the resolution down one tier, then reduces the frame rate (never below 15 FPS), and applies per-frame compression throughout — so a stream can report `high` yet look soft. Requesting a lower resolution or FPS often yields *better* visual quality on a constrained link.
 
+#### Microphone audio (iOS)
+
+The glasses' microphones can ride on the camera stream as 16-bit PCM, mono,
+16 kHz. Ask for the microphone permission once (it opens Meta AI and comes back
+through your app link, like the camera permission), then start the stream with
+`audio: true` and listen to `audioFramesStream()`:
+
+```dart
+if (!await MetaWearablesDat.getMicrophonePermissionStatus()) {
+  await MetaWearablesDat.requestMicrophonePermission();
+}
+
+final audio = MetaWearablesDat.audioFramesStream().listen((pcm) {
+  // pcm: Uint8List of little-endian Int16 samples, mono, 16 kHz.
+  speechRecognizer.add(pcm);
+});
+
+await MetaWearablesDat.startStreamSession(null, audio: true);
+```
+
+Why use it rather than the phone's audio input with the glasses as a Bluetooth
+headset:
+
+- **It works from the background.** iOS refuses to start an `AVAudioSession`
+  recording while the app is backgrounded, so an app woken in the background
+  (for example by a "Hey Meta" voice invocation) cannot open the microphone.
+  This audio never touches the phone's audio input, and with background
+  streaming enabled it keeps arriving while the app is backgrounded or the
+  phone is locked.
+- **Better quality, no route change.** The hands-free (HFP) link is 8 kHz and
+  switches the glasses out of A2DP while it is open; this is 16 kHz and leaves
+  the media route alone.
+
+The audio needs the camera stream to be running (it is part of it), and the
+permission needs the glasses connected; `getMicrophonePermissionStatus()`
+reads `false` while they are not. Android is not implemented yet: `audio` is
+ignored there and the microphone methods are not available.
+
 #### Accessing raw frame bytes
 
 For use cases that need pixel-level access — OCR, on-device ML inference, computer vision — use `captureStreamFrame`. This rasterizes the Flutter texture on the Dart side and returns raw RGBA bytes:
