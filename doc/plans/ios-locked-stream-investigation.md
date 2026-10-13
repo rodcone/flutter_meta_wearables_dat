@@ -319,3 +319,59 @@ without the Dart tracing define was built, installed and launched with no trace
 argument/environment. The idle screen was verified and iPhoneMirror Agent Access
 was restored to off. The 44-assertion native harness still passes; no recovery
 behavior was changed.
+
+## Recovery fix — 2026-10-13
+
+Approved implementation of the plan above:
+
+- Error notifications share a single pending backoff. Counters advance when a
+  recovery executes, with the same three-attempt limits and separate frame-stall
+  budget. Duplicate errors do not extend the watchdog deadline.
+- Every recovery explicitly stops before starting. The captured SDK error burst
+  occurred while native state was still streaming, so relying on an SDK auto-stop
+  could return the failed session's existing texture.
+- Errors during a replacement's pending start are retained and processed once
+  the start completes. Failed replacements still advance to the next bounded
+  attempt. An old session's streaming notification cannot cancel pending recovery.
+- Recovery and subscription generations reject obsolete callbacks. Manual Stop,
+  terminal errors, background opt-out and the watchdog cancel recovery. A late
+  native start result is cleaned up before another manual start is allowed.
+- Added 12 provider regression cases: nine-error burst; errors during replacement
+  start; synchronous/asynchronous failed replacements; Stop during teardown;
+  watchdog with late texture; and Stop/terminal/background cancellation both
+  during backoff and during a pending start. Existing first-frame stall budget
+  and compatibility tests remain intact.
+
+The burst regression was observed failing before the fix (fourth error ends
+recovery before any attempt). After the fix, all 26 example tests pass, focused
+Dart MCP analysis reports no errors, and the signed instrumented iOS release
+build succeeds. No running Dart debug/DTD process was available for hot reload;
+physical verification uses a newly installed release build. Device retest pending.
+
+### Instrumented device retest — 16:07 Europe/Madrid
+
+Same iPhone/glasses, Bluetooth Classic, RAW / medium / 30 FPS, background opt-in.
+Native trace run `3FE322BD-11C4-4B80-B2C1-C90E2995ADE4`. Complete sequences native
+1–73 and Dart 1–43, with no missing entries or trace cap. Local-only filtered
+logs and normalized `trial.json` are under the temporary directory
+`dat-recovery-trace-ptclotxz`; no frame payloads or screenshots were saved.
+
+| Relative to background entry | Result |
+| --- | --- |
+| +0.531 to +0.542 s | Five SDK `videoStreamingError` events on camera `08FB1800-684E-4536-B29E-3466F9196DC0` |
+| +0.586 s | One recovery scheduled; four following Dart notifications coalesced |
+| +1.306 s | One actual retry executes (timer scheduling took longer than the nominal 400 ms in background) |
+| +4.167 s | First frame on fresh camera `8242F61E-77CA-4FF9-A96E-A2A08F204C6C`, texture 1 |
+| +60.371 s | Later `sdkFramesStopped` stall: 1.699 s arrival gap after 1420 received frames |
+| +60.777 s | Separate frame-stall recovery executes, frame-stall budget count 1 |
+| +63.442 s | First frame on camera `AC55B641-8A12-4F04-AA36-137AACA33602`, texture 2 |
+| +69.655 s | Foreground after manual unlock; no Start/Stop input |
+
+The preview was observed updating after unlock. Diagnostics showed SDK 27.5 FPS,
+texture submissions 25 FPS, no current stall, 990 frames received and 740
+submitted. Both recoveries happened while locked. This validates error-burst
+coalescing and recovery on this device, **not uninterrupted background delivery**:
+the upstream SDK error burst and a later frame gap still occurred. USB,
+iPhoneMirror and console/syslog capture remain observer effects. After verification,
+manual Stop worked, and both collectors were stopped before installing the normal
+trace-disabled release for a comparison run.
