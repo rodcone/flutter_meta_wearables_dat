@@ -375,3 +375,38 @@ the upstream SDK error burst and a later frame gap still occurred. USB,
 iPhoneMirror and console/syslog capture remain observer effects. After verification,
 manual Stop worked, and both collectors were stopped before installing the normal
 trace-disabled release for a comparison run.
+
+### Normal release comparison — observed at 16:45 Europe/Madrid
+
+Built/installed without the Dart investigation define and launched without native
+trace arguments/environment; console/syslog collectors were stopped. Same RAW /
+medium / 30 FPS and background opt-in. Before lock, the diagnostics panel showed
+camera `BAD6E223-1C39-4A5C-B124-A17CABC18E41`, 266 received frames, SDK 28.5 FPS,
+26.5 texture submissions/sec and no stall. The lock command was issued at
+16:12:28. The user later replied unlocked; the first fresh observation was at
+16:45:43, about 33 minutes after the command. This elapsed observation window
+must not be reported as a measured continuous lock interval: no lifecycle trace
+was collected and uninterrupted wear/connection/lock conditions are unconfirmed.
+
+At inspection the app showed the stopped placeholder, no current session/texture,
+and background streaming still enabled. Retained frame-stall snapshot:
+
+- Camera `3EBC21F1-C045-4EC7-97F4-F7430AC414B5` (different from the pre-lock camera).
+- Native state 4 / streaming; app backgrounded; background opt-in true.
+- 5,098 frames received, zero texture submissions (expected in background).
+- `sdkFramesStopped`, last arrival 2,350,251 us ago, rolling received FPS 0.
+- First-frame wait 828,343 us; queue 0, peak 1.
+- Audio input `MicrophoneBuiltIn`, output `BluetoothA2DPOutput`.
+
+A replacement camera delivered frames during this run, but the app was stopped
+at inspection. The retained snapshot alone does not establish final stop time,
+retry count, retry exhaustion, or a terminal SDK error. This comparison cannot be
+marked a pass for background continuity or a controlled 30-second test, and does
+not overturn the instrumented proof that error-burst coalescing works. Asked the
+user whether the phone stayed locked and glasses stayed connected/worn throughout.
+No further code change is justified from this snapshot alone. Background streaming
+was restored to off and the normal release left idle; the retained diagnostics
+were preserved. Mirror sessions reconnected several times during inspection,
+without any agent-initiated app restart.
+Agent Access was restored to off after inspection. No additional code or runtime
+configuration changes were made.
