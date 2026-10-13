@@ -1,6 +1,7 @@
 # Investigate iOS streaming stalls while locked
 
-Prepared 2026-10-13. Status: plan only; no runtime changes or new device tests.
+Prepared 2026-10-13. Status: Step 1 instrumentation implemented; instrumented
+physical capture awaits the user's unlocked/connected/worn setup confirmation.
 Baseline: `8ded141` on `codex/diagnostics-plan`. Prior evidence is recorded in
 [diagnostics-first-frame.md](diagnostics-first-frame.md#agent-controlled-ios-background-qa-2026-10-13).
 
@@ -165,3 +166,80 @@ and all device claims state the tested configuration and actual durations.
 Android is outside this iOS investigation except for regression checks if shared
 Dart code changes. Stop streaming and restore temporary settings/agent access
 after each test session. No release, publication or issue closure is part of this plan.
+
+## Step 1 implementation and capture procedure
+
+Added opt-in native and example JSON trace events without changing streaming,
+audio configuration, stall thresholds, or recovery decisions. Both loggers cap
+output at 2,000 events plus one explicit limit marker per process. Native events
+have a random run ID, sequence, uptime and wall-clock microseconds; Dart events
+have sequence, Stopwatch elapsed and wall-clock microseconds. Use the paired
+wall/monotonic samples to correlate clocks, allowing for sampling uncertainty
+and any wall-clock adjustment. Do not directly subtract Dart and native clocks.
+
+Native events cover parent/camera identity, states and error codes, lifecycle,
+audio activation/interruption (including an optional `wasSuspended` value),
+first/resumed SDK frames, stall snapshots, and teardown. Existing watchdog ticks
+produce a summary every five seconds or when a tick is delayed beyond two seconds;
+no new keep-alive timer or frame-byte subscription was introduced. Dart events
+cover received state/errors, both retry counters, start/stop/teardown, recovery
+watchdog expiration and the final error passed to teardown. `streaming` state and
+`startReturnedTexture` still do not prove frame delivery; correlate with native
+`firstFrame`/`framesResumed`. SDK error mappings are logged without free-text
+messages, and audio traces use port types without device names.
+
+Native switch: launch environment `MWDAT_INVESTIGATION=1`.
+Example switch: build with `--dart-define=MWDAT_INVESTIGATION=true`.
+Both are off by default. The instrumented build has been installed without
+uninstalling the app or deleting its data; it has not yet been used for a lock trial.
+
+From `example/`, build with the repository Flutter SDK:
+
+```sh
+/Users/gdelataillade/dev/flutter/bin/flutter build ios --release \
+  --dart-define=MWDAT_INVESTIGATION=true
+```
+
+After installation, start a process-filtered collector before launching. Substitute
+the connected iPhone UDID and a fresh local output path; stop the collector after
+the bounded trial. Collect only tagged events, not a whole-device log archive:
+
+```sh
+idevicesyslog -u "$DAT_DEVICE_UDID" --no-colors -p Runner \
+  -m MWDAT-TRACE -o "$DAT_TRACE_PATH"
+```
+
+Launch without attaching a debugger or console bridge:
+
+```sh
+xcrun devicectl device process launch --device "$DAT_DEVICE_UDID" \
+  --terminate-existing --environment-variables '{"MWDAT_INVESTIGATION":"1"}' \
+  io.rodcone.flutterMetaWearablesDatExample
+```
+
+Before locking, verify that both native and Dart tagged JSON actually reach the
+collector, enable background streaming, and establish a healthy foreground
+baseline. Do not infer missing events until collector completeness is checked.
+Record firmware from the paired-device UI if exposed. USB log transport connected
+successfully during preparation, but instrumented device event delivery and
+locked-log continuity are still pending. OS log capture can affect observation;
+repeat without capture when assessing any eventual behavioral fix.
+
+Validation: focused Dart MCP analysis clean; five focused example tests passed
+with tracing disabled and enabled; 44 native timing assertions passed. A host
+smoke check confirmed the native logger emits nothing while disabled and valid
+sequenced JSON capped at 2,001 entries while enabled. Signed iOS release build
+passed. The built app contains DAT Core 1.0.0 and `audio`, `bluetooth-central`,
+`bluetooth-peripheral`, `external-accessory` modes. No DTD/debug app was running;
+native changes were rebuilt instead of hot reloaded. No root-cause claim yet.
+
+Documentation comparison:
+- [Meta background guide announcement](https://github.com/facebook/meta-wearables-dat-ios/discussions/142)
+  links an April 2026 CameraRecorder-based guide with audio-engine recording,
+  HFP and an active audio session. That differs from this plugin's camera-only
+  setup. It is not proof that changing audio routing would fix these stalls.
+  The local DAT 1.0.0 release tag contains binaries and metadata, not sample sources.
+- [Apple audio-session guidance](https://developer.apple.com/library/archive/documentation/Audio/Conceptual/AudioSessionProgrammingGuide/ConfiguringanAudioSession/ConfiguringanAudioSession.html)
+  discusses suspension-driven audio interruption when an app is not actively
+  using audio. This supports capturing interruption metadata, not assuming that
+  activation alone proves uninterrupted background execution.

@@ -85,6 +85,7 @@ final class BackgroundStreamingController {
         completion(nil)
       } catch {
         self.setEnabled(false)
+        StreamInvestigationTrace.record("audioActivationFailed", ["code": (error as NSError).code])
         completion(error)
       }
     }
@@ -104,6 +105,7 @@ final class BackgroundStreamingController {
         return
       }
       self.setEnabled(false)
+      StreamInvestigationTrace.record("audioDisableRequested")
       // Pass `.notifyOthersOnDeactivation` so other apps (e.g. music) can
       // resume immediately instead of waiting for their next routing event.
       try? AVAudioSession.sharedInstance().setActive(
@@ -124,6 +126,7 @@ final class BackgroundStreamingController {
     )
     try session.setActive(true)
     logCurrentRoute("after activation")
+    StreamInvestigationTrace.record("audioActivated", ["category": session.category.rawValue, "mode": session.mode.rawValue, "options": session.categoryOptions.rawValue])
   }
 
   /// Logs the current audio route. Kept in production on purpose: the
@@ -135,6 +138,7 @@ final class BackgroundStreamingController {
   /// these lines is diagnosable without a repro.
   static func logCurrentRoute(_ context: String) {
     let route = AVAudioSession.sharedInstance().currentRoute
+    StreamInvestigationTrace.record("audioRoute", ["context": context, "inputs": route.inputs.map { $0.portType.rawValue }, "outputs": route.outputs.map { $0.portType.rawValue }])
     let inputs = route.inputs.map { "\($0.portType.rawValue):\($0.portName)" }.joined(separator: ",")
     let outputs = route.outputs.map { "\($0.portType.rawValue):\($0.portName)" }.joined(separator: ",")
     NSLog("[MWDAT-ROUTE] \(context) — in=[\(inputs)] out=[\(outputs)]")
@@ -182,6 +186,7 @@ final class BackgroundStreamingController {
           let type = AVAudioSession.InterruptionType(rawValue: typeValue)
     else { return }
 
+    StreamInvestigationTrace.record("audioInterruption", ["type": typeValue, "options": info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0, "wasSuspended": info[AVAudioSessionInterruptionWasSuspendedKey] ?? NSNull()])
     switch type {
     case .began:
       NSLog("[MWDAT] Audio interruption began")
@@ -195,9 +200,11 @@ final class BackgroundStreamingController {
         do {
           try AVAudioSession.sharedInstance().setActive(true)
           self.setEnabled(true)
+          StreamInvestigationTrace.record("audioReactivated")
           NSLog("[MWDAT] Audio interruption ended — session re-activated")
         } catch {
           self.setEnabled(false)
+          StreamInvestigationTrace.record("audioReactivationFailed", ["code": (error as NSError).code])
           NSLog("[MWDAT] Failed to re-activate AVAudioSession after interruption: \(error)")
         }
       }
@@ -210,6 +217,7 @@ final class BackgroundStreamingController {
     // Rare but documented — whole audio stack reset. Re-activate if we were
     // keeping the session alive.
     guard isEnabled else { return }
+    StreamInvestigationTrace.record("audioMediaServicesReset")
     NSLog("[MWDAT] AVAudioSession media services were reset — re-activating")
     sessionQueue.async { [weak self] in
       guard let self, self.isEnabled else { return }
@@ -218,6 +226,7 @@ final class BackgroundStreamingController {
         self.setEnabled(true)
       } catch {
         self.setEnabled(false)
+        StreamInvestigationTrace.record("audioResetActivationFailed", ["code": (error as NSError).code])
         NSLog("[MWDAT] Failed to re-activate AVAudioSession after reset: \(error)")
       }
     }

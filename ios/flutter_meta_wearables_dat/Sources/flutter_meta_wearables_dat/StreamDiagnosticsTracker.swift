@@ -74,6 +74,10 @@ final class StreamDiagnosticsTracker {
   func noteArrival() {
     lock.lock(); defer { lock.unlock() }
     let now = clock()
+    if StreamInvestigationTrace.enabled, first == nil || (last.map { now - $0 > 1.5 } ?? false) {
+      StreamInvestigationTrace.record(first == nil ? "firstFrame" : "framesResumed",
+        ["sessionId": sessionId, "previousGapUs": last.map { Int((now - $0) * 1_000_000) } ?? 0, "framesReceivedBefore": receivedCount])
+    }
     if first == nil { advance(now); first = now }
     if stallReason != "textureSubmissionsStopped" { stallReason = nil }
     last = now; receivedCount += 1
