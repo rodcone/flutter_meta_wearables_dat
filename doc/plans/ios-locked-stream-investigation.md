@@ -1,7 +1,7 @@
 # Investigate iOS streaming stalls while locked
 
-Prepared 2026-10-13. Status: Step 1 instrumentation implemented; instrumented
-physical capture awaits the user's unlocked/connected/worn setup confirmation.
+Prepared 2026-10-13. Status: Step 1 captured an actionable example recovery bug;
+the originating SDK error remains unexplained. See the controlled-trial results below.
 Baseline: `8ded141` on `codex/diagnostics-plan`. Prior evidence is recorded in
 [diagnostics-first-frame.md](diagnostics-first-frame.md#agent-controlled-ios-background-qa-2026-10-13).
 
@@ -188,10 +188,10 @@ watchdog expiration and the final error passed to teardown. `streaming` state an
 `firstFrame`/`framesResumed`. SDK error mappings are logged without free-text
 messages, and audio traces use port types without device names.
 
-Native switch: launch environment `MWDAT_INVESTIGATION=1`.
+Native switch: launch argument `--mwdat-investigation` or environment
+`MWDAT_INVESTIGATION=1`. A `traceStarted` event verifies activation.
 Example switch: build with `--dart-define=MWDAT_INVESTIGATION=true`.
-Both are off by default. The instrumented build has been installed without
-uninstalling the app or deleting its data; it has not yet been used for a lock trial.
+Both are off by default. Installation preserves existing app data.
 
 From `example/`, build with the repository Flutter SDK:
 
@@ -200,30 +200,37 @@ From `example/`, build with the repository Flutter SDK:
   --dart-define=MWDAT_INVESTIGATION=true
 ```
 
-After installation, start a process-filtered collector before launching. Substitute
+After installation, start a tagged collector before launching. Substitute
 the connected iPhone UDID and a fresh local output path; stop the collector after
-the bounded trial. Collect only tagged events, not a whole-device log archive:
+the bounded trial. Collect only tagged events, not a whole-device log archive.
+During this run, `-p Runner` missed the newly launched process; omit that filter
+and select the verified app PID when parsing, or resolve the PID after launch.
+Use a PTY reader with line-flushed output when consuming syslog incrementally:
 
 ```sh
-idevicesyslog -u "$DAT_DEVICE_UDID" --no-colors -p Runner \
+idevicesyslog -u "$DAT_DEVICE_UDID" --no-colors \
   -m MWDAT-TRACE -o "$DAT_TRACE_PATH"
 ```
 
-Launch without attaching a debugger or console bridge:
+The syslog relay delivered Dart events but did not deliver native NSLog events
+in this setup. A second, filtered `devicectl --console` capture delivered native
+events. Launch with the console bridge, without a debugger, and retain only
+`[MWDAT-TRACE]` lines from that output:
 
 ```sh
 xcrun devicectl device process launch --device "$DAT_DEVICE_UDID" \
-  --terminate-existing --environment-variables '{"MWDAT_INVESTIGATION":"1"}' \
-  io.rodcone.flutterMetaWearablesDatExample
+  --terminate-existing --console \
+  --environment-variables '{"MWDAT_INVESTIGATION":"1"}' \
+  io.rodcone.flutterMetaWearablesDatExample --mwdat-investigation
 ```
 
 Before locking, verify that both native and Dart tagged JSON actually reach the
 collector, enable background streaming, and establish a healthy foreground
 baseline. Do not infer missing events until collector completeness is checked.
 Record firmware from the paired-device UI if exposed. USB log transport connected
-successfully during preparation, but instrumented device event delivery and
-locked-log continuity are still pending. OS log capture can affect observation;
-repeat without capture when assessing any eventual behavioral fix.
+successfully and the controlled trial below verified both event streams without
+sequence gaps. Console/log capture can affect observation; repeat without capture
+when assessing any eventual behavioral fix.
 
 Validation: focused Dart MCP analysis clean; five focused example tests passed
 with tracing disabled and enabled; 44 native timing assertions passed. A host
@@ -231,7 +238,7 @@ smoke check confirmed the native logger emits nothing while disabled and valid
 sequenced JSON capped at 2,001 entries while enabled. Signed iOS release build
 passed. The built app contains DAT Core 1.0.0 and `audio`, `bluetooth-central`,
 `bluetooth-peripheral`, `external-accessory` modes. No DTD/debug app was running;
-native changes were rebuilt instead of hot reloaded. No root-cause claim yet.
+native changes were rebuilt instead of hot reloaded. SDK root cause remains open.
 
 Documentation comparison:
 - [Meta background guide announcement](https://github.com/facebook/meta-wearables-dat-ios/discussions/142)
@@ -243,3 +250,72 @@ Documentation comparison:
   discusses suspension-driven audio interruption when an app is not actively
   using audio. This supports capturing interruption metadata, not assuming that
   activation alone proves uninterrupted background execution.
+
+## Controlled trial — 2026-10-13, 15:48 Europe/Madrid
+
+Evidence: signed release on iPhone 17 / iOS 27.0, DAT 1.0.0, Bluetooth Classic,
+RAW / medium / 30 FPS, background opt-in on. Native trace run
+`5EF2F4AC-C4C2-43F4-81AF-64304DFCA5C1`, camera
+`6ABC2E0D-287B-428D-8260-ABC484569E54`. Firmware was not read in this run.
+Both native console and Dart syslog streams were verified before the lock.
+Complete captured sequences: native 1–35 and Dart 1–17, including cleanup;
+neither had missing sequence numbers or reached the event cap. No debugger was
+attached, but the console bridge and USB/Mirror connection are observer effects
+to account for in later verification. No recording payload or screenshot was saved.
+
+Foreground was healthy at approximately 26.5–28 SDK FPS. The lock command was
+issued at 15:48:25; native background entry was 15:48:26.448. A 30-second wait
+preceded the unlock request, but native foreground return was 15:50:29.948:
+actual background duration 123.501 seconds, including the user's response time.
+The app showed the stopped placeholder after unlock without Start/Stop input.
+
+| Time after background entry | Evidence |
+| --- | --- |
+| +0.805 to +0.886 s | Nine native `videoStreamingError` events from the same camera |
+| +0.904561 s | Dart receives the first error; SDK retry count is zero |
+| +0.904914 s | Schedules recovery 1, with a 400 ms backoff |
+| +0.905802 s | Next error reschedules recovery and increments count to 2 |
+| +0.906761 s | Next error reschedules recovery and increments count to 3 |
+| +0.908607 s | Fourth received error calls `endSessionWithError` |
+| +0.908678 s | Cancels the pending recovery timer |
+| +0.917781 s | Native camera teardown begins; last SDK frame age is 0.765 s |
+| +1.056695 s | Dart teardown completes |
+
+There was no `recoveryStarted` or automatic start event. Three scheduled retries
+were consumed by an error burst before any attempt could execute. There was no
+`frameStalled` event, and the separate frame-stall retry count stayed zero.
+No audio-interruption event was captured before this stop. These facts establish
+the immediate application-side failure, not the source of the SDK error burst.
+The earlier trials with retained frame-stall snapshots may have different paths.
+
+Code corroboration: `_setStreamError` permits another `_scheduleRecovery` while
+`_isRecovering` is true. Each schedule increments `_recoveryAttempts` and cancels
+the previous timer. Once the counter reaches three, the next recoverable error
+tears down instead. Increasing the frame-stall threshold cannot fix this sequence.
+
+### Proposed next implementation (not yet applied)
+
+1. Reproduce this exact burst in the provider test: several `videoStreamingError`
+   events on a streaming session before the first 400 ms backoff fires. Assert
+   one pending attempt, no premature terminal teardown, then one executed retry.
+2. Coalesce recoverable errors belonging to a pending/in-flight recovery. Keep
+   terminal SDK errors, explicit Stop and background opt-out authoritative.
+   Ensure errors from a failed replacement still advance recovery rather than
+   being swallowed forever; distinguish backoff from an executing attempt if
+   needed. Count actual attempts rather than repeated notifications.
+3. Retain bounded retries and the existing separate frame-stall budget. Test
+   persistent failed replacements, terminal errors during backoff, cancellation,
+   and old-session callbacks. A mere `_isRecovering` early return is insufficient
+   unless these cases remain correct.
+4. Repeat the instrumented lock trial, then a normal release run without capture.
+   Report successful retry separately from uninterrupted SDK streaming. Investigate
+   the SDK burst independently if it persists after application recovery works.
+
+This supersedes running the entire Step 2 comparison first: the captured burst
+is already a deterministic, actionable policy defect. No recovery fix was made
+during evidence capture. Temporary trace collectors were stopped; the background
+toggle was restored to its initial off state for this run. A normal release build
+without the Dart tracing define was built, installed and launched with no trace
+argument/environment. The idle screen was verified and iPhoneMirror Agent Access
+was restored to off. The 44-assertion native harness still passes; no recovery
+behavior was changed.

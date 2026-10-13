@@ -203,6 +203,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var abortStopWait = false
 
   public static func register(with registrar: FlutterPluginRegistrar) {
+    StreamInvestigationTrace.record("traceStarted")
     let channel = FlutterMethodChannel(name: "flutter_meta_wearables_dat", binaryMessenger: registrar.messenger())
     let instance = MetaWearablesDatPlugin()
     instance.textureRegistry = registrar.textures()

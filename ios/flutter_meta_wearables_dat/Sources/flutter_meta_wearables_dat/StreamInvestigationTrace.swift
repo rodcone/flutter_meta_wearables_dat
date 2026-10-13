@@ -1,9 +1,10 @@
 import Foundation
 
 /// Opt-in release-device investigation. No timers, files, payload bytes or public API.
-/// Launch with MWDAT_INVESTIGATION=1; collect tagged OS logs over USB.
+/// Launch with --mwdat-investigation or MWDAT_INVESTIGATION=1.
 enum StreamInvestigationTrace {
   static let enabled = ProcessInfo.processInfo.environment["MWDAT_INVESTIGATION"] == "1"
+    || ProcessInfo.processInfo.arguments.contains("--mwdat-investigation")
   private static let lock = NSLock()
   private static var sequence = 0
   private static let runId = UUID().uuidString
