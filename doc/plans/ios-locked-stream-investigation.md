@@ -468,3 +468,67 @@ sequence with existing instrumentation, then prepare any implementation plan.
 Restored background streaming to off and left the normal release idle. No code,
 transport, codec, watchdog threshold or audio policy changes were made.
 Agent Access was restored to off after the repeat.
+
+### Instrumented follow-up — 17:08 and 17:09 Europe/Madrid
+
+User selected tracing and a fix plan, with glasses worn and connected. Installed
+the signed release with the existing opt-in Dart/native investigation flags;
+RAW / medium / 30 FPS and Bluetooth Classic remained unchanged. Native run ID
+`511FE80A-5A21-4304-AED3-6D497551A8ED`, process 82727. Captured native console and
+filtered Dart syslog separately; merged tagged records are retained locally in
+`/var/folders/wg/f2_rmttd7mjg7wxjybfjbz000000gn/T/dat-recovery-trace-2_r1ypsm/trial.json`.
+This temporary artifact is not committed and may be removed by macOS cleanup.
+
+Native sequence 1–116 is complete. Dart sequence 1–112 has missing records 26–32
+in the first interval; the second interval's records 35–112 are complete. These
+are trace records, not frame payloads. No audio interruption event was recorded;
+that absence does not exclude an SDK, transport or scheduling problem.
+
+First background interval: 17:08:04.453 to 17:08:56.603, **52.150 seconds** by
+native monotonic timestamps. Two camera errors coalesced into one recovery; the
+replacement first frame arrived 5.199 seconds after background entry. After 1,272
+frames, an SDK arrival stall at +51.676 seconds triggered another recovery across
+unlock. The next camera delivered its first frame at 17:08:59.513. Post-unlock
+diagnostics showed 28 received FPS and 27.5 submissions/sec. Automatic recovery
+was observed, but delivery was interrupted and the missing Dart records limit
+analysis of that first interval.
+
+Second interval: native background at 17:09:35.638, foreground at 17:12:11.576,
+**155.939 seconds** by monotonic timestamps. The requested wait was 30 seconds;
+actual time also included user-response latency. No manual Start/Stop occurred
+between intervals. The decisive failure occurred within the first 17 seconds:
+
+| Seconds after background entry | Captured event |
+| --- | --- |
+| +1.274 onward | 36 native `videoStreamingError` callbacks |
+| +2.292 | Dart schedules one recovery; duplicate errors share it |
+| +8.455 | Native reports `sdkFramesStopped` after 1,064 frames |
+| +9.135 | Dart begins its one executed recovery attempt |
+| +9.143 | Dart begins teardown |
+| +10.857 | Native receives stop request |
+| +11.812 | Native camera teardown begins |
+| +11.891 | A late frame arrives during teardown after a 9.358-second gap |
+| +13.847 | Dart recovery watchdog expires while stop is pending |
+| +13.930 | Recovery cancellation invalidates the intended restart |
+| +15.132 | Native device-session error is received |
+| +15.139 | Native requests `unexpectedError`, with no current camera ID |
+| +15.170 | Native device session reports stopped |
+| +16.404 | Dart teardown completes; no replacement start follows |
+
+The nominal 400 ms backoff took **6.843 seconds** to execute. The existing
+10-second watchdog starts when backoff is scheduled, so it consumed delayed
+backoff and pending teardown before a replacement start could even be attempted.
+The 36-error burst correctly consumed one actual recovery attempt: the existing
+burst-accounting fix held. At unlock the app visibly showed the stopped
+placeholder.
+
+In this capture the SDK `unexpectedError` arrived **after** Dart had abandoned
+recovery. It did not initiate that cancellation. Its description was intentionally
+not logged, and this trace does not prove the earlier normal-release device-ended
+banner had the same ordering. Instrumentation, USB and console capture can affect
+scheduling. The physical cause of SDK interruptions remains unresolved.
+
+Prepared [a separate recovery-deadline implementation plan](ios-recovery-watchdog-phases.md).
+No behavioral changes were applied. Restored background streaming off, stopped
+both collectors, installed and launched the normal release without investigation
+flags, verified its idle screen and off toggle, and restored Agent Access off.
