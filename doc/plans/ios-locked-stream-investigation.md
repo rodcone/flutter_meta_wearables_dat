@@ -386,7 +386,8 @@ camera `BAD6E223-1C39-4A5C-B124-A17CABC18E41`, 266 received frames, SDK 28.5 FPS
 16:12:28. The user later replied unlocked; the first fresh observation was at
 16:45:43, about 33 minutes after the command. This elapsed observation window
 must not be reported as a measured continuous lock interval: no lifecycle trace
-was collected and uninterrupted wear/connection/lock conditions are unconfirmed.
+was collected. The user subsequently confirmed that the glasses were removed or
+disconnected during the interval; continuous wear/connection was not maintained.
 
 At inspection the app showed the stopped placeholder, no current session/texture,
 and background streaming still enabled. Retained frame-stall snapshot:
@@ -402,8 +403,11 @@ A replacement camera delivered frames during this run, but the app was stopped
 at inspection. The retained snapshot alone does not establish final stop time,
 retry count, retry exhaustion, or a terminal SDK error. This comparison cannot be
 marked a pass for background continuity or a controlled 30-second test, and does
-not overturn the instrumented proof that error-burst coalescing works. Asked the
-user whether the phone stayed locked and glasses stayed connected/worn throughout.
+not overturn the instrumented proof that error-burst coalescing works. The user's
+confirmation that the glasses were removed or disconnected makes this run
+inconclusive for background reliability under continuous wear/connection. It is
+not evidence of a recovery regression. The timing of removal/disconnection is
+unknown, so it cannot be assigned as the cause of the retained stall or final stop.
 No further code change is justified from this snapshot alone. Background streaming
 was restored to off and the normal release left idle; the retained diagnostics
 were preserved. Mirror sessions reconnected several times during inspection,
