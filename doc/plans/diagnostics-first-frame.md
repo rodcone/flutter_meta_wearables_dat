@@ -195,7 +195,7 @@ delays after STREAMING; do not shorten it merely to make tests faster.
 - The CocoaPods host used an isolated XDG config directory; the maintainer's
   global SwiftPM setting remains enabled.
 
-Physical checks above remain outstanding. The 10-second first-frame threshold
+Physical checks are partially complete; see results below. The 10-second first-frame threshold
 is a conservative policy; existing intermittent iOS locked-background termination
 is not claimed fixed by this diagnostics change.
 
@@ -208,5 +208,50 @@ User-reported results on the connected iPhone 17, Bluetooth Classic:
 - Test 2 passed: two stop/start cycles, session identity and counters reset.
 - Test 3 passed: background opt-out stops the stream and manual restart works.
 - User found diagnostics partly covered by the floating Settings button while
-  idle. Move diagnostics into the same floating-button row; device confirmation
-  of this layout fix and background opt-in QA remain pending.
+  idle. Diagnostics now shares the floating-button row; the user confirmed the
+  fix, and subsequent agent-controlled QA also verified both buttons are visible.
+
+### Agent-controlled iOS background QA (2026-10-13)
+
+Signed release build, no debugger, iPhone 17 on iOS 27.0, connected/worn glasses,
+Bluetooth Classic, RAW, medium, requested 30 FPS, background streaming enabled.
+Phone actions and diagnostics were observed through iPhoneMirror. The user only
+unlocked the phone when requested, without tapping Start or Stop.
+
+- Foreground baseline: session `9F44A44C-8834-481D-8586-8DE3C287918B`,
+  28 SDK FPS / 26 submission FPS, moving preview, no current stall.
+- Home/return passed: approximately 32 seconds between Home and return
+  observations; same session, frames continued, no new retained stall. Rates
+  settled to 27.5 SDK FPS / 24.5 submission FPS after returning.
+- First lock cycle failed uninterrupted streaming but recovered automatically:
+  baseline session retained a background `sdkFramesStopped` snapshot with an
+  SDK frame age of 1,686,089 us, 2,515 received / 1,534 submitted frames, and
+  queue depth 0 / peak 1. On unlock, moving video used a new session,
+  `AED58D24-8ED1-43A2-84F8-7616C03E7EAE`, without a manual restart.
+- Second lock cycle failed recovery: on unlock the app was stopped and showed
+  the idle placeholder, not a frozen preview. The last retained failure belonged
+  to another session, `B13E19D6-A841-4B6F-BC72-7A92D2B72602`, with background
+  `sdkFramesStopped`, SDK frame age 3,390,454 us, 2,059 received / 0 submitted
+  frames, first-frame wait 862,307 us, and queue depth 0 / peak 1. Zero texture
+  submissions are expected for a session running entirely in the background.
+- Both retained lock snapshots showed empty audio inputs and A2DP output.
+  Further session changes and the final stopped state are consistent with
+  bounded retries, but the snapshots alone do not establish the exact retry
+  count or the final terminating event.
+- Manual restart passed: new session `0C7A8620-C80C-4CF2-ACB3-FBF77E4A4E2A`,
+  moving preview, 27.5 SDK FPS / 26 submission FPS, no current stall. Closing
+  diagnostics preserved moving video. The stream was then stopped deliberately.
+
+Each lock interval included a timed 30-second wait before requesting manual
+unlock. Actual locked durations were longer due to user response time: the
+lock-command to post-unlock-observation intervals were approximately 72 and
+108 seconds. These were not precisely 30-second lock tests.
+
+Diagnostics preserved useful pre-recovery evidence, but reliable locked
+streaming remains unverified and failed in this run. An SDK arrival gap does
+not distinguish transport trouble from SDK/OS scheduling; an empty plugin queue
+does not establish the root cause. No code fix is claimed by this QA result.
+Android device QA, low-FPS hardware checks, and fold/unfold checks remain pending.
+No phone screenshots or incidental scene content were saved in the repository.
+The app was left idle, the background-streaming preference unchanged, and
+iPhoneMirror Agent Access restored to off.
