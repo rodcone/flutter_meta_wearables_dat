@@ -678,6 +678,56 @@ void stopFrameProcessing() => _processing = false;
 
 **Note:** See the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) for a complete implementation.
 
+### Stream diagnostics (unreleased)
+
+Use `MetaWearablesDat.getDiagnostics()` to inspect streaming in a release build,
+without a debugger or a `videoFramesStream()` subscription:
+
+```dart
+final diagnostics = await MetaWearablesDat.getDiagnostics();
+print(diagnostics.toMap()); // JSON-compatible; duration keys end in Us
+```
+
+The snapshot includes a per-camera session ID, native state, requested settings,
+effective codec, background flags, SDK arrival and texture submission counts,
+rolling rates, actual frame ages, first-frame wait and a typed stall reason.
+Rates use bounded 100 ms buckets over approximately two seconds; they become
+zero when delivery stops. Texture submissions do not prove that frames were
+shown on screen. Android always uses the raw codec, even when hvc1 was requested.
+
+iOS also exposes queue depth and current audio input/output **port types**.
+Android returns null for these unsupported fields. Audio device names and unique
+identifiers are excluded. Reading the route never activates or reconfigures it.
+The method is safe before Android SDK initialization: it does not request
+permissions or start a session. Idle snapshots have zero counts and null session
+metrics. Reads do not reset counters or influence watchdogs.
+
+`frameStalled` errors now carry optional `stallReason` and `diagnostics` fields:
+
+| Reason | Detection while the native state is streaming |
+| --- | --- |
+| `firstFrameTimeout` | No SDK frame after 10 eligible seconds |
+| `sdkFramesStopped` | More than 1.5 seconds since the last SDK frame |
+| `textureSubmissionsStopped` | SDK frames arrive but no texture submission for more than 6 seconds |
+
+The first-frame deadline excludes connection/STARTING time, SDK pauses, long
+watchdog scheduling gaps and foreground grace. Ten seconds is a conservative
+plugin threshold, not an SDK guarantee. Background opt-in still expects SDK
+frames, but does not require texture submissions. Each first-frame timeout is
+reported once per camera session; a late first frame clears it. Existing
+post-first-frame stalls re-arm after delivery recovers. Older error payloads
+without the optional fields continue to work.
+
+If a stall persists, explicitly stop and start the session and use the new
+texture ID. The plugin does not restart automatically. The example allows at
+most three frame-stall recovery attempts per manual start, even if the SDK keeps
+reporting streaming without delivering frames.
+
+In the example, tap the diagnostics icon at the top right of the stream screen.
+The panel polls once per second only while open and foregrounded. **Copy** copies
+the current snapshot plus the latest frame-stall snapshot, retained across
+recovery. Nothing is uploaded automatically.
+
 ## Optional: mock device add-on
 
 Meta gates registration on real glasses, so during development it's often handy to pair against a simulated Ray-Ban Meta backed by the phone's camera. That capability lives in the optional [`flutter_meta_wearables_dat_mock_device`](flutter_meta_wearables_dat_mock_device/) package — same repo, separate plugin. Apps that don't depend on it never link `MWDATMockDevice.xcframework` / `mwdat-mockdevice`, which is what allows the core plugin to ship without `NSCameraUsageDescription` (iOS) or the `CAMERA` permission (Android).

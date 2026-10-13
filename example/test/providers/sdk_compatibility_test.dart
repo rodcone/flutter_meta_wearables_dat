@@ -53,6 +53,53 @@ void main() {
     }
   });
 
+  testWidgets('first-frame recovery stops first and has a bounded budget', (
+    tester,
+  ) async {
+    final device = DeviceProvider();
+    final mock = MockDeviceProvider();
+    final stream = StreamSessionProvider(device, mock);
+    await tester.pump();
+    await stream.startStreamSession();
+    await tester.pump();
+    for (var attempt = 0; attempt < 4; attempt++) {
+      // A nominal streaming transition must not refresh the frame-stall budget.
+      await messenger.handlePlatformMessage(
+        'flutter_meta_wearables_dat/stream_session_state',
+        const StandardMethodCodec().encodeSuccessEnvelope(4),
+        (_) {},
+      );
+      await tester.pump();
+      await messenger.handlePlatformMessage(
+        'flutter_meta_wearables_dat/stream_session_errors',
+        const StandardMethodCodec().encodeSuccessEnvelope({
+          'code': 'frameStalled',
+          'message': 'No first frame',
+          'stallReason': 'firstFrameTimeout',
+          'diagnostics': {'sessionId': 'failed-$attempt', 'framesReceived': 0},
+        }),
+        (_) {},
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+    }
+    expect(starts, 4, reason: 'Initial start plus three recoveries');
+    expect(
+      stops,
+      4,
+      reason: 'Stop before each recovery, then terminal teardown',
+    );
+    expect(stream.textureId, isNull);
+    expect(stream.isRecovering, isFalse);
+    expect(stream.lastFailureDiagnostics!.sessionId, 'failed-3');
+    await tester.pump(const Duration(seconds: 20));
+    expect(starts, 4);
+    stream.dispose();
+    device.dispose();
+    mock.dispose();
+    await tester.pump();
+  });
+
   for (final code in ['dwaOutOfStuRange', 'insufficientSDKVersion']) {
     testWidgets('$code follows its warning or terminal lifecycle', (
       tester,

@@ -118,6 +118,7 @@ class StreamSessionProvider extends ChangeNotifier {
   // concurrent teardown.
   bool _isTearingDown = false;
   int _recoveryAttempts = 0;
+  int _frameStallRecoveryAttempts = 0;
   Timer? _recoveryBackoffTimer;
   Timer? _recoveryWatchdogTimer;
 
@@ -480,7 +481,12 @@ class StreamSessionProvider extends ChangeNotifier {
     return _setStreamError(error);
   }
 
+  /// Retained across automatic recovery so the failure remains inspectable.
+  StreamDiagnostics? get lastFailureDiagnostics => _lastFailureDiagnostics;
+  StreamDiagnostics? _lastFailureDiagnostics;
+
   Future<void> _setStreamError(StreamSessionError error) async {
+    if (error.diagnostics != null) _lastFailureDiagnostics = error.diagnostics;
     if (error.code == 'dwaOutOfStuRange') {
       // Compatibility advice must not interrupt a usable stream or recovery.
       _lastError = error;
@@ -509,7 +515,9 @@ class StreamSessionProvider extends ChangeNotifier {
     final isRecoverable = _recoverableStreamErrors.contains(error.code);
     if (_streamingIntended &&
         isRecoverable &&
-        _recoveryAttempts < _maxRecoveryAttempts) {
+        _recoveryAttempts < _maxRecoveryAttempts &&
+        (!error.isFrameStalled ||
+            _frameStallRecoveryAttempts < _maxRecoveryAttempts)) {
       _scheduleRecovery(error);
       return;
     }
@@ -580,6 +588,7 @@ class StreamSessionProvider extends ChangeNotifier {
 
   void _scheduleRecovery(StreamSessionError error) {
     _recoveryAttempts++;
+    if (error.isFrameStalled) _frameStallRecoveryAttempts++;
     _isRecovering = true;
     // Suppress the error banner while we retry; the UI shows a lightweight
     // "Reconnecting…" state driven by [isRecovering] instead.
@@ -619,12 +628,20 @@ class StreamSessionProvider extends ChangeNotifier {
     // state stream reaches `streaming` (see the state subscription), which
     // clears the recovery flags; a fresh async error re-enters [_setError] and
     // drives the next attempt.
+    // A frame-stalled stream may still report STREAMING, including one that
+    // never produced a frame. An explicit stop guarantees a new camera/texture.
+    if (error.isFrameStalled) {
+      await _teardownSession();
+      if (!_streamingIntended) return;
+    }
     final started = await startStreamSession();
     if (started || !_streamingIntended) return;
 
     // Synchronous failure with no error event (e.g. the device session could
     // not be started): retry or give up.
-    if (_recoveryAttempts >= _maxRecoveryAttempts) {
+    if (_recoveryAttempts >= _maxRecoveryAttempts ||
+        (error.isFrameStalled &&
+            _frameStallRecoveryAttempts >= _maxRecoveryAttempts)) {
       _cancelRecovery();
       _lastError = error;
       notifyListeners();
@@ -646,7 +663,10 @@ class StreamSessionProvider extends ChangeNotifier {
   /// recovery restart, which runs while [_isRecovering]) refreshes the
   /// recovery budget and marks intent to keep streaming.
   Future<bool> startStreamSession() async {
-    if (!_isRecovering) _recoveryAttempts = 0;
+    if (!_isRecovering) {
+      _recoveryAttempts = 0;
+      _frameStallRecoveryAttempts = 0;
+    }
     _streamingIntended = true;
     try {
       // Set camera feed if video is selected (only for mock devices)
@@ -676,7 +696,9 @@ class StreamSessionProvider extends ChangeNotifier {
                 _textureId = null;
               } else if (state == StreamSessionState.streaming) {
                 // A (re)established stream confirms recovery succeeded: clear
-                // the in-flight recovery and refresh the retry budget.
+                // the in-flight recovery and refresh the SDK retry budget.
+                // Frame-stall retries retain their separate per-manual-start
+                // limit: STREAMING alone does not prove frames arrived.
                 _recoveryAttempts = 0;
                 _cancelRecovery();
               }

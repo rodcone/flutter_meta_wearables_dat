@@ -90,13 +90,13 @@ Communication:
 | `insufficientSDKVersion` | Terminal: the app must update to a supported DAT SDK. Do not retry the same session. |
 | `dwaOutOfStuRange` | Nonblocking compatibility warning; keep streaming and optionally suggest an app update. |
 | `audioStreamingError` | iOS SDK audio error; camera audio streaming is not enabled by this plugin. |
-| `frameStalled` | The stream still reports `streaming` but no frame has arrived for ~1.5s — the preview is frozen. Raised by the plugin, not the SDK. Recover with `stopStreamSession()` then `startStreamSession()`, and use the new texture ID |
+| `frameStalled` | Native `streaming` with no first frame after 10 eligible seconds, an SDK gap >1.5s, or a foreground texture submission gap >6s. Raised by the plugin, not the SDK. Recover with `stopStreamSession()` then `startStreamSession()`, and use the new texture ID |
 
 Photo-capture failure never appears here — it rejects the `capturePhoto()` future instead (`CAPTURE_PHOTO_FAILED`, with `details` carrying the granular reason).
 
 Codes that leave the stream dead with no auto-resume need a **teardown**, not a retry: clear your texture ID and streaming flag, or the `Texture` widget freezes on its last frame. Those are `hingesClosed`, `permissionDenied`, `thermalEmergency`, `peakPowerShutdown`, `batteryCritical`, `deviceThermalEmergency`, `devicePeakPowerShutdown`, `deviceBatteryCritical`, `sessionEndedByDevice` and `insufficientSDKVersion`.
 
-`frameStalled` is not in that list either, but it needs the opposite of a teardown-and-stop: the stream was never stopped, so nothing will ever clear it. Restart — `stopStreamSession()` then `startStreamSession()` — and take the new texture ID. The plugin deliberately does not restart for you, because that would change the texture ID under a widget still rendering the old one. Do **not** try to detect this yourself by rasterising frames and comparing pixels: a frozen stream and a motionless scene produce identical bytes.
+`frameStalled` may recover if delivery resumes. If it persists, restart with `stopStreamSession()` then `startStreamSession()` and take the new texture ID. The plugin does not restart automatically. Use its typed stall reason and diagnostics; comparing pixels cannot distinguish a frozen stream from a motionless scene.
 
 `thermalCritical` and `deviceThermalCritical` are **not** in that list — they pause rather than end the stream, and the session stays up. Treat them as a warning (surface it, keep rendering) and use `deviceStateStream()` to react before the device reaches the emergency tier.
 
@@ -587,3 +587,26 @@ iOS: Wi-Fi never prompts, or one transport streams unreliably?
 - [Version Dependencies](https://wearables.developer.meta.com/docs/version-dependencies)
 - [Example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example)
 - [pub.dev](https://pub.dev/packages/flutter_meta_wearables_dat)
+
+## Read-only stream diagnostics (unreleased)
+
+`await MetaWearablesDat.getDiagnostics()` works without frame subscriptions and
+is safe before SDK initialization. `StreamDiagnostics` reports per-camera
+identity, state/configuration, actual arrival/submission counts and ages, rolling
+approximately two-second rates and background flags. Submitted does not mean
+displayed. Idle session metrics are null/zero. iOS-only audio port types and queue
+depth are null on Android; reading audio routing has no activation side effect.
+Use `toMap()` for a report; wire durations explicitly end in `Us`.
+
+`StreamSessionError.stallReason` is optional: `firstFrameTimeout` (10 eligible
+streaming seconds with no frame), `sdkFramesStopped` (>1.5s arrival gap), or
+`textureSubmissionsStopped` (>6s submission gap, foreground only). The optional
+`diagnostics` snapshot is captured before recovery. Ignore unknown optional
+fields from future versions. First-frame timing excludes STARTING, PAUSED,
+long watchdog scheduling gaps and foreground grace. A late first frame clears
+the reason; post-first-frame stalls may also recover automatically. If a stall
+persists, stop then start explicitly and use the new texture ID. Do not compare
+pixels to detect a stall. The example keeps a maximum of three frame-stall
+retries per manual start and retains the failure snapshot in its diagnostics
+panel. Poll only while the panel is open/foreground; never subscribe to frame
+bytes just to measure health.

@@ -1,3 +1,17 @@
+## Unreleased
+
+### Added
+- Read-only `getDiagnostics()` API with typed stream counters, rolling rates, actual frame ages, session identity, requested/effective settings and background state. iOS also reports queue depth and privacy-limited audio port types.
+- Optional typed `stallReason` and a pre-recovery diagnostics snapshot on `frameStalled` errors, including a first-frame timeout after 10 eligible streaming seconds.
+- Example diagnostics panel with foreground-only polling and manual report copying.
+
+### Fixed
+- Detect a native stream that reports streaming but never produces its first frame; exclude SDK pauses, long scheduling gaps and foreground grace.
+- Explicitly stop before example frame-stall recovery and limit those retries to three per manual start, even across nominal streaming transitions.
+
+### Changed
+- Replace the example's blanket Bluetooth Classic 15 fps guidance with device/transport-specific diagnostics guidance.
+
 ## 1.0.0
 
 - Promote the tested release candidate to stable 1.0.0 with DAT 1.0.0 on iOS and Android; no runtime changes from 1.0.0-rc.1.
