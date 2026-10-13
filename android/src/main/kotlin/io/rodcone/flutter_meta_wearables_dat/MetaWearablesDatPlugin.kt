@@ -367,6 +367,8 @@ class MetaWearablesDatPlugin :
         // but nothing was drawn. Measure the push clock from here, or the first
         // watchdog tick reports the whole background window as a stall.
         frameProcessor.resyncPushClock()
+        diagnostics?.resumeGrace()
+        foregroundGraceUntil = System.nanoTime() + frameStallTimeoutMs * 1_000_000L
         // Deliberately nothing else. With background streaming off the session
         // is stopped and stays stopped; the plugin never restarts the glasses
         // camera on its own. Do not add a resume here.
@@ -404,6 +406,7 @@ class MetaWearablesDatPlugin :
             "capturePhoto" -> capturePhoto(call, result)
             "enableBackgroundStreaming" -> enableBackgroundStreaming(call, result)
             "disableBackgroundStreaming" -> disableBackgroundStreaming(result)
+            "getDiagnostics" -> result.success(diagnosticsSnapshot())
             "isBackgroundStreamingEnabled" -> result.success(backgroundStreamingStarted)
             "openDATGlassesAppUpdate" -> openDATGlassesAppUpdate(result)
             else -> result.notImplemented()
@@ -1336,6 +1339,16 @@ class MetaWearablesDatPlugin :
                     return@launch
                 }
                 val newStream = newCamera.stream
+                val tracker = StreamDiagnosticsTracker()
+                diagnostics = tracker
+                diagnosticsConfiguration = mapOf("requestedFrameRate" to fps,
+                    "requestedQuality" to (args?.get("streamQuality") as? String ?: "high"),
+                    "requestedCodec" to (videoCodec ?: "raw"), "effectiveCodec" to "raw")
+                diagnosticsStateJob = scope.launch {
+                    newStream.state.collect { state ->
+                        tracker.stateChanged(state == com.meta.wearable.dat.camera.types.StreamState.STREAMING)
+                    }
+                }
 
                 camera = newCamera
                 stream = newStream
@@ -1349,6 +1362,7 @@ class MetaWearablesDatPlugin :
                                 // "is the SDK still delivering?", which must
                                 // stay true whatever the plugin then does with
                                 // the frame. The stall watchdog reads it.
+                                tracker.noteArrival()
                                 frameProcessor.noteArrival()
                                 NativeVideoFrameConsumers.dispatch(videoFrame)
                                 if (frameProcessor.needsBufferSizeUpdate(
@@ -1376,7 +1390,7 @@ class MetaWearablesDatPlugin :
                                 if (videoFrameStreamHandler.hasListener) {
                                     emitVideoFrame(videoFrame)
                                 }
-                                frameProcessor.processFrame(videoFrame, surface)
+                                frameProcessor.processFrame(videoFrame, surface, tracker::noteSubmission)
                             }
                         }
 
@@ -1681,21 +1695,30 @@ class MetaWearablesDatPlugin :
 
     // region Frame stall watchdog
 
-    /**
-     * Longest gap tolerated between frames while the stream still reports
-     * STREAMING. The SDK raises nothing when delivery just stops, so without
-     * this a frozen preview is indistinguishable from a static scene and an app
-     * can only find out by diffing pixels. Kept identical to iOS, where device
-     * measurements sized it: arrivals ~34 ms apart, worst legitimate gap 222 ms.
-     */
+    private var diagnostics: StreamDiagnosticsTracker? = null
+    private var diagnosticsConfiguration = emptyMap<String, Any>()
+    private var diagnosticsStateJob: Job? = null
+    private var foregroundGraceUntil = 0L
+
+    private fun diagnosticsSnapshot(): Map<String, Any> {
+        val result = mutableMapOf<String, Any>(
+            "sessionState" to (stream?.state?.value?.let { StreamStateStreamHandler.mapState(it) } ?: 1),
+            "framesReceived" to 0, "framesSubmitted" to 0, "waitingForFirstFrame" to false,
+            "isAppInBackground" to isAppInBackground,
+            "backgroundStreamingEnabled" to backgroundStreamingStarted
+        )
+        diagnostics?.let { result.putAll(it.snapshot()); result.putAll(diagnosticsConfiguration) }
+        return result
+    }
+
+    private fun reportStall(reason: String, message: String) {
+        diagnostics?.setStallReason(reason)
+        streamSessionErrorStreamHandler?.sendError("frameStalled", message,
+            stallReason = reason, diagnostics = diagnosticsSnapshot())
+    }
+
     private val frameStallTimeoutMs = 1_500L
 
-    /**
-     * Longer for the "arriving but not rendering" half. That is a plugin fault
-     * rather than a transport one, and reporting it spuriously would make an app
-     * restart a healthy stream — worse than staying quiet.
-     */
-    private val framePushStallTimeoutMs = 6_000L
     private val frameStallPollIntervalMs = 1_000L
 
     /**
@@ -1740,8 +1763,13 @@ class MetaWearablesDatPlugin :
         // The background path drops frames on purpose and says so already.
         if (mustNotStreamNow) return
 
+        if (System.nanoTime() < foregroundGraceUntil) return
+        if (diagnostics?.pollFirstFrame() == true) {
+            reportStall("firstFrameTimeout", "No first video frame after 10 eligible seconds in streaming state. Restart the session if delivery does not resume.")
+            return
+        }
         val stats = frameProcessor.liveness()
-        // A stream that has not produced its first frame yet is starting up.
+        // The first-frame deadline above handles sessions with no arrival yet.
         val sinceArrival = stats.sinceArrivalNanos ?: return
 
         // With background streaming on, frames keep arriving while the surface
@@ -1752,12 +1780,10 @@ class MetaWearablesDatPlugin :
         // single frame would otherwise read as healthy forever.
         val sincePush = stats.sincePushNanos ?: stats.sinceFirstArrivalNanos ?: sinceArrival
         val arrivalStalled = sinceArrival > frameStallTimeoutMs * 1_000_000L
-        val stalled =
-                arrivalStalled ||
-                        (pushIsMeaningful &&
-                                sincePush > framePushStallTimeoutMs * 1_000_000L)
+        val reason = StreamDiagnosticsTracker.deliveryStall(
+            sinceArrival / 1e9, sincePush / 1e9, !pushIsMeaningful)
 
-        if (!stalled) {
+        if (reason == null) {
             didReportFrameStall = false
             return
         }
@@ -1782,13 +1808,18 @@ class MetaWearablesDatPlugin :
                             "This is a plugin fault — please report it."
                 }
         Log.w(TAG, "Frame stall detected — $message")
-        streamSessionErrorStreamHandler?.sendError("frameStalled", message)
+        reportStall(reason, message)
     }
 
     // endregion
 
     private fun teardownStreamOnlyLocked() {
         cancelFrameWatchdog()
+        diagnosticsStateJob?.cancel()
+        diagnosticsStateJob = null
+        diagnostics?.stateChanged(false)
+        diagnostics = null
+        diagnosticsConfiguration = emptyMap()
         videoJob?.cancel()
         videoJob = null
         streamErrorJob?.cancel()

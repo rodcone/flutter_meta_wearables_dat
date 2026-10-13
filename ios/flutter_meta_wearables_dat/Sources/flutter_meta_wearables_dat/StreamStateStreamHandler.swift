@@ -109,7 +109,7 @@ class StreamStateStreamHandler: NSObject, FlutterStreamHandler {
   private static let stoppedValue = 1
 
   /// Maps StreamState to the int values expected by Dart.
-  private static func stateToInt(_ state: StreamState) -> Int {
+  static func stateToInt(_ state: StreamState) -> Int {
     switch state {
     case .stopping:         return 0
     case .stopped:          return 1

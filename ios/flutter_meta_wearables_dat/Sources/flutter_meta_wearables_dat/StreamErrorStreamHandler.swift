@@ -104,6 +104,14 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     }
   }
 
+  // Called on the platform thread before recovery can replace the session.
+  @MainActor
+  func sendFrameStall(message: String, reason: String, diagnostics: [String: Any]) {
+    guard !isStoppingForBackground else { return }
+    eventSink?(["code": "frameStalled", "message": message,
+                "stallReason": reason, "diagnostics": diagnostics])
+  }
+
   /// Maps a `DeviceSessionError` onto the Flutter channel. Matches the
   /// naming used by the native enum so Dart consumers can reason about
   /// failures uniformly across layers.

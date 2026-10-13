@@ -3,6 +3,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_meta_wearables_dat/meta_wearables_dat_platform_interface.dart';
+import 'package:flutter_meta_wearables_dat/src/stream_diagnostics.dart';
+
+export 'src/stream_diagnostics.dart';
 
 /// Represents the current state of user registration with the Meta Wearables platform.
 enum RegistrationState {
@@ -187,7 +190,8 @@ class StreamSessionError {
   ///   terminal [StreamSessionState.stopped] follows. Not a fault.
   /// - `frameStalled` — the stream still reports
   ///   [StreamSessionState.streaming] but no video frame has arrived for
-  ///   1.5 seconds, so frame delivery is stalled. Short stalls can recover
+  ///   1.5 seconds, no first frame arrived after 10 eligible streaming seconds,
+  ///   or texture submissions stopped for 6 seconds. Short stalls can recover
   ///   without a state transition; the plugin reports each detected episode
   ///   once and re-arms after frame arrival and texture delivery are healthy
   ///   again. If delivery does not resume, call
@@ -205,7 +209,18 @@ class StreamSessionError {
   /// A human-readable description of the error.
   final String message;
 
-  const StreamSessionError({required this.code, required this.message});
+  const StreamSessionError({
+    required this.code,
+    required this.message,
+    this.stallReason,
+    this.diagnostics,
+  });
+
+  /// Typed detail for plugin frame stalls; absent in older native payloads.
+  final StreamStallReason? stallReason;
+
+  /// Snapshot captured before a frame-stall event, preserved across recovery.
+  final StreamDiagnostics? diagnostics;
 
   /// Returns true if the device's thermal state has reached a critical level.
   bool get isThermalCritical => code == 'thermalCritical';
@@ -222,8 +237,8 @@ class StreamSessionError {
   /// Returns true if camera permission was denied.
   bool get isPermissionDenied => code == 'permissionDenied';
 
-  /// Returns true if the stream is still nominally streaming but has stopped
-  /// delivering frames, leaving the `Texture` frozen on its last frame.
+  /// Whether a nominally streaming session has no first frame, stalled SDK
+  /// delivery, or stalled texture submissions.
   ///
   /// Recoverable: stop the session and start a new one. The plugin will not do
   /// that for you, because a restart changes the texture ID.
@@ -744,6 +759,14 @@ class VideoFrame {
 
 /// The main class for the Meta Wearables DAT.
 class MetaWearablesDat {
+  /// Reads native stream counters and timing without changing stream behavior.
+  ///
+  /// Safe before initialization. Does not request permissions, subscribe to
+  /// frame bytes or activate audio. Idle snapshots have zero counters and null
+  /// session metrics. See [StreamDiagnostics] for platform availability.
+  static Future<StreamDiagnostics> getDiagnostics() =>
+      MetaWearablesDatPlatform.instance.getDiagnostics();
+
   /// Requests the Android runtime permissions required by the DAT SDK
   /// (Bluetooth, Internet). Returns true if all permissions are granted.
   /// No-op on iOS.

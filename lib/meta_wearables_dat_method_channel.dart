@@ -57,6 +57,14 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   );
 
   @override
+  Future<StreamDiagnostics> getDiagnostics() async {
+    final map = await methodChannel.invokeMapMethod<Object?, Object?>(
+      'getDiagnostics',
+    );
+    return StreamDiagnostics.fromMap(map ?? const {});
+  }
+
+  @override
   Future<bool> requestAndroidPermissions() async {
     final ok = await methodChannel.invokeMethod<bool>(
       'requestAndroidPermissions',
@@ -230,6 +238,12 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
       final err = StreamSessionError(
         code: map['code'] as String,
         message: map['message'] as String,
+        stallReason: StreamStallReason.fromValue(map['stallReason']),
+        diagnostics: map['diagnostics'] is Map
+            ? StreamDiagnostics.fromMap(
+                Map<Object?, Object?>.from(map['diagnostics'] as Map),
+              )
+            : null,
       );
       if (kDebugMode) {
         debugPrint(

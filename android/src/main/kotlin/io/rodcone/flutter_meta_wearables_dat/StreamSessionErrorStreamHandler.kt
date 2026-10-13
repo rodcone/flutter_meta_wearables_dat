@@ -85,12 +85,16 @@ internal class StreamSessionErrorStreamHandler : EventChannel.StreamHandler {
      * must reach Dart even though it opens the suppression window immediately
      * afterwards.
      */
-    fun sendError(code: String, message: String, bypassSuppression: Boolean = false) {
+    fun sendError(code: String, message: String, bypassSuppression: Boolean = false,
+                  stallReason: String? = null, diagnostics: Map<String, Any>? = null) {
         if (!bypassSuppression && isStoppingForBackground) {
             Log.d(TAG, "suppressed '$code' during background stop")
             return
         }
-        eventSink?.success(mapOf("code" to code, "message" to message))
+        val payload = mutableMapOf<String, Any>("code" to code, "message" to message)
+        stallReason?.let { payload["stallReason"] = it }
+        diagnostics?.let { payload["diagnostics"] = it }
+        eventSink?.success(payload)
     }
 
     /**

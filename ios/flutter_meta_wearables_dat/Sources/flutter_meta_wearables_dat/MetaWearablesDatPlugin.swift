@@ -120,6 +120,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var teardownSeq = 0
   // Frame arrival/push clocks for the stall watchdog, lock-guarded because the
   // SDK's frame queue writes them and the main actor reads them.
+  private var diagnostics: StreamDiagnosticsTracker?
+  private var diagnosticsConfiguration: [String: Any] = [:]
+  private var diagnosticsStateToken: AnyListenerToken?
+  private var foregroundGraceUntil = 0.0
   private let liveness = FrameLivenessTracker()
   // Plugin-owned buffers for the `raw` path, so the SDK's pool is never held.
   // See FramePixelBufferPool for why this is not zero-copy any more.
@@ -135,10 +139,6 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // stream was back to `.streaming` in 0.4 s on device, so detection dominates
   // the visible freeze and is the part worth shortening.
   private let frameStallTimeout: TimeInterval = 1.5
-  // Longer for the "arriving but not rendering" half: returning from background
-  // on `hvc1` rebuilds the decoder, which emits nothing until the next
-  // keyframe, and a false positive would make an app restart a healthy stream.
-  private let framePushStallTimeout: TimeInterval = 6.0
   private let frameStallPollInterval: TimeInterval = 1.0
   private var frameWatchdogTask: Task<Void, Never>?
   private var didReportFrameStall = false
@@ -311,6 +311,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         capturePhoto(call: call, result: result)
       case "getRegistrationState":
         getRegistrationState(result: result)
+      case "getDiagnostics":
+        Task { @MainActor in result(self.diagnosticsSnapshot()) }
       case "getDevices":
         getDevices(result: result)
       case "enableBackgroundStreaming":
@@ -882,15 +884,35 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// leaving a stream that had been started in the meantime running.
   // MARK: - Frame Stall Watchdog
 
-  /// Watches for a stream that reports `.streaming` while no frames arrive.
-  ///
-  /// Neither SDK surfaces this: `errorStream` stays quiet, the state stays
-  /// `.streaming`, and the `Texture` holds its last frame forever — so the only
-  /// way an app could notice was to rasterise the texture and compare pixels,
-  /// which cannot tell a frozen stream from someone holding still.
-  ///
-  /// Reporting only. A restart mints a new texture id, and swapping that under
-  /// a live widget is the app's call, not the plugin's.
+  /// Read-only snapshot; frame metrics are coherent under the tracker lock.
+  @MainActor
+  private func diagnosticsSnapshot() -> [String: Any] {
+    var result: [String: Any] = [
+      "sessionState": streamSession.map { StreamStateStreamHandler.stateToInt($0.state) } ?? 1,
+      "framesReceived": 0, "framesSubmitted": 0, "waitingForFirstFrame": false,
+      "isAppInBackground": isInBackground,
+      "backgroundStreamingEnabled": backgroundController.isEnabled
+    ]
+    if let diagnostics {
+      result.merge(diagnostics.snapshot()) { _, new in new }
+      result.merge(diagnosticsConfiguration) { _, new in new }
+      let queue = liveness.snapshot()
+      result["queuedFrames"] = queue.inFlight
+      result["peakQueuedFrames"] = queue.peakInFlight
+    }
+    // Reading currentRoute does not activate or reconfigure the audio session.
+    let route = AVAudioSession.sharedInstance().currentRoute
+    result["audioRoute"] = ["inputs": route.inputs.map { $0.portType.rawValue },
+                            "outputs": route.outputs.map { $0.portType.rawValue }]
+    return result
+  }
+
+  @MainActor
+  private func reportStall(_ reason: String, message: String) {
+    diagnostics?.setStallReason(reason)
+    streamErrorHandler.sendFrameStall(message: message, reason: reason, diagnostics: diagnosticsSnapshot())
+  }
+
   @MainActor
   private func startFrameWatchdog() {
     cancelFrameWatchdog()
@@ -924,16 +946,21 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // The background path drops frames on purpose and says so already.
     guard !mustNotStreamNow else { return }
 
+    guard ProcessInfo.processInfo.systemUptime >= foregroundGraceUntil else { return }
+    if diagnostics?.pollFirstFrame() == true {
+      reportStall("firstFrameTimeout", message: "No first video frame after 10 eligible seconds in streaming state. Restart the session if delivery does not resume.")
+      return
+    }
     let stats = liveness.snapshot()
     guard let sinceArrival = stats.sinceArrival else { return }
 
     let pushIsMeaningful = !isInBackground
     let sincePush = stats.sincePush ?? stats.sinceFirstArrival ?? sinceArrival
     let arrivalStalled = sinceArrival > frameStallTimeout
-    let stalled = arrivalStalled
-      || (pushIsMeaningful && sincePush > framePushStallTimeout)
+    let reason = StreamDiagnosticsTracker.deliveryStall(
+      sinceArrival: sinceArrival, sinceSubmission: sincePush, background: !pushIsMeaningful)
 
-    guard stalled else {
+    guard let reason else {
       didReportFrameStall = false
       return
     }
@@ -959,7 +986,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       )
     }
     NSLog("[MWDAT] frame stall detected — \(message)")
-    streamErrorHandler.sendError(code: "frameStalled", message: message)
+    reportStall(reason, message: message)
   }
 
   @MainActor
@@ -995,6 +1022,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // stopped underneath us), and a silent detach left the app holding a live
     // texture id with no terminal event — a `Texture` frozen on its last frame.
     cancelFrameWatchdog()
+    diagnostics?.stateChanged(streaming: false)
+    diagnostics = nil
+    diagnosticsConfiguration = [:]
+    if let token = diagnosticsStateToken { Task { await token.cancel() } }
+    diagnosticsStateToken = nil
     streamStateHandler.detachEmittingStopped()
     streamErrorHandler.session = nil
 
@@ -1304,6 +1336,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // the texture was deliberately not written. Measure the push clock from
     // here, or the first watchdog tick reports the whole background window.
     liveness.resyncPushClock()
+    diagnostics?.resumeGrace()
+    foregroundGraceUntil = ProcessInfo.processInfo.systemUptime + frameStallTimeout
     // An expired background assertion sets `abortStopWait` and nothing else
     // clears it, so without this reset one expiry would poison every later
     // stop-wait: the abort poll in `awaitStreamStopped` /
@@ -1320,7 +1354,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // MARK: - Frame Processing (zero-copy via Texture API)
   /// Pushes a CVPixelBuffer extracted from the VideoFrame's CMSampleBuffer
   /// directly to the Flutter texture — no JPEG encode/decode, no byte copy.
-  private func processAndSendFrame(_ videoFrame: VideoFrame) {
+  private func processAndSendFrame(_ videoFrame: VideoFrame, diagnostics: StreamDiagnosticsTracker) {
     // Arrival was stamped in the publisher callback; this only closes out the
     // queue depth. Everything below is a gate the frame may not survive.
     liveness.noteDequeue()
@@ -1421,6 +1455,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     texture.latestPixelBuffer = renderBuffer
     textureRegistry?.textureFrameAvailable(texId)
     liveness.notePush()
+    diagnostics.noteSubmission()
 
     // Report arrivals alongside renders. Counting only post-throttle frames
     // made this line go silent on a wedged throttle exactly as it does on a
@@ -1939,6 +1974,15 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return
       }
       let session = addedCamera.stream
+      let tracker = StreamDiagnosticsTracker()
+      diagnostics = tracker
+      diagnosticsConfiguration = ["requestedFrameRate": fps,
+        "requestedQuality": args["streamQuality"] as? String ?? "high",
+        "requestedCodec": videoCodecStr, "effectiveCodec": videoCodecStr == "hvc1" ? "hvc1" : "raw"]
+      tracker.stateChanged(streaming: session.state == .streaming)
+      diagnosticsStateToken = session.statePublisher.listen { state in
+        tracker.stateChanged(streaming: state == .streaming)
+      }
 
       // 4. Wire listeners. Stream errors are forwarded to Dart by
       // `streamErrorHandler` once its `session` is set below. The frame
@@ -1950,6 +1994,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // Stamp arrival on the SDK's own callback, not inside the frame queue:
         // those are different instants, and conflating them makes a backlog of
         // ours look like the transport going quiet.
+        tracker.noteArrival()
         self.liveness.noteArrival()
         // Keep the serial queue — hvc1 decode order depends on it — but wait for
         // processing to finish before returning Meta's publisher callback.
@@ -1960,7 +2005,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // `sync` preserves ordering while ensuring the SDK gets its frame back
         // before this callback returns.
         self.frameQueue.sync {
-          self.processAndSendFrame(videoFrame)
+          self.processAndSendFrame(videoFrame, diagnostics: tracker)
         }
       }
 

@@ -150,7 +150,7 @@ internal class FrameProcessor {
     /**
      * Process a video frame: throttle by FPS, convert I420 → ARGB, render to surface.
      */
-    fun processFrame(videoFrame: VideoFrame, surface: Surface) {
+    fun processFrame(videoFrame: VideoFrame, surface: Surface, onSubmitted: () -> Unit) {
         if (released) return
 
         // FPS throttling
@@ -215,6 +215,7 @@ internal class FrameProcessor {
 
             lastPushNanos = now
             framesPushed++
+            onSubmitted()
             // Advance from the previous deadline so the cadence does not drift,
             // but never schedule in the past: after a stall that would let a
             // burst through while it caught up.
