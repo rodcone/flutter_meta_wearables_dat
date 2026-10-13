@@ -8,7 +8,6 @@ import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provide
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart'
     as stream_providers;
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/meta_button.dart';
-import 'package:flutter_meta_wearables_dat_example/screens/stream/diagnostics_sheet.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -189,25 +188,6 @@ class _StreamScreenState extends State<StreamScreen> {
                   ),
                 ),
               ),
-            Positioned(
-              top: 0,
-              right: 0,
-              child: SafeArea(
-                child: IconButton(
-                  tooltip: 'Stream diagnostics',
-                  color: Colors.white,
-                  icon: const Icon(Icons.monitor_heart_outlined),
-                  onPressed: () => showModalBottomSheet<void>(
-                    context: context,
-                    isScrollControlled: true,
-                    builder: (_) => ChangeNotifierProvider.value(
-                      value: streamProvider,
-                      child: const DiagnosticsSheet(),
-                    ),
-                  ),
-                ),
-              ),
-            ),
             // Controls overlay at the bottom
             Positioned(
               bottom: 24,

@@ -198,3 +198,15 @@ delays after STREAMING; do not shorten it merely to make tests faster.
 Physical checks above remain outstanding. The 10-second first-frame threshold
 is a conservative policy; existing intermittent iOS locked-background termination
 is not claimed fixed by this diagnostics change.
+
+## Physical QA progress (iPhone, release build)
+
+User-reported results on the connected iPhone 17, Bluetooth Classic:
+- Test 1 passed: moving video, 29 SDK fps / 23.5 texture submission fps at the
+  sampled instant, no stall, queue depth 0 / peak 1, A2DP output. This does not
+  establish displayed FPS or long-term reliability.
+- Test 2 passed: two stop/start cycles, session identity and counters reset.
+- Test 3 passed: background opt-out stops the stream and manual restart works.
+- User found diagnostics partly covered by the floating Settings button while
+  idle. Move diagnostics into the same floating-button row; device confirmation
+  of this layout fix and background opt-in QA remain pending.

@@ -10,6 +10,7 @@ import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dar
 import 'package:flutter_meta_wearables_dat_example/screens/home/home_screen.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/mock_device/mock_device_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/settings/settings_sheet.dart';
+import 'package:flutter_meta_wearables_dat_example/screens/stream/diagnostics_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/stream/paired_devices_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/stream/stream_screen.dart';
 import 'package:provider/provider.dart';
@@ -121,8 +122,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       child: MaterialApp(
         navigatorKey: navigatorKey,
         home: Builder(
-          builder: (context) => Consumer2<DeviceProvider, StreamSessionProvider>(
-            builder: (context, deviceProvider, streamProvider, _) => Scaffold(
+          builder: (context) => Consumer3<DeviceProvider, StreamSessionProvider, MockDeviceProvider>(
+            builder: (context, deviceProvider, streamProvider, mockDeviceProvider, _) => Scaffold(
               floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
               floatingActionButton: Padding(
                 padding: const EdgeInsets.only(top: 8, right: 5),
@@ -176,6 +177,32 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                           },
                           child: const Icon(
                             Icons.settings,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    // Keep diagnostics in the same row as settings/devices so
+                    // their hit areas cannot overlap the stream screen overlay.
+                    if (deviceProvider.isRegistered ||
+                        (mockDeviceProvider.deviceUUID != null &&
+                            (streamProvider.selectedVideo != null ||
+                                streamProvider.selectedImage != null)))
+                      Padding(
+                        padding: const EdgeInsets.only(right: 5),
+                        child: FloatingActionButton.small(
+                          heroTag: 'diagnostics',
+                          backgroundColor: Colors.blueAccent,
+                          tooltip: 'Stream diagnostics',
+                          onPressed: () => showModalBottomSheet<void>(
+                            context: context,
+                            isScrollControlled: true,
+                            builder: (_) => ChangeNotifierProvider.value(
+                              value: streamProvider,
+                              child: const DiagnosticsSheet(),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.monitor_heart_outlined,
                             color: Colors.white,
                           ),
                         ),
