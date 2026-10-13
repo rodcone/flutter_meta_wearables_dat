@@ -384,6 +384,8 @@ jobs:
             echo "ERROR: ios/Podfile was generated, so this built through CocoaPods."
             exit 1
           fi
+      - name: Test production stream timing policy
+        run: scripts/test-stream-diagnostics.sh
       - name: Build iOS example
         working-directory: example
         run: flutter build ios --release --no-codesign
@@ -473,6 +475,18 @@ jobs:
       - name: Android unit tests
         working-directory: example/android
         run: ./gradlew :flutter_meta_wearables_dat:testDebugUnitTest
+      - name: Verify diagnostics tests executed
+        run: |
+          python3 - <<'PYTEST'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          report = pathlib.Path('example/build/flutter_meta_wearables_dat/test-results/testDebugUnitTest/TEST-io.rodcone.flutter_meta_wearables_dat.StreamDiagnosticsTrackerTest.xml')
+          suite = ET.parse(report).getroot()
+          cases = suite.findall('testcase')
+          if not cases or any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error')):
+              raise SystemExit('Diagnostics tests must execute without skips or failures')
+          print(f'Diagnostics: {len(cases)} tests passed')
+          PYTEST
       - name: Android photo-sharing tests
         working-directory: example/android
         run: ./gradlew :app:testDebugUnitTest --tests 'io.rodcone.flutter_meta_wearables_dat_example.PhotoSharingTest'
