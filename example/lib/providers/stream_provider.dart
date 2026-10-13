@@ -10,6 +10,8 @@ import 'package:flutter_meta_wearables_dat_example/utils/photo_sharing.dart';
 import 'package:flutter_meta_wearables_dat_example/utils/stream_investigation_trace.dart';
 import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
 
+enum _RecoveryPhase { backoff, stopping, starting, awaitingStreaming }
+
 /// Provider to manage streaming state and active device monitoring.
 /// Depends on DeviceProvider for registration state and permissions.
 /// Depends on MockDeviceProvider for mock device UUID.
@@ -54,6 +56,7 @@ class StreamSessionProvider extends ChangeNotifier {
   };
   static const int _maxRecoveryAttempts = 3;
   static const Duration _recoveryWatchdog = Duration(seconds: 10);
+  static const Duration _recoveryTeardownDeadline = Duration(seconds: 20);
 
   // --- Terminal errors: the stream is dead and will not come back ---------
   // The SDK does not auto-resume after these, so retrying is pointless — the
@@ -93,7 +96,10 @@ class StreamSessionProvider extends ChangeNotifier {
   // stream up. Gates auto-recovery so we never fight a deliberate stop.
   bool _streamingIntended = false;
   bool _isRecovering = false;
-  bool _recoveryRunning = false;
+  _RecoveryPhase? _recoveryPhase;
+  bool get _recoveryRunning =>
+      _recoveryPhase == _RecoveryPhase.stopping ||
+      _recoveryPhase == _RecoveryPhase.starting;
   StreamSessionError? _replacementError;
   int _recoveryGeneration = 0;
   int _sessionGeneration = 0;
@@ -114,10 +120,10 @@ class StreamSessionProvider extends ChangeNotifier {
   StreamSessionError? _pendingUserAction;
   Timer? _pendingUserActionTimer;
   static const Duration _userActionGrace = Duration(seconds: 15);
-  // Guards [_teardownSession] against re-entry: it awaits a platform call, and
-  // a second terminal error arriving during that await would otherwise start a
-  // concurrent teardown.
-  bool _isTearingDown = false;
+  // Keep the actual platform completion even after a recovery deadline expires.
+  // Every caller shares it; no new start may overlap unresolved cleanup.
+  Future<void>? _teardownFuture;
+  bool get _isTearingDown => _teardownFuture != null;
   int _recoveryAttempts = 0;
   int _frameStallRecoveryAttempts = 0;
   Timer? _recoveryBackoffTimer;
@@ -233,6 +239,9 @@ class StreamSessionProvider extends ChangeNotifier {
   /// even while a previously pinned pair is gone (the native selector re-pins
   /// on the next [startStreamSession], which is what makes that pair active).
   bool get canStartSelected {
+    if (_disposed || _startInFlight || _isTearingDown || _isRecovering) {
+      return false;
+    }
     // A terminal error left the glasses in a state no restart can fix until the
     // user acts. Device connectivity below can't see that — doff usually keeps
     // the link up — so the latch has to gate this first.
@@ -477,6 +486,13 @@ class StreamSessionProvider extends ChangeNotifier {
       'state': _sessionState?.name,
       'streamingIntended': _streamingIntended,
       'isRecovering': _isRecovering,
+      'recoveryPhase': _recoveryPhase?.name,
+      'recoveryDeadlineMs': switch (_recoveryPhase) {
+        _RecoveryPhase.stopping => _recoveryTeardownDeadline.inMilliseconds,
+        _RecoveryPhase.starting ||
+        _RecoveryPhase.awaitingStreaming => _recoveryWatchdog.inMilliseconds,
+        _ => null,
+      },
       'sdkRetries': _recoveryAttempts,
       'frameStallRetries': _frameStallRecoveryAttempts,
       if (error != null) ...{
@@ -589,8 +605,9 @@ class StreamSessionProvider extends ChangeNotifier {
     _trace('endSessionWithError', error: error);
     _cancelRecovery();
     _streamingIntended = false;
+    final generation = _recoveryGeneration;
     await _teardownSession(preserveError: true);
-    if (_disposed) return;
+    if (_disposed || generation != _recoveryGeneration) return;
     if (needsUserAction) _latchUserAction(error);
     _lastError = error;
     notifyListeners();
@@ -626,6 +643,9 @@ class StreamSessionProvider extends ChangeNotifier {
 
   void _scheduleRecovery(StreamSessionError error) {
     _isRecovering = true;
+    _recoveryPhase = _RecoveryPhase.backoff;
+    _recoveryWatchdogTimer?.cancel();
+    _recoveryWatchdogTimer = null;
     final generation = ++_recoveryGeneration;
     _trace('recoveryScheduled', error: error);
     notifyListeners();
@@ -636,12 +656,38 @@ class StreamSessionProvider extends ChangeNotifier {
         unawaited(_runRecovery(error, generation));
       },
     );
-    // Duplicate errors do not extend this deadline.
+  }
+
+  void _armRecoveryDeadline(
+    Duration deadline,
+    StreamSessionError error,
+    int generation,
+  ) {
+    // Called only on phase entry. Duplicate errors/states never extend it.
     _recoveryWatchdogTimer?.cancel();
-    _recoveryWatchdogTimer = Timer(_recoveryWatchdog, () {
+    _recoveryWatchdogTimer = Timer(deadline, () {
       if (!_isCurrentRecovery(generation)) return;
       _trace('recoveryWatchdogExpired', error: error);
-      unawaited(_endSessionWithError(error));
+      final stopping = _recoveryPhase == _RecoveryPhase.stopping;
+      _streamingIntended = false;
+      _cancelRecovery();
+      // Publish failure even if cleanup never returns. Its shared future and
+      // any pending start still block new work after this deadline is cancelled.
+      final cleanup = _teardownSession(preserveError: true);
+      _lastError = stopping
+          ? const StreamSessionError(
+              code: 'recoveryTeardownTimeout',
+              message:
+                  'Stream cleanup is taking too long. Wait for it to finish '
+                  'before restarting. If it stays stuck, close and reopen the app.',
+            )
+          : error;
+      notifyListeners();
+      unawaited(
+        cleanup.then((_) {
+          if (!_disposed) notifyListeners();
+        }),
+      );
     });
   }
 
@@ -650,7 +696,7 @@ class StreamSessionProvider extends ChangeNotifier {
 
   Future<void> _runRecovery(StreamSessionError error, int generation) async {
     if (!_isCurrentRecovery(generation)) return;
-    _recoveryRunning = true;
+    _recoveryPhase = _RecoveryPhase.stopping;
     _replacementError = null;
     // Count executed attempts, not SDK error notifications.
     _recoveryAttempts++;
@@ -658,11 +704,19 @@ class StreamSessionProvider extends ChangeNotifier {
     _trace('recoveryStarted', error: error);
     // SDK errors can arrive while native state is still STREAMING. Explicitly
     // stop for every recovery so start cannot return the failed session's texture.
-    await _teardownSession();
-    if (!_isCurrentRecovery(generation)) return;
+    final teardown = _teardownSession();
+    _armRecoveryDeadline(_recoveryTeardownDeadline, error, generation);
+    await teardown;
+    if (!_isCurrentRecovery(generation)) {
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    _recoveryPhase = _RecoveryPhase.starting;
+    _trace('recoveryStarting', error: error);
+    _armRecoveryDeadline(_recoveryWatchdog, error, generation);
     final started = await _startStreamSession();
     if (!_isCurrentRecovery(generation)) return;
-    _recoveryRunning = false;
+    _recoveryPhase = _RecoveryPhase.awaitingStreaming;
     final replacementError = _replacementError;
     _replacementError = null;
     _trace(
@@ -693,7 +747,7 @@ class StreamSessionProvider extends ChangeNotifier {
   void _cancelRecovery() {
     if (_isRecovering) _trace('recoveryCancelledOrCompleted');
     _recoveryGeneration++;
-    _recoveryRunning = false;
+    _recoveryPhase = null;
     _replacementError = null;
     _recoveryBackoffTimer?.cancel();
     _recoveryBackoffTimer = null;
@@ -810,7 +864,7 @@ class StreamSessionProvider extends ChangeNotifier {
       if (!isCurrent() || !_streamingIntended) {
         // Hold the start guard until cleanup settles; a late result must not
         // stop a newer manual session or restore its obsolete texture.
-        await MetaWearablesDat.stopStreamSession(_selectedDeviceId);
+        await _teardownSession(preserveError: true);
         return false;
       }
 
@@ -825,6 +879,7 @@ class StreamSessionProvider extends ChangeNotifier {
       notifyListeners();
     } finally {
       _startInFlight = false;
+      if (!_disposed) notifyListeners();
     }
     return _isStreaming;
   }
@@ -842,7 +897,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _clearPendingUserAction(force: true);
 
     await _teardownSession();
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   /// Drops every trace of the current session: subscriptions, texture, stream
@@ -858,9 +913,13 @@ class StreamSessionProvider extends ChangeNotifier {
   ///
   /// Never notifies: callers own that, so a caller can pair the cleared state
   /// with an error in a single notification.
-  Future<void> _teardownSession({bool preserveError = false}) async {
-    if (_isTearingDown) return;
-    _isTearingDown = true;
+  Future<void> _teardownSession({bool preserveError = false}) {
+    return _teardownFuture ??= _performTeardownSession(
+      preserveError: preserveError,
+    ).whenComplete(() => _teardownFuture = null);
+  }
+
+  Future<void> _performTeardownSession({required bool preserveError}) async {
     _sessionGeneration++;
     _trace('teardownStarted');
     try {
@@ -885,7 +944,6 @@ class StreamSessionProvider extends ChangeNotifier {
       }
     } finally {
       _trace('teardownCompleted');
-      _isTearingDown = false;
     }
   }
 
@@ -907,6 +965,17 @@ class StreamSessionProvider extends ChangeNotifier {
 
   Future<void> setBackgroundStreamingEnabled(bool enabled) async {
     if (_backgroundStreamingEnabled == enabled) return;
+    // Native errors may be detached while cleanup is pending. Cancel directly
+    // on opt-out rather than depending on a stoppedForBackground callback.
+    if (!enabled && _isRecovering) {
+      _streamingIntended = false;
+      _cancelRecovery();
+      unawaited(
+        _teardownSession().then((_) {
+          if (!_disposed) notifyListeners();
+        }),
+      );
+    }
     try {
       if (enabled) {
         await MetaWearablesDat.enableBackgroundStreaming(

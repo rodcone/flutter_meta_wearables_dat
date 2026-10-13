@@ -8,6 +8,7 @@
 ### Fixed
 - Detect a native stream that reports streaming but never produces its first frame; exclude SDK pauses, long scheduling gaps and foreground grace.
 - Explicitly stop before example frame-stall recovery and limit those retries to three per manual start, even across nominal streaming transitions.
+- Give example recovery separate cleanup and startup deadlines so delayed background cleanup does not consume the replacement stream's startup window. Share pending cleanup between callers, block starts until it completes, and cancel recovery directly on background opt-out.
 
 ### Changed
 - Replace the example's blanket Bluetooth Classic 15 fps guidance with device/transport-specific diagnostics guidance.

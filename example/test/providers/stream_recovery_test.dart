@@ -27,6 +27,7 @@ void main() {
   var stops = 0;
   Future<int> Function()? startReplacement;
   Completer<bool>? pendingStop;
+  var disposed = false;
 
   Future<void> event(String channel, Object value) =>
       messenger.handlePlatformMessage(
@@ -48,6 +49,7 @@ void main() {
     stops = 0;
     startReplacement = null;
     pendingStop = null;
+    disposed = false;
     for (final name in channels) {
       messenger.setMockMethodCallHandler(MethodChannel(name), (call) async {
         switch (call.method) {
@@ -77,7 +79,7 @@ void main() {
   });
 
   tearDown(() {
-    stream.dispose();
+    if (!disposed) stream.dispose();
     device.dispose();
     mock.dispose();
     for (final name in channels) {
@@ -148,12 +150,20 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(stops, 1);
     expect(starts, 1);
-    await stream.stopStreamSession();
+    var stopCompleted = false;
+    final manualStop = stream.stopStreamSession().then((_) {
+      stopCompleted = true;
+    });
+    await tester.pump();
+    expect(stopCompleted, isFalse);
+    expect(stops, 1);
     // A queued old state must not resurrect the cleared texture or start work.
     await event('stream_session_state', 4);
     expect(await stream.startStreamSession(), isFalse);
     pendingStop!.complete(true);
     await tester.pump(const Duration(seconds: 20));
+    await manualStop;
+    expect(stopCompleted, isTrue);
     expect(starts, 1);
     expect(stream.textureId, isNull);
     expect(stream.isRecovering, isFalse);
@@ -161,6 +171,158 @@ void main() {
     expect(await stream.startStreamSession(), isTrue);
     expect(stream.textureId, 42);
   });
+
+  testWidgets('slow teardown leaves a full replacement startup window', (
+    tester,
+  ) async {
+    await begin(tester);
+    pendingStop = Completer<bool>();
+    await error();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(seconds: 11));
+    expect(stream.isRecovering, isTrue);
+    expect(starts, 1);
+    pendingStop!.complete(true);
+    await tester.pump();
+    expect(starts, 2);
+    await tester.pump(const Duration(seconds: 9));
+    expect(stream.isRecovering, isTrue);
+    await event('stream_session_state', 4);
+    await tester.pump(const Duration(seconds: 12));
+    expect(stream.isRecovering, isFalse);
+    expect(stream.textureId, 42);
+    expect(stream.lastError, isNull);
+    expect(stops, 1);
+  });
+
+  testWidgets('teardown timeout blocks new work until late cleanup completes', (
+    tester,
+  ) async {
+    await begin(tester);
+    await event('active_device', true);
+    pendingStop = Completer<bool>();
+    await error();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(seconds: 19));
+    expect(stream.isRecovering, isTrue);
+    await tester.pump(const Duration(seconds: 1));
+    expect(stream.isRecovering, isFalse);
+    expect(stream.lastError?.code, 'recoveryTeardownTimeout');
+    expect(stream.textureId, isNull);
+    expect(stream.canStartSelected, isFalse);
+    expect(await stream.startStreamSession(), isFalse);
+    expect(stops, 1, reason: 'Deadline must reuse the unresolved stop');
+    await tester.pump(const Duration(seconds: 30));
+    expect(starts, 1);
+    pendingStop!.complete(true);
+    await tester.pump();
+    expect(starts, 1, reason: 'Late cleanup cannot revive cancelled intent');
+    expect(stream.canStartSelected, isTrue);
+    expect(await stream.startStreamSession(), isTrue);
+    await event('stream_session_state', 4);
+    await tester.pump(const Duration(seconds: 30));
+    expect(stream.textureId, 42);
+    expect(stops, 1);
+  });
+
+  testWidgets('duplicate errors and streaming cannot extend pending start', (
+    tester,
+  ) async {
+    await begin(tester);
+    final pending = Completer<int>();
+    startReplacement = () => pending.future;
+    await error();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(seconds: 9));
+    await event('stream_session_state', 4);
+    for (var i = 0; i < 9; i++) {
+      await error();
+    }
+    pendingStop = Completer<bool>();
+    await tester.pump(const Duration(seconds: 1));
+    expect(stream.isRecovering, isFalse);
+    expect(stream.lastError?.code, 'videoStreamingError');
+    expect(await stream.startStreamSession(), isFalse);
+    expect(stops, 2);
+    pending.complete(99);
+    await tester.pump();
+    expect(stops, 2, reason: 'Late start shares pending timeout cleanup');
+    expect(stream.textureId, isNull);
+    pendingStop!.complete(true);
+    await tester.pump();
+    expect(starts, 2);
+    startReplacement = null;
+    expect(await stream.startStreamSession(), isTrue);
+  });
+
+  testWidgets('a returned texture still needs streaming before the deadline', (
+    tester,
+  ) async {
+    await begin(tester);
+    await error();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(stream.textureId, 42);
+    await tester.pump(const Duration(seconds: 9));
+    await event('stream_session_state', 3);
+    await tester.pump(const Duration(seconds: 1));
+    expect(stream.isRecovering, isFalse);
+    expect(stream.textureId, isNull);
+    expect(starts, 2);
+    expect(stops, 2);
+  });
+
+  for (final phase in [
+    'backoff',
+    'stopping',
+    'starting',
+    'awaitingStreaming',
+  ]) {
+    for (final cancellation in ['stop', 'optOut', 'dispose', 'terminal']) {
+      // Old camera subscriptions are deliberately detached during stopping;
+      // native terminal events from that old session cannot target recovery.
+      if (phase == 'stopping' && cancellation == 'terminal') continue;
+      testWidgets('$cancellation cancels the $phase recovery phase', (
+        tester,
+      ) async {
+        await begin(tester);
+        await stream.setBackgroundStreamingEnabled(true);
+        final pendingStart = Completer<int>();
+        if (phase == 'starting') {
+          startReplacement = () => pendingStart.future;
+        }
+        if (phase == 'stopping') pendingStop = Completer<bool>();
+        await error();
+        await tester.pump();
+        if (phase != 'backoff') {
+          await tester.pump(const Duration(milliseconds: 400));
+        }
+        Future<void>? stop;
+        switch (cancellation) {
+          case 'stop':
+            stop = stream.stopStreamSession();
+          case 'optOut':
+            await stream.setBackgroundStreamingEnabled(false);
+          case 'dispose':
+            stream.dispose();
+            disposed = true;
+          case 'terminal':
+            await error('insufficientSDKVersion');
+        }
+        await tester.pump();
+        pendingStop?.complete(true);
+        if (phase == 'starting') pendingStart.complete(99);
+        await tester.pump();
+        if (stop != null) await stop;
+        await tester.pump(const Duration(seconds: 40));
+        expect(starts, phase == 'backoff' || phase == 'stopping' ? 1 : 2);
+        expect(stream.isRecovering, isFalse);
+        if (!disposed) {
+          expect(stream.isStreaming, isFalse);
+          expect(stream.textureId, isNull);
+        }
+      });
+    }
+  }
 
   testWidgets(
     'watchdog stops an unresolved start and rejects its late texture',

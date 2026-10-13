@@ -1,6 +1,7 @@
 # iOS background recovery: separate backoff, teardown and startup deadlines
 
-Status: proposed implementation; not applied. Prepared 2026-10-13 after the
+Status: implemented in the example; automated checks passed, device validation
+of this change is pending. Prepared 2026-10-13 after the
 17:08/17:09 Europe/Madrid instrumented lock trials. User requested tracing and a
 plan before further behavioral changes.
 
@@ -24,7 +25,7 @@ wait, plus asynchronous listener cancellation and scheduling. Those are individu
 wait bounds, not a guarantee that the complete platform call finishes in 13 wall
 seconds. A startup deadline should not cover backoff plus all of that work.
 
-## Proposed implementation
+## Agreed implementation
 
 1. **Model recovery phases explicitly in the example provider.** Use backoff,
    stopping, starting and awaiting-streaming phases, scoped to the existing
@@ -36,7 +37,7 @@ seconds. A startup deadline should not cover backoff plus all of that work.
 
 2. **Give teardown its own bounded wait and shared completion.** Replace the
    `_isTearingDown` early-return behavior with an in-flight future: concurrent
-   callers await the same cleanup instead of assuming it has finished. Propose
+   callers await the same cleanup instead of assuming it has finished. Use
    a 20-second example teardown deadline, measured from the stop call, to allow
    the native 3+10-second waits and scheduling overhead. On expiry, abandon the
    recovery generation, surface a failure, and do not start another camera while
@@ -84,3 +85,32 @@ seconds. A startup deadline should not cover backoff plus all of that work.
 - This fixes demonstrated premature abandonment. It does not promise continuous
   background streaming or explain the SDK/device errors. A device-session error
   that independently ends a healthy session remains a separate investigation.
+
+## Implementation and verification — 2026-10-13
+
+- Recovery now records backoff/stopping/starting/awaiting-streaming phases. The
+  20-second cleanup timer and 10-second startup timer begin at their respective
+  phase entries; neither includes backoff. Existing opt-in traces include phase
+  and deadline length. Repeated error/state events do not reset an active bound.
+- Cleanup callers share the actual platform future. A cleanup deadline reports
+  the example-only `recoveryTeardownTimeout` error immediately, but Start stays
+  disabled until native work settles. Startup expiry also surfaces its failure
+  without waiting indefinitely for subsequent cleanup. Late start results share
+  any pending cleanup and cannot expose their obsolete texture.
+- Background opt-out cancels recovery directly, including while old-session
+  subscriptions are detached. Manual Stop shares pending cleanup, and disposal
+  prevents completion callbacks from notifying a disposed provider.
+- The 11-second cleanup regression failed against the previous implementation
+  (recovery was already cancelled), then passed with the change. All 31 recovery
+  tests and all 45 example tests passed. Coverage includes hung cleanup/startup,
+  late results, shared stop callers, streaming-before-start-completion, missing
+  streaming confirmation, duplicate errors and cancellation across phases.
+- Scoped Dart MCP analysis reported no errors; formatting and diff checks passed.
+  No running Dart debug app/DTD was found, so hot reload was unavailable.
+- Signed `flutter build ios --release` passed and produced
+  `example/build/ios/iphoneos/Runner.app`. This build has not been installed or
+  exercised on the phone yet; the previously restored normal release remains
+  the last device-tested build.
+- The existing native SDK/device interruption remains unresolved. These checks
+  verify example recovery policy; physical lock/unlock reliability must still be
+  tested using step 5 with the new build.
