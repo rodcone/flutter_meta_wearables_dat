@@ -414,3 +414,57 @@ were preserved. Mirror sessions reconnected several times during inspection,
 without any agent-initiated app restart.
 Agent Access was restored to off after inspection. No additional code or runtime
 configuration changes were made.
+
+### Controlled normal release repeat — 16:55 Europe/Madrid
+
+User explicitly confirmed the glasses were being worn before this repeat. Same
+installed normal release, no trace collectors, RAW / medium / 30 FPS, Bluetooth
+Classic. Background streaming was enabled from its restored off state. Initial
+camera `03F9A2D8-B117-4861-8B9A-5E73404F18E8` showed 246 received frames, 222
+submissions, SDK 28 FPS, texture submissions 27 FPS and no active stall. The old
+failure snapshot from the preceding run remains historical unless replaced.
+
+Lock command issued at 16:55:03; a black phone screen was observed afterward.
+After a 30-second wait, the user was prompted to unlock without Start/Stop input
+and to keep the glasses worn and connected. The user reported accidentally
+unlocking during the intended 30 seconds, so this attempt is not counted as a
+continuous 30-second lock test. A fresh observation at 16:56:56 showed live video;
+diagnostics then showed replacement camera `1E7CEDA3-58AC-406E-8180-5EB691B70ADD`,
+1,156 received frames, 1,063 submissions, 27.5 SDK FPS and 26.5 submissions/sec,
+with no active stall. The retained historical stall had 1,627 received frames and
+a 2,691,201 us SDK arrival gap. Recovery occurred, but its timing is unavailable.
+
+A second lock command was issued at 16:57:50 on that running replacement session,
+without a manual Stop/Start between intervals. The user was again prompted to
+unlock after a 30-second wait. A fresh observation at 16:59:19 (89 seconds after
+the command, including response/observation latency) showed the stopped
+placeholder and the visible banner: "Unexpected device session error: Session
+ended by device". The user then confirmed unlocked. Exact lock duration and final
+stop timing are unavailable without lifecycle tracing. No manual Start/Stop was
+performed between the lock command and this observation.
+
+Diagnostics showed no current session, state stopped, background opt-in still
+true, and the same retained 1,627-frame / 2,691,201 us `sdkFramesStopped` snapshot
+seen before this second lock. That snapshot is historical and must not be assigned
+as the cause of this final stop.
+
+Read-only code inspection ties the displayed message prefix to iOS
+`DeviceSessionError.unexpectedError(description:)`, mapped to `unexpectedError`
+in `StreamErrorStreamHandler.swift`. The example does not classify that code as
+recoverable. This is a source-based interpretation of the visible message, not a
+captured event-code trace. It is distinct from the earlier `videoStreamingError`
+burst. Native device-session observation also tears down the camera on `.stopped`.
+The observation does not prove which error/state callbacks arrived first or why
+the glasses ended the session.
+
+Outcome: first repeat inconclusive due to accidental early unlock; second repeat
+failed the user-visible resume expectation with a device-ended error. The bounded
+retry fix remains validated for its covered errors, while normal-release lock
+reliability is unresolved. Do not broadly retry every `unexpectedError` or match
+SDK description strings without investigating the device-session lifecycle and
+agreeing on a recovery policy. Next recommended step: capture this error/state
+sequence with existing instrumentation, then prepare any implementation plan.
+
+Restored background streaming to off and left the normal release idle. No code,
+transport, codec, watchdog threshold or audio policy changes were made.
+Agent Access was restored to off after the repeat.
