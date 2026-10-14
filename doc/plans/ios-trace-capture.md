@@ -124,3 +124,41 @@ Status: local work complete; stop here until the iPhone is available. The new
 transport's physical reliability and its effect on background scheduling remain
 unverified. This change improves capture and its failure detection; it does not
 fix or explain the glasses' background interruption or replacement-session error.
+
+## Physical capture smoke test — 2026-10-14, 14:16–14:18 Europe/Madrid
+
+Installed the instrumented build from `33c2fcf` on the wired iPhone, still on
+iOS 27.0 (24A437). The user confirmed unlocked/connected/worn readiness. Native,
+bridge and forwarded Dart startup markers passed the collector gate immediately.
+One foreground Start/Stop cycle used RAW / medium / 30 FPS with background
+streaming off. No lock interval, foreground restart comparison or background
+recovery attempt was performed in this capture-validation step.
+
+Foreground camera `7D71180C-9359-4BDD-8666-9A3539206F8E` delivered 740 frames,
+with 674 texture submissions before stop. Sampled arrival rates were around
+27–28.5 FPS; fresh mirror observations showed the preview and subsequent idle
+screen. Submitted frames are not a count of displayed frames. Native stop method
+duration was 163.999 ms. Dart recorded manual start, state updates, texture
+return, manual stop, teardown start and teardown completion. All cleanup spans
+paired; no camera/device error or stall was observed in this foreground cycle.
+
+The single collector ended normally on operator stop with native sequence 1–81,
+bridge sequence 1, and Dart sequence 1–10 complete: no gaps, duplicates,
+out-of-order records, malformed/rejected payloads or truncation. Native run:
+`B93046BC-0227-4CFD-ADE8-B2D51D88D806`; bridge run:
+`52C99284-FAF8-4DAC-A0A6-B3DACA780C3E`; Dart run:
+`1791980165635019-590920177`. Local structured records and summary are retained in
+`/var/folders/wg/f2_rmttd7mjg7wxjybfjbz000000gn/T/dat-unified-capture-ydbtyykp/trial/`.
+Temporary evidence may be removed by macOS cleanup. No video was recorded.
+
+Outcome: unified forwarding and capture completeness checks are physically
+verified for this foreground smoke test. Background delivery/overhead and the
+underlying streaming failure remain unverified. The next step is the planned
+foreground-versus-background restart comparison; this result does not establish
+that recovery is fixed.
+
+Cleanup: the stream stopped and the idle screen was observed. Background
+streaming remained off throughout the trial. Stopped the collector, rebuilt and
+installed the normal release without the Dart define, launched without native
+trace flags, and verified the idle screen again. Restored Agent Access off and
+verified its menu status. No implementation changes were made during this test.
