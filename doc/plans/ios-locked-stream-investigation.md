@@ -672,3 +672,71 @@ investigation flags, observed its idle screen and verified its background toggle
 off again. Restored iPhoneMirror Agent Access off and verified the menu status.
 No implementation changes were made during this test; the normal release build
 and documentation diff check passed.
+
+### Unified foreground/background comparison — 2026-10-14, 14:26–14:29 Europe/Madrid
+
+Instrumented build from `10890a9` (capture implementation `33c2fcf`), iPhone on
+iOS 27.0 (24A437), wired USB and iPhoneMirror controls. User confirmed the phone
+unlocked and glasses connected/worn before testing. Enabled background streaming
+before both parts; RAW / medium / 30 FPS, Bluetooth Classic. No diagnostics panel
+polling or second syslog reader. No implementation change during this trial.
+
+Single-console preflight passed. Capture ended on operator stop with complete
+native sequence 1–171, bridge sequence 1 and Dart sequence 1–27. No gaps,
+duplicates, out-of-order records, malformed/rejected payloads or truncation;
+all cleanup spans paired. Native run `E0BCEC15-250A-400B-8842-23D80E462752`,
+bridge `197653B3-C1FF-4F1B-8351-322E99C2694B`, Dart
+`1791980769005736-508391603`. Local records/summary:
+`/var/folders/wg/f2_rmttd7mjg7wxjybfjbz000000gn/T/dat-restart-comparison-7ejik66w/trial/`.
+Temporary evidence may be removed by macOS cleanup; no video recorded.
+
+**Foreground manual restart passed.** First camera
+`88C6655B-F9C7-4D47-9ADE-5A9C8FFB94F6` delivered 491 frames before manual Stop.
+Native cleanup took 120.082 ms. A later manual Start created a fresh camera
+`295DC492-16D4-4251-96C8-1F91209D909D` and texture 1; its first frame arrived
+about 2.462 seconds after the native start request. Foreground arrival was around
+26–26.5 FPS before lock, and the preview was observed through a fresh mirror frame.
+
+**Automatic background recovery failed.** Native background entry was
+14:27:41.526769. The lock action was dispatched successfully; the user was prompted
+to unlock after 30 seconds and subsequently confirmed unlocking. The first native
+foreground event was 14:28:23.394582, **41.868465 seconds** later by monotonic time.
+A background event followed 41.657 ms later, with another foreground event at
+14:28:40.778528. Report these transitions separately: this is not one continuous
+59-second lock interval. The failure below occurred in the first 1.2 seconds.
+
+| Seconds after first native background entry | Event |
+| --- | --- |
+| +0.171 | Native receives `videoStreamingError` |
+| +0.525 | Dart receives error and schedules one recovery |
+| +0.927 | Recovery enters stopping with a 20-second cleanup deadline |
+| +0.929 | Native receives stop request |
+| +1.110 | Native stop completes: 181.386 ms; both stopped-state waits succeed |
+| +1.111 | Dart teardown completes and arms the separate 10-second startup deadline |
+| +1.114 | Native receives the automatic replacement start |
+| +1.115 | New device-session identity observed |
+| +1.194 | New device session reports error; plugin emits `unexpectedError` |
+| +1.194 | Dart receives that error and cancels recovery in starting phase |
+| +1.196 | New device session reports stopped; no replacement camera was created |
+
+The replacement device-session error arrived **78.730 ms** after observation.
+No cleanup or startup watchdog expired. There was one executed SDK recovery
+attempt, no overlap with pending cleanup, and no replacement first frame.
+The post-unlock UI visibly showed the idle Start screen. This capture establishes
+device-session failure preceding Dart cancellation, unlike the earlier long-stop
+captures where the deadline expired first. It does not explain the SDK error.
+
+**Comparison limitation:** timing is not matched. The manual foreground start
+was received **10.453817 seconds** after cleanup ended; automatic background
+start followed cleanup by **3.511 ms**. Background state, immediate restart timing,
+and manual-versus-error-driven recovery all differ. Do not conclude that background
+state alone causes failure, or add an arbitrary delay based on one comparison.
+A useful next step is a plan for a controlled immediate foreground restart using
+the same recovery path, followed by a matched background comparison. Keep
+`unexpectedError` handling and existing timeout/overlap guards unchanged until
+evidence supports a specific behavioral change.
+
+Cleanup: disabled background streaming and visually verified its off toggle;
+stopped the collector; rebuilt/installed/launched the normal release without
+investigation flags and observed the idle screen. Agent Access restored off and
+verified in the menu. Normal release build and documentation diff checks passed.

@@ -162,3 +162,14 @@ streaming remained off throughout the trial. Stopped the collector, rebuilt and
 installed the normal release without the Dart define, launched without native
 trace flags, and verified the idle screen again. Restored Agent Access off and
 verified its menu status. No implementation changes were made during this test.
+
+## Background capture verification — 2026-10-14, 14:27
+
+The subsequent [foreground/background comparison](ios-locked-stream-investigation.md)
+captured native sequence 1–171 and Dart sequence 1–27 without gaps or truncation,
+including background recovery phase changes. Native stop took 181 ms, then the
+replacement device session failed with `unexpectedError`; that error preceded
+Dart cancellation and neither watchdog expired. The foreground manual restart
+passed, but waited 10.454 seconds after cleanup versus 3.511 ms for automatic
+background restart, so timing and lifecycle effects remain confounded. Unified
+capture is verified in this background attempt; recovery reliability is not fixed.
