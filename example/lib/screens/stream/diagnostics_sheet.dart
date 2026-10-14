@@ -64,6 +64,24 @@ class DiagnosticsSheet extends StatelessWidget {
                     'Submitted frames are not a measurement of displayed frames.',
                   ),
                   const SizedBox(height: 12),
+                  if (StreamSessionProvider.recoveryExperimentEnabled)
+                    OutlinedButton(
+                      onPressed: stream.recoveryExperimentToken == null
+                          ? null
+                          : () async {
+                              final token = stream.recoveryExperimentToken;
+                              final route = ModalRoute.of(context);
+                              if (token == null || route == null) return;
+                              Navigator.of(context).pop();
+                              // Wait for disposal and polling shutdown, not
+                              // merely the start of the dismissal animation.
+                              await route.completed;
+                              stream.triggerRecoveryExperiment(token);
+                            },
+                      child: const Text(
+                        'Investigation: synthetic foreground recovery (once)',
+                      ),
+                    ),
                   if (controller.error != null) Text(controller.error!),
                   if (snapshot != null) ...[
                     Text(

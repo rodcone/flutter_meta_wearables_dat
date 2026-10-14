@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' show WidgetsBinding;
+import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding;
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
@@ -105,6 +105,47 @@ class StreamSessionProvider extends ChangeNotifier {
   int _sessionGeneration = 0;
   bool _startInFlight = false;
   bool _disposed = false;
+
+  static const bool recoveryExperimentEnabled =
+      StreamInvestigationTrace.enabled &&
+      bool.fromEnvironment('MWDAT_RECOVERY_EXPERIMENT');
+  bool _experimentUsed = false;
+  String? _experimentTrialId;
+  int _experimentTrialNumber = 0;
+
+  /// Capture before dismissing diagnostics; a changed session invalidates it.
+  int? get recoveryExperimentToken =>
+      recoveryExperimentEnabled &&
+          !_disposed &&
+          !_experimentUsed &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+          _streamingIntended &&
+          _sessionState == StreamSessionState.streaming &&
+          !_isRecovering &&
+          !_startInFlight &&
+          !_isTearingDown &&
+          _pendingUserAction == null
+      ? _sessionGeneration
+      : null;
+
+  /// Exercises app recovery policy, not a real SDK fault. Verify frames first.
+  bool triggerRecoveryExperiment(int token) {
+    if (recoveryExperimentToken != token) return false;
+    _experimentUsed = true;
+    _experimentTrialId =
+        '${DateTime.now().microsecondsSinceEpoch}-${++_experimentTrialNumber}';
+    _trace('recoveryExperimentTriggered');
+    unawaited(
+      _setError(
+        const StreamSessionError(
+          code: 'videoStreamingError',
+          message: 'Synthetic foreground recovery experiment',
+        ),
+        errorSource: 'synthetic',
+      ),
+    );
+    return true;
+  }
 
   // --- "Fix something first" latch ----------------------------------------
   // Terminal errors need a physical action before a restart can succeed: put
@@ -478,7 +519,11 @@ class StreamSessionProvider extends ChangeNotifier {
   /// and the plugin would reject it with `APP_BACKGROUNDED` anyway.
   static const String _backgroundStopCode = 'stoppedForBackground';
 
-  void _trace(String event, {StreamSessionError? error}) {
+  void _trace(
+    String event, {
+    StreamSessionError? error,
+    String? errorSource,
+  }) {
     if (!StreamInvestigationTrace.enabled) return;
     StreamInvestigationTrace.record(event, {
       'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
@@ -495,6 +540,13 @@ class StreamSessionProvider extends ChangeNotifier {
       },
       'sdkRetries': _recoveryAttempts,
       'frameStallRetries': _frameStallRecoveryAttempts,
+      if (_experimentTrialId != null) ...{
+        'trialId': _experimentTrialId,
+        // Trial origin only: errorSource identifies each received error.
+        'triggerSource': 'synthetic',
+        'postCleanupDelayMs': 0,
+      },
+      'errorSource': ?errorSource,
       if (error != null) ...{
         'code': error.code,
         'reason': error.stallReason?.name,
@@ -503,8 +555,11 @@ class StreamSessionProvider extends ChangeNotifier {
     });
   }
 
-  Future<void> _setError(StreamSessionError error) async {
-    _trace('errorReceived', error: error);
+  Future<void> _setError(
+    StreamSessionError error, {
+    String errorSource = 'platform',
+  }) async {
+    _trace('errorReceived', error: error, errorSource: errorSource);
     if (error.code == _backgroundStopCode) {
       // Disarm recovery before the terminal `stopped` lands. Without this the
       // SDK's own `videoStreamingError` death-rattle races the deliberate stop
@@ -760,6 +815,10 @@ class StreamSessionProvider extends ChangeNotifier {
   Future<bool> startStreamSession() async {
     if (_disposed || _startInFlight || _isTearingDown || _isRecovering) {
       return false;
+    }
+    if (recoveryExperimentEnabled && !_streamingIntended) {
+      _experimentUsed = false;
+      _experimentTrialId = null;
     }
     _trace('manualStartRequested');
     _recoveryAttempts = 0;

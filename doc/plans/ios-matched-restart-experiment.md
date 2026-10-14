@@ -1,8 +1,46 @@
 # Matched restart timing experiment
 
-Status: plan only, prepared 2026-10-14. No experiment code or device actions
-authorized by this planning step. Implement the first stage only after the
-maintainer selects it; decide later stages from its evidence.
+Status: stage 1 implemented after maintainer approval on 2026-10-14; physical
+validation pending. Stage 2 remains a proposal, with no delay implementation.
+
+## Stage 1 controls and trace interpretation
+
+Build from `example/` with the pinned Flutter SDK:
+
+```sh
+/Users/gdelataillade/dev/flutter/bin/flutter build ios --release \
+  --dart-define=MWDAT_INVESTIGATION=true \
+  --dart-define=MWDAT_RECOVERY_EXPERIMENT=true
+```
+
+The diagnostics sheet exposes **Investigation: synthetic foreground recovery
+(once)** only with both defines. It is enabled only for an eligible foreground
+stream. Tapping it dismisses the sheet and waits for route disposal before
+dispatch, so diagnostics polling stops first. The captured session token and all
+eligibility guards are checked again after dismissal. A stopped, replaced,
+backgrounded or disposed session cannot accept the stale request.
+
+An accepted request records `recoveryExperimentTriggered`, with `trialId`,
+`triggerSource: synthetic`, `postCleanupDelayMs: 0` and lifecycle. Related Dart
+records retain that trial origin until a fresh manual session. On each
+`errorReceived`, **`errorSource`** distinguishes `synthetic` from `platform`;
+platform includes native SDK errors and plugin watchdog errors. A later real
+error in a synthetic trial remains `platform`. Native records are unchanged.
+
+For device QA, use the capture startup checks and physical protocol below:
+enable background streaming, start RAW / medium / 30 FPS, verify at least ten
+seconds of actual frames, open diagnostics, then tap the experiment action.
+Observe replacement frames for ten seconds; explicitly Stop and Start before
+repeating. The current control tests immediate recovery only. It does not make
+the SDK experience a genuine camera failure or establish the physical root cause.
+
+Validation on 2026-10-14: scoped formatting/static analysis passed; the normal
+example suite passed 63 tests and the recovery suite with both defines passed
+42. The 11 experiment checks also ran with neither define and each define alone
+to verify that both gates are required. The signed instrumented iOS release
+build succeeded (`build/ios/iphoneos/Runner.app`). No installation, camera use or
+phone test was performed in this implementation step. Native code and the
+capture collector were unchanged, so their existing harnesses were not rerun.
 
 ## Question and evidence
 
