@@ -1016,13 +1016,21 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   @MainActor
-  private func teardownStreamOnly() async {
+  private func teardownStreamOnly(traceParent: StreamInvestigationTrace.Span? = nil) async {
+    let trace = StreamInvestigationTrace.begin("streamTeardown", parent: traceParent)
+    defer { StreamInvestigationTrace.end(trace) }
     if let inFlight = teardownTask {
+      let wait = StreamInvestigationTrace.begin("priorTeardownTaskWait", parent: trace)
       await inFlight.value
+      StreamInvestigationTrace.end(wait)
     }
     teardownSeq += 1
     let mySeq = teardownSeq
-    let task = Task { @MainActor in await self.performTeardownStreamOnly() }
+    let scheduling = StreamInvestigationTrace.begin("teardownTaskScheduling", parent: trace)
+    let task = Task { @MainActor in
+      StreamInvestigationTrace.end(scheduling)
+      await self.performTeardownStreamOnly(traceParent: trace)
+    }
     teardownTask = task
     await task.value
     // Only the most recent starter clears the slot, so a caller that queued
@@ -1031,8 +1039,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   @MainActor
-  private func performTeardownStreamOnly() async {
+  private func performTeardownStreamOnly(traceParent: StreamInvestigationTrace.Span?) async {
+    let trace = StreamInvestigationTrace.begin("performStreamTeardown", parent: traceParent)
+    defer { StreamInvestigationTrace.end(trace) }
+    let snapshot = StreamInvestigationTrace.begin("teardownSnapshot", parent: trace)
     StreamInvestigationTrace.record("cameraTeardown", diagnosticsSnapshot())
+    StreamInvestigationTrace.end(snapshot)
     NSLog("[MWDAT] teardownStreamOnly — stopping camera, awaiting stop cascade")
 
     // Capture identities and stop BEFORE the first suspension below. While this
@@ -1048,14 +1060,22 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // never reports on (the device-availability watchdog, a DeviceSession that
     // stopped underneath us), and a silent detach left the app holding a live
     // texture id with no terminal event — a `Texture` frozen on its last frame.
+    let detach = StreamInvestigationTrace.begin("detachLocalStreamState", parent: trace)
     cancelFrameWatchdog()
     diagnostics?.stateChanged(streaming: false)
     diagnostics = nil
     diagnosticsConfiguration = [:]
-    if let token = diagnosticsStateToken { Task { await token.cancel() } }
+    if let token = diagnosticsStateToken {
+      Task {
+        let cancellation = StreamInvestigationTrace.begin("diagnosticsListenerCancel", parent: trace)
+        await token.cancel()
+        StreamInvestigationTrace.end(cancellation)
+      }
+    }
     diagnosticsStateToken = nil
     streamStateHandler.detachEmittingStopped()
     streamErrorHandler.session = nil
+    StreamInvestigationTrace.end(detach)
 
     // `Camera.stop()` synchronously calls `Stream.stop()` and detaches the
     // capability from the DeviceSession.
@@ -1075,10 +1095,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // *was* the `Stream` and there was no removal API, so the DeviceSession
     // retained it for its whole life and our nil was never the last release.
     // Under 0.9.0 it is — hence the bounded wait below before letting go.
+    let cameraStop = StreamInvestigationTrace.begin("cameraStopCall", parent: trace)
     camera?.stop()
+    StreamInvestigationTrace.end(cameraStop)
 
     if let token = videoListenerToken {
+      let cancellation = StreamInvestigationTrace.begin("videoListenerCancel", parent: trace)
       await token.cancel()
+      StreamInvestigationTrace.end(cancellation)
       videoListenerToken = nil
     }
 
@@ -1091,9 +1115,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // unregister a live texture and orphan a running stream with no reference
     // left to stop it.
     if let stoppingStream {
-      await awaitStreamStopped(stoppingStream)
+      await awaitStreamStopped(stoppingStream, traceParent: trace)
     }
 
+    let release = StreamInvestigationTrace.begin("releaseStreamResources", parent: trace)
+    defer { StreamInvestigationTrace.end(release) }
     if camera === stoppingCamera { camera = nil }
     if streamSession === stoppingStream { streamSession = nil }
 
@@ -1131,15 +1157,23 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// glasses never receive the capability removal. The listener is attached
   /// before the state is checked so a transition can't slip between the two.
   @MainActor
-  private func awaitStreamStopped(_ stream: MWDATCamera.Stream) async {
+  private func awaitStreamStopped(
+    _ stream: MWDATCamera.Stream,
+    traceParent: StreamInvestigationTrace.Span?
+  ) async {
+    let trace = StreamInvestigationTrace.begin("awaitStreamStopped", parent: traceParent)
+    defer { StreamInvestigationTrace.end(trace, ["stopped": stream.state == .stopped]) }
+    let subscription = StreamInvestigationTrace.begin("streamStopStateSubscribe", parent: trace)
     var listenerToken: (any MWDATCore.AnyListenerToken)?
     let states = AsyncStream<StreamState> { continuation in
       listenerToken = stream.statePublisher.listen { state in
         continuation.yield(state)
       }
     }
+    StreamInvestigationTrace.end(subscription)
 
     if stream.state != .stopped {
+      let race = StreamInvestigationTrace.begin("streamStopStateRace", parent: trace)
       let stopped = await withTaskGroup(of: Bool.self) { group in
         group.addTask {
           for await state in states where state == .stopped {
@@ -1162,9 +1196,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           return false
         }
         let first = await group.next() ?? false
+        StreamInvestigationTrace.record("cleanupWaitFirstResult", [
+          "spanId": race?.id as Any? ?? NSNull(), "phase": "streamStopStateRace",
+          "stopped": first, "abortStopWait": abortStopWait
+        ])
         group.cancelAll()
         return first
       }
+      StreamInvestigationTrace.end(race, ["stopped": stopped, "abortStopWait": abortStopWait])
       if !stopped, stream.state != .stopped {
         NSLog(
           "[MWDAT] stream did not reach .stopped within \(streamStopTimeout)s (state: \(stream.state), aborted: \(abortStopWait)) — releasing anyway; the glasses may keep a stale capability")
@@ -1172,7 +1211,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
 
     if let listenerToken {
+      let cancellation = StreamInvestigationTrace.begin("streamStopListenerCancel", parent: trace)
       await listenerToken.cancel()
+      StreamInvestigationTrace.end(cancellation)
     }
   }
 
@@ -1180,12 +1221,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   /// disconnects, when mock devices are disabled, or when a new mock
   /// config is applied.
   @MainActor
-  private func teardownDeviceSession() async {
-    await teardownStreamOnly()
+  private func teardownDeviceSession(traceParent: StreamInvestigationTrace.Span? = nil) async {
+    let trace = StreamInvestigationTrace.begin("deviceSessionTeardown", parent: traceParent)
+    defer { StreamInvestigationTrace.end(trace) }
+    await teardownStreamOnly(traceParent: trace)
+    let observers = StreamInvestigationTrace.begin("deviceObserverTasksCancel", parent: trace)
     deviceSessionStateTask?.cancel()
     deviceSessionStateTask = nil
     deviceSessionErrorTask?.cancel()
     deviceSessionErrorTask = nil
+    StreamInvestigationTrace.end(observers)
     if let session = deviceSession {
       // Capture the state stream BEFORE stop() so the transition can't be
       // missed, then hold the strong reference until the session actually
@@ -1193,10 +1238,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // cascade: releasing early can cancel the SDK's session-end handshake
       // before the glasses hear about it, which also mutes the stream-ended
       // tone the glasses play on session end.
+      let subscription = StreamInvestigationTrace.begin("deviceStopStateSubscribe", parent: trace)
       let stateStream = session.stateStream()
+      StreamInvestigationTrace.end(subscription)
       deviceSession = nil
+      let stop = StreamInvestigationTrace.begin("deviceSessionStopCall", parent: trace)
       session.stop()
-      await awaitDeviceSessionStopped(session, stateStream: stateStream)
+      StreamInvestigationTrace.end(stop)
+      await awaitDeviceSessionStopped(session, stateStream: stateStream, traceParent: trace)
     }
   }
 
@@ -1207,9 +1256,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func awaitDeviceSessionStopped(
     _ session: DeviceSession,
-    stateStream: AsyncStream<DeviceSessionState>
+    stateStream: AsyncStream<DeviceSessionState>,
+    traceParent: StreamInvestigationTrace.Span?
   ) async {
+    let trace = StreamInvestigationTrace.begin("awaitDeviceSessionStopped", parent: traceParent)
+    defer { StreamInvestigationTrace.end(trace, ["stopped": session.state == .stopped]) }
     if session.state == .stopped { return }
+    let race = StreamInvestigationTrace.begin("deviceStopStateRace", parent: trace)
     let stopped = await withTaskGroup(of: Bool.self) { group in
       group.addTask {
         for await state in stateStream where state == .stopped { return true }
@@ -1227,9 +1280,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return false
       }
       let first = await group.next() ?? false
+      StreamInvestigationTrace.record("cleanupWaitFirstResult", [
+        "spanId": race?.id as Any? ?? NSNull(), "phase": "deviceStopStateRace",
+        "stopped": first, "abortStopWait": abortStopWait
+      ])
       group.cancelAll()
       return first
     }
+    StreamInvestigationTrace.end(race, ["stopped": stopped, "abortStopWait": abortStopWait])
     if !stopped, session.state != .stopped {
       NSLog(
         "[MWDAT] device session did not reach .stopped within \(deviceSessionStopTimeout)s (state: \(session.state), aborted: \(abortStopWait)) — releasing anyway")
@@ -2069,13 +2127,17 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   }
 
   func stopStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let trace = StreamInvestigationTrace.begin("stopMethod")
+    let scheduling = StreamInvestigationTrace.begin("stopMainActorScheduling", parent: trace)
     Task { @MainActor in
+      StreamInvestigationTrace.end(scheduling)
+      defer { StreamInvestigationTrace.end(trace) }
       guard streamSession != nil else {
         // No stream, but a failed start can leave a started DeviceSession
         // cached — end it anyway so the glasses aren't left mid-session
         // (which would also mute the next start's tone).
         if deviceSession != nil {
-          await teardownDeviceSession()
+          await teardownDeviceSession(traceParent: trace)
         }
         result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
         return
@@ -2088,7 +2150,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // restarts) meant the glasses only chimed when the app was backgrounded
       // or killed. Trade-off: the next startStreamSession is a full session
       // reconnect rather than a fast addCamera.
-      await teardownDeviceSession()
+      await teardownDeviceSession(traceParent: trace)
       result(true)
     }
   }

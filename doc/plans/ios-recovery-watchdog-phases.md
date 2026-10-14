@@ -134,3 +134,49 @@ device-session stop/wait. Separate scheduling delays from awaited SDK operations
 and trace emission overhead. Repeat with stable observation or manual controls,
 then compare with an uninstrumented release. Preserve the non-overlap and
 explicit-cancellation guards throughout.
+
+### Native timing instrumentation plan — approved 2026-10-14
+
+1. Add correlated begin/end spans to the existing opt-in, bounded native trace.
+   Record operation start/end monotonic times, parent span IDs, field-capture
+   cost and trace-lock wait. Do not evaluate trace fields or allocate span IDs
+   when investigation is disabled.
+2. Cover method-call-to-main-actor scheduling, prior teardown-task waiting,
+   teardown-task scheduling, diagnostics capture, local detach, synchronous
+   camera stop, video-listener cancellation, stream-state subscription/wait/
+   cancellation, resource release and device-session stop/wait. Mark task-group
+   first-result selection separately from group exit to expose cancellation drain.
+3. Keep operation order, task structure, state retention, timeout constants and
+   error policy unchanged. Log only stage names, IDs, durations and state flags;
+   no frames, device names or SDK error descriptions.
+4. Validate trace opt-out, concurrent span correlation and the bounded record
+   limit with a standalone Swift harness, then run existing diagnostics checks
+   and build the signed iOS release. A physical repeat is required before any
+   conclusion about the source of the 93-second delay.
+
+Instrumentation implemented and signed instrumented iOS build passed. The
+standalone trace harness passed opt-out/lazy-field checks, both enablement paths,
+eight concurrent child spans, monotonic duration/parent correlation, expensive
+field capture, and the 2,001-record cap (including its final truncation marker).
+The existing diagnostics harness passed all 44 assertions. No Dart or native
+cleanup policy changed; no new device capture has been performed yet.
+
+Trace interpretation:
+
+- Pair `cleanupPhaseBegin` / `cleanupPhaseEnd` using `spanId`; use `parentSpanId`
+  for nested operations, including overlapping cleanup requests.
+- `durationUs` is measured between `operationStartUptimeUs` and
+  `operationEndUptimeUs`. It excludes the span's own begin/end log emission,
+  but includes scheduling gaps and nested instrumentation. It is elapsed time,
+  not CPU time or proof of SDK-only work.
+- Every native record includes `traceCallUptimeUs`, `traceFieldsUs` and
+  `traceLockWaitUs`. Existing `uptimeUs` is sampled after acquiring the trace
+  lock. The difference between a begin record and its operation-start timestamp
+  exposes time spent emitting that begin record or being scheduled afterward.
+- `cleanupWaitFirstResult` is emitted before cancelling the remaining task-group
+  children. The matching race span ends after group exit, exposing a possible
+  cancellation-drain delay. It reports whether the first result indicated stopped
+  and the current abort flag; it does not identify which false-result child won.
+- Missing span ends indicate unfinished work only if capture remains active and
+  complete with no `traceLimitReached` marker. Do not interpret truncation or log
+  loss as a hung operation. Logging itself may change background scheduling.
