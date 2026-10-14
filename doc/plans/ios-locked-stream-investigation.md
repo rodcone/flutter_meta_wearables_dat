@@ -584,10 +584,12 @@ delay or diagnostic operation accounted for the long native stop.
 
 After unlock, a successful fresh mirror observation showed the stopped placeholder
 and "Waiting for an active device". Diagnostics showed no current session, state
-stopped, zero counters, foreground, and background opt-in still true. The agent
-asked whether wear/connection remained continuous; that confirmation is pending.
-Treat the run as observed failure to resume, with continuous-connection conditions
-unconfirmed. The later `unexpectedError` again followed watchdog cancellation;
+stopped, zero counters, foreground, and background opt-in still true. The user
+subsequently confirmed that the glasses remained worn and connected throughout
+the interval. Classify this as an observed failure to resume under user-confirmed
+continuous wear/connection. This is user-reported connection evidence, not an
+independent transport trace; the app's later lack of an active device remains
+unexplained. The later `unexpectedError` again followed watchdog cancellation;
 its description was not logged.
 
 Outcome: the new phase deadline and non-overlap guard behaved as designed, but
