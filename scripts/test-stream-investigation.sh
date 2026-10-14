@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 output_dir=$(mktemp -d)
 trap 'rm -rf "$output_dir"' EXIT
 swiftc ios/flutter_meta_wearables_dat/Sources/flutter_meta_wearables_dat/StreamInvestigationTrace.swift scripts/tests/stream_investigation/main.swift -o "$output_dir/test"
+swiftc example/ios/Runner/InvestigationTraceSink.swift scripts/tests/investigation_sink/main.swift -o "$output_dir/sink-test"
+"$output_dir/sink-test"
 MWDAT_INVESTIGATION=0 "$output_dir/test" 2> "$output_dir/disabled.log"
 MWDAT_INVESTIGATION=1 "$output_dir/test" 2> "$output_dir/enabled.log"
 MWDAT_INVESTIGATION=0 "$output_dir/test" --mwdat-investigation 2> "$output_dir/argument.log"

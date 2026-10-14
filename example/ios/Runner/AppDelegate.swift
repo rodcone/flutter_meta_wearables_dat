@@ -16,6 +16,8 @@ import UIKit
 /// really did was call `super`, which the scene delegate now does.
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  private let investigationSink = InvestigationTraceSink()
+  private var investigationChannel: FlutterMethodChannel?
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -25,5 +27,24 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ExampleInvestigationTrace") else { return }
+    let channel = FlutterMethodChannel(
+      name: "example/stream_investigation", binaryMessenger: registrar.messenger())
+    investigationChannel = channel
+    channel.setMethodCallHandler { [investigationSink] call, result in
+      switch call.method {
+      case "initialize":
+        result(investigationSink.initialize())
+      case "record":
+        guard let payload = call.arguments as? String,
+              investigationSink.record(payload) else {
+          result(FlutterError(code: "TRACE_REJECTED", message: nil, details: nil))
+          return
+        }
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
   }
 }

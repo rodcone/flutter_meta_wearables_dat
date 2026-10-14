@@ -193,6 +193,11 @@ Native switch: launch argument `--mwdat-investigation` or environment
 Example switch: build with `--dart-define=MWDAT_INVESTIGATION=true`.
 Both are off by default. Installation preserves existing app data.
 
+**Capture update, 2026-10-14:** the split-reader commands below describe the
+original setup. Subsequent syslog capture failed to deliver Dart events. New
+captures must use the [single-console capture procedure](ios-trace-capture.md),
+including its native/Dart startup gate, once the updated example is installed.
+
 From `example/`, build with the repository Flutter SDK:
 
 ```sh

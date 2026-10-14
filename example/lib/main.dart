@@ -13,10 +13,12 @@ import 'package:flutter_meta_wearables_dat_example/screens/settings/settings_she
 import 'package:flutter_meta_wearables_dat_example/screens/stream/diagnostics_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/stream/paired_devices_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/stream/stream_screen.dart';
+import 'package:flutter_meta_wearables_dat_example/utils/stream_investigation_trace.dart';
 import 'package:provider/provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await StreamInvestigationTrace.initialize();
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,

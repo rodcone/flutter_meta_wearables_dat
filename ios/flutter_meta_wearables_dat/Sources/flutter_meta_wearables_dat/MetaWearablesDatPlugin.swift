@@ -897,7 +897,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   /// Read-only snapshot; frame metrics are coherent under the tracker lock.
   @MainActor
-  private func diagnosticsSnapshot() -> [String: Any] {
+  private func diagnosticsSnapshot(includeAudioRoute: Bool = true) -> [String: Any] {
     var result: [String: Any] = [
       "sessionState": streamSession.map { StreamStateStreamHandler.stateToInt($0.state) } ?? 1,
       "framesReceived": 0, "framesSubmitted": 0, "waitingForFirstFrame": false,
@@ -912,16 +912,18 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       result["peakQueuedFrames"] = queue.peakInFlight
     }
     // Reading currentRoute does not activate or reconfigure the audio session.
-    let route = AVAudioSession.sharedInstance().currentRoute
-    result["audioRoute"] = ["inputs": route.inputs.map { $0.portType.rawValue },
-                            "outputs": route.outputs.map { $0.portType.rawValue }]
+    if includeAudioRoute {
+      let route = AVAudioSession.sharedInstance().currentRoute
+      result["audioRoute"] = ["inputs": route.inputs.map { $0.portType.rawValue },
+                              "outputs": route.outputs.map { $0.portType.rawValue }]
+    }
     return result
   }
 
   @MainActor
   private func reportStall(_ reason: String, message: String) {
     diagnostics?.setStallReason(reason)
-    StreamInvestigationTrace.record("stall", diagnosticsSnapshot())
+    StreamInvestigationTrace.record("stall", diagnosticsSnapshot(includeAudioRoute: false))
     streamErrorHandler.sendFrameStall(message: message, reason: reason, diagnostics: diagnosticsSnapshot())
   }
 
@@ -956,7 +958,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let interval = investigationLastTick.map { now - $0 } ?? 0
       investigationLastTick = now
       if interval > 2 || now - investigationLastSummary >= 5 {
-        var fields = diagnosticsSnapshot()
+        var fields = diagnosticsSnapshot(includeAudioRoute: false)
         fields["tickIntervalUs"] = Int(interval * 1_000_000)
         fields["parentId"] = investigationParentId
         StreamInvestigationTrace.record("watchdog", fields)
@@ -1043,7 +1045,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let trace = StreamInvestigationTrace.begin("performStreamTeardown", parent: traceParent)
     defer { StreamInvestigationTrace.end(trace) }
     let snapshot = StreamInvestigationTrace.begin("teardownSnapshot", parent: trace)
-    StreamInvestigationTrace.record("cameraTeardown", diagnosticsSnapshot())
+    StreamInvestigationTrace.record("cameraTeardown", diagnosticsSnapshot(includeAudioRoute: false))
     StreamInvestigationTrace.end(snapshot)
     NSLog("[MWDAT] teardownStreamOnly — stopping camera, awaiting stop cascade")
 
@@ -1334,7 +1336,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func handleDidEnterBackground() {
     isInBackground = true
-    StreamInvestigationTrace.record("background", diagnosticsSnapshot())
+    StreamInvestigationTrace.record("background", diagnosticsSnapshot(includeAudioRoute: false))
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
@@ -1418,7 +1420,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func handleWillEnterForeground() {
     isInBackground = false
-    StreamInvestigationTrace.record("foreground", diagnosticsSnapshot())
+    StreamInvestigationTrace.record("foreground", diagnosticsSnapshot(includeAudioRoute: false))
     // With background streaming on, frames kept arriving while backgrounded but
     // the texture was deliberately not written. Measure the push clock from
     // here, or the first watchdog tick reports the whole background window.
