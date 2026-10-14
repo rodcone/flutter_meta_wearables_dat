@@ -532,3 +532,73 @@ Prepared [a separate recovery-deadline implementation plan](ios-recovery-watchdo
 No behavioral changes were applied. Restored background streaming off, stopped
 both collectors, installed and launched the normal release without investigation
 flags, verified its idle screen and off toggle, and restored Agent Access off.
+
+### Phase-deadline device test — 2026-10-14, 11:54 Europe/Madrid
+
+Installed the instrumented signed release built from `4a21088`. Phone remains
+iOS 27.0 (24A437); user deferred the iOS update and confirmed its scheduled
+installation was cancelled. User confirmed glasses worn at setup. RAW / medium /
+30 FPS, Bluetooth Classic, background streaming enabled. Foreground SDK arrival
+was around 27–28.5 FPS, with texture submissions around 25–26 FPS.
+
+Native run `80DB91A1-8C13-47A8-BA59-388FC9791A29`, PID 86750. Complete native
+sequence 1–92 and Dart sequence 1–91, with no sequence gaps. Local tagged logs,
+merged `trial.json`, and mirror event history are in
+`/var/folders/wg/f2_rmttd7mjg7wxjybfjbz000000gn/T/dat-recovery-trace-6srbxhl7/`.
+Temporary evidence may be removed by macOS cleanup; no video was recorded.
+
+iPhoneMirror 0.5.0 exposed action observations and timestamped connection events.
+It repeatedly reported video stalls, native failures and reconnects while the DAT
+app still logged healthy foreground frames. The agent's attempted lock returned
+HTTP 409 (session changed), and no native background event followed it. The user
+therefore locked the phone manually and confirmed locked. This separates the
+mirror failures from the subsequently observed app failure; causality between
+mirroring and background scheduling is not established.
+
+Native background entry was 11:54:43.728; foreground return was 11:56:28.482.
+Monotonic background duration: **104.755890 seconds**, including the time after
+the 30-second unlock prompt while awaiting the user's reply. This is not an exact
+30-second lock test. No manual Start/Stop occurred during the interval.
+
+| Seconds after native background entry | Event |
+| --- | --- |
+| +2.715 | Dart schedules recovery for the camera error burst |
+| +3.130 | One recovery enters stopping and starts teardown |
+| +3.132 | Native receives stop request |
+| +18.126 | Native camera-teardown trace emitted |
+| +30.209 | Camera state becomes stopping |
+| +46.753 | Dart cleanup watchdog fires in stopping phase (20,000 ms policy) |
+| +48.435 | Recovery cancellation is traced |
+| +95.753 | Native device-session error received |
+| +95.754 | Native requests `unexpectedError` without a current camera ID |
+| +95.780 | Device session reports stopped |
+| +96.500 | Dart teardown completes; no replacement start follows |
+| +104.754 | Foreground event; native session stopped |
+
+All 40 `videoStreamingError` callbacks shared one actual recovery attempt.
+Cleanup took about **93.37 seconds** from Dart teardown start to completion.
+The nominal 20-second timer callback ran about **43.62 seconds** after teardown
+began; background scheduling/logging delays prevent treating it as a wall-clock
+execution guarantee. The trace does not isolate which SDK await, actor scheduling
+delay or diagnostic operation accounted for the long native stop.
+
+After unlock, a successful fresh mirror observation showed the stopped placeholder
+and "Waiting for an active device". Diagnostics showed no current session, state
+stopped, zero counters, foreground, and background opt-in still true. The agent
+asked whether wear/connection remained continuous; that confirmation is pending.
+Treat the run as observed failure to resume, with continuous-connection conditions
+unconfirmed. The later `unexpectedError` again followed watchdog cancellation;
+its description was not logged.
+
+Outcome: the new phase deadline and non-overlap guard behaved as designed, but
+automatic recovery failed. No replacement start was issued while cleanup was
+pending, nor after it eventually completed. A second consecutive interval could
+not proceed from a running stream; the uninstrumented comparison was not run.
+Do not mark background reliability fixed or merely increase the timeout again.
+The next proposed investigation is native teardown phase timing, described in
+[the recovery plan](ios-recovery-watchdog-phases.md).
+
+Cleanup: disabled background streaming and visually verified the off toggle;
+stopped both owned collectors; built, installed and launched the normal release
+without trace flags; observed the idle Start screen. Agent Access restored off.
+No implementation changes were made during this test.

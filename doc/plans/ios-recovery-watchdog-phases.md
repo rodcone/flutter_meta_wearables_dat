@@ -1,7 +1,9 @@
 # iOS background recovery: separate backoff, teardown and startup deadlines
 
-Status: implemented in the example; automated checks passed, device validation
-of this change is pending. Prepared 2026-10-13 after the
+Status: implemented in the example; automated checks passed. The 2026-10-14
+instrumented device attempt failed automatic recovery because native cleanup
+outlasted its separate deadline. Background reliability remains unresolved.
+Prepared 2026-10-13 after the
 17:08/17:09 Europe/Madrid instrumented lock trials. User requested tracing and a
 plan before further behavioral changes.
 
@@ -114,3 +116,21 @@ seconds. A startup deadline should not cover backoff plus all of that work.
 - The existing native SDK/device interruption remains unresolved. These checks
   verify example recovery policy; physical lock/unlock reliability must still be
   tested using step 5 with the new build.
+
+## Device follow-up — 2026-10-14
+
+See [the investigation record](ios-locked-stream-investigation.md) for timing and
+capture limitations. Build `4a21088` correctly coalesced 40 errors into one
+recovery and retained the unresolved-stop guard after its cleanup deadline.
+However, native stop completion took about 93.37 seconds, and no replacement
+start occurred. The 20-second timer callback itself ran about 43.62 seconds after
+teardown began; these timers cannot guarantee wall-clock execution while the app
+is backgrounded. No startup deadline was armed in this attempt.
+
+Do not simply increase the cleanup deadline. Before changing behavior again,
+instrument entry/exit around the native teardown task, synchronous camera stop,
+video-listener cancellation, stream-state wait, listener cancellation, and
+device-session stop/wait. Separate scheduling delays from awaited SDK operations
+and trace emission overhead. Repeat with stable observation or manual controls,
+then compare with an uninstrumented release. Preserve the non-overlap and
+explicit-cancellation guards throughout.
