@@ -159,7 +159,7 @@ standalone trace harness passed opt-out/lazy-field checks, both enablement paths
 eight concurrent child spans, monotonic duration/parent correlation, expensive
 field capture, and the 2,001-record cap (including its final truncation marker).
 The existing diagnostics harness passed all 44 assertions. No Dart or native
-cleanup policy changed; no new device capture has been performed yet.
+cleanup policy changed. A subsequent physical capture is recorded below.
 
 Trace interpretation:
 
@@ -180,3 +180,19 @@ Trace interpretation:
 - Missing span ends indicate unfinished work only if capture remains active and
   complete with no `traceLimitReached` marker. Do not interpret truncation or log
   loss as a hung operation. Logging itself may change background scheduling.
+
+### Native phase capture result — 2026-10-14, 12:47
+
+The instrumented `922e60e` capture did not reproduce the 93-second stop: native
+cleanup completed in 107.140 ms, with both state waits reporting stopped and
+no substantial task-group cancellation drain. A replacement start followed;
+its new device session emitted `unexpectedError` about 96 ms after observation,
+before creating a camera. The app remained stopped after unlock. Background
+duration was 46.877 seconds, including response latency after the unlock prompt.
+
+Native sequence 1–119 is complete; Dart syslog records were unavailable. A stall
+diagnostic snapshot took 1.771 seconds, so observer overhead remains a concern.
+This run establishes a different failure path, not the cause of the previous
+delay. See [the investigation record](ios-locked-stream-investigation.md) for
+timings and limitations. Background reliability remains unresolved; no timeout,
+retry policy or native cleanup behavior was changed after the capture.

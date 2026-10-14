@@ -604,3 +604,66 @@ Cleanup: disabled background streaming and visually verified the off toggle;
 stopped both owned collectors; built, installed and launched the normal release
 without trace flags; observed the idle Start screen. Agent Access restored off.
 No implementation changes were made during this test.
+
+### Native cleanup phase capture — 2026-10-14, 12:47 Europe/Madrid
+
+Installed the instrumented release from `922e60e`, RAW / medium / 30 FPS,
+Bluetooth Classic, background opt-in enabled. User confirmed the phone ready
+and glasses connected/worn at setup. Foreground arrival was 28.5–30 FPS near
+lock, with 26.5–28 texture submissions/sec. No manual Start/Stop occurred during
+the interval. iPhoneMirror dispatched lock successfully; native background entry
+was 12:47:35.135 and foreground return was 12:48:22.011: **46.877028 seconds**
+monotonic elapsed time, including user response latency after the 30-second
+unlock prompt. The user confirmed unlocking.
+
+Native run `554ADD44-CD16-488A-AED4-2AF1A85E3927`, PID 86886, sequence 1–119
+complete, with no truncation and every cleanup span paired. Local tagged logs
+and merged `trial.json` are in
+`/var/folders/wg/f2_rmttd7mjg7wxjybfjbz000000gn/T/dat-recovery-trace-99rtxewl/`.
+The Dart syslog reader captured no records; a second reader connected but also
+captured none. Consequently Dart phase transitions, timer events and recovery
+accounting cannot be verified from this capture. No video was recorded; temporary
+evidence may be removed by macOS cleanup.
+
+| Seconds after native background entry | Event |
+| --- | --- |
+| +1.238 | Camera reports `videoStreamingError` |
+| +4.397 | Stall trace emitted; its diagnostic field capture took 1.771 seconds |
+| +4.868 | Frame arrival resumes before teardown |
+| +4.875 | Native receives stop request |
+| +4.982 | Native stop method completes, measured operation duration 107.140 ms |
+| +4.983 | Replacement start requested; a new device-session identity is observed |
+| +5.080 | Replacement device session reports an error; `unexpectedError` requested |
+| +5.081 | Replacement device session stops; no replacement camera was created |
+| +46.877 | Foreground return with stopped state and zero current-session counters |
+
+The measured stop included camera stop 2.352 ms, video listener cancellation
+16.255 ms, camera stopped-state wait 45.454 ms, device stop call 0.182 ms and
+device stopped-state wait 34.183 ms. Both state races returned `stopped: true`;
+first-result-to-group-exit gaps were below 0.5 ms. Main-actor scheduling was
+0.248 ms and teardown-task scheduling 0.801 ms. These are elapsed durations,
+including nested instrumentation and scheduling, not isolated CPU or SDK costs.
+
+**Outcome: automatic recovery failed again, but the earlier 93-second cleanup
+delay did not reproduce.** This time cleanup completed before a fresh start,
+which failed about 96 ms after its device-session observation. No replacement
+camera or first frame followed. A fresh post-unlock mirror screenshot showed
+the stopped placeholder with Start enabled. The mirror required one reconnect
+after unlock. There was no second consecutive interval or uninstrumented lock
+comparison.
+
+The 1.771-second diagnostic-field capture is a separate measurement concern:
+`diagnosticsSnapshot()` includes an audio-route read, but this span does not
+isolate that read from other work or scheduling. Trace-lock waits were at most
+4 microseconds. Neither the prior long cleanup nor this replacement-session
+failure has a demonstrated physical root cause. Do not increase deadlines or
+broaden `unexpectedError` retries based on this run. A useful next investigation
+is to restore reliable Dart capture, minimize observation overhead, and compare
+one foreground restart with one background restart using the same configuration.
+
+Cleanup: disabled background streaming and visually verified it off, stopped
+both owned log collectors, rebuilt/installed/launched the normal release without
+investigation flags, observed its idle screen and verified its background toggle
+off again. Restored iPhoneMirror Agent Access off and verified the menu status.
+No implementation changes were made during this test; the normal release build
+and documentation diff check passed.
