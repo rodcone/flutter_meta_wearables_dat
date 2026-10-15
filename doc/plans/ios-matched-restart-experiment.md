@@ -1,8 +1,8 @@
 # Matched restart timing experiment
 
-Status: stage 1 implemented on 2026-10-14 and tested on 2026-10-15: one
-foreground recovery passed and one failed. Stage 2 remains a proposal, with no
-delay implementation. Repeat the same condition before introducing a delay.
+Status: stage 1 implemented on 2026-10-14. Two foreground batches on
+2026-10-15 produced three passes and one failure; the repeat batch passed twice.
+Stage 2 remains a proposal, with no delay implementation or production fix.
 
 ## Stage 1 controls and trace interpretation
 
@@ -240,3 +240,74 @@ off on the idle app. Restored Agent Access off and verified its menu status. No
 production code changes, new timeouts, delay implementation or lock tests were
 made in this batch. The normal signed release build and documentation diff checks
 passed; unchanged automated suites were not rerun for this documentation-only step.
+
+
+## Repeat foreground batch — 2026-10-15, approximately 18:15–18:21
+
+The maintainer selected a readiness check and two identical foreground trials.
+Rebuilt from `d379af7` (experiment code still `80e6868`), installed without deleting
+app data, and required a new native/bridge/Dart capture preflight. The user
+confirmed the phone was unlocked and the glasses connected and worn, with an
+instruction to keep them on throughout. Registration/Start availability, fresh
+native frames, foreground lifecycle and the normal thermal indicator provided
+operational readiness evidence. Firmware and battery state of the glasses were
+not independently read; this was not a complete device-health audit.
+
+The configuration stayed Bluetooth Classic, background streaming enabled,
+RAW / medium / 30 FPS, zero added post-cleanup delay. Both manual baseline starts
+succeeded without a retry. An explicit manual Stop/Start separated trials.
+
+| Measurement | Repeat 1 | Repeat 2 |
+| --- | --- | --- |
+| Trial ID | `1792081060575799-1` | `1792081218424575-2` |
+| Healthy baseline through last pre-trigger watchdog | 59.103 s / 1,671 frames | 59.221 s / 1,677 frames |
+| Native device-session cleanup duration | 104.781 ms | 112.507 ms |
+| Cleanup completion to replacement native start | 1.734 ms | 1.646 ms |
+| First replacement frame after native start | 2.272 s | 2.510 s |
+| Observation after first replacement frame | 44.190 s / 1,248 frames | 33.868 s / 973 frames |
+| Arrival FPS range in captured post-first-frame watchdogs | 26–29 | 27.5–29 |
+| Texture submission FPS range | 24–27 | 24.5–27.5 |
+| Outcome | Pass | Pass |
+
+Repeat 1 replaced `300414D0-BA9F-4AEB-8311-CD6F196DA807` with
+`D28C8EF1-787C-4BD8-9C7B-6AB3B62EEBEE` (texture 0 → 1). Repeat 2 replaced
+`0D35FC3B-5453-431E-B5BC-3C98196E90C6` with
+`8B4ACD7B-8B87-4731-81B2-D170CBFACA43` (texture 2 → 3). Each trial executed one
+automatic recovery attempt, reached actual first-frame delivery and continued
+receiving frames until explicit Stop. No platform error, frame-stall report or
+recovery deadline expiry was captured. Native snapshots remained foreground;
+Dart records remained `resumed`, with no native background transition captured.
+The live preview was visible after each recovery; submission counts alone are
+not proof of display.
+
+iPhoneMirror repeatedly changed connection sessions. Rejected stale actions were
+not counted as dispatched; a fresh observation preceded each accepted tap.
+These interruptions lengthened manual setup/baselines, but native capture had one
+continuous run with no detected gaps. Diagnostics was closed during recovery.
+There was no phone lock or background test in this batch.
+
+Capture retained locally in ignored
+`build/investigations/2026-10-15-foreground-repeat/`: `records.jsonl` and
+`summary.json`. Native run `70800349-91C9-4F70-8A00-E1AD9DF8B007` contains
+sequences 1–285, Dart run `1792080944410142-332703833` contains 1–49, and bridge
+run `CBBE665B-5A7A-4521-9FB2-945590EF1B8C` contains its startup record.
+Operator stopped the collector after final manual teardown. Preflight passed;
+no malformed/rejected records, gaps, duplicates, out-of-order or truncation were
+reported. The missing-tail limitation still applies. Timings use native uptime.
+
+**Interpretation:** this batch passed twice, but the combined evidence remains
+three passes and one failure across four synthetic trials, plus the separate
+manual startup failure in the first batch. Immediate foreground restart can
+succeed; it is not uniformly reliable. These small samples do not establish a
+failure rate, a root cause, or that background streaming is fixed. The earlier
+foreground failure remains valid. Keep the production recovery policy unchanged;
+inspect what the SDK exposes behind `unexpectedError`, and use a natural
+zero-delay background comparison if another device trial is selected. No fixed
+delay is justified by the present results.
+
+Cleanup: stopped streaming and the owned collector, then rebuilt, installed and
+launched the normal signed release. Generated build configuration contains no
+MWDAT investigation/experiment defines. Visually verified the idle Start screen
+and background streaming off, then restored Agent Access off and verified its
+menu status. No production code changed. The normal release build and
+documentation diff checks passed; unchanged automated suites were not rerun.
