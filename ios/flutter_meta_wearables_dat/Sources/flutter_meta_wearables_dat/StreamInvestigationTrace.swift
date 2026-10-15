@@ -44,6 +44,14 @@ enum StreamInvestigationTrace {
     record("cleanupPhaseEnd", entry)
   }
 
+  // Bound by UTF-8 bytes so unusual Unicode cannot exceed collector limits.
+  static func boundedText(_ text: String, key: String) -> [String: Any] {
+    var bytes = Array(text.utf8.prefix(1_024))
+    while String(bytes: bytes, encoding: .utf8) == nil { bytes.removeLast() }
+    return [key: String(decoding: bytes, as: UTF8.self),
+            "\(key)Truncated": text.utf8.count > 1_024]
+  }
+
   static func record(_ event: String, _ fields: @autoclosure () -> [String: Any] = [:]) {
     guard enabled else { return }
     let calledUs = uptimeUs()

@@ -39,6 +39,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private var deviceSession: DeviceSession?
   private var deviceSessionStateTask: Task<Void, Never>?
   private var deviceSessionErrorTask: Task<Void, Never>?
+  private var investigationDeviceObserver: InvestigationDeviceObserver?
   private var deviceAvailabilityTask: Task<Void, Never>?
   // Debounces the availability watchdog below. `activeDeviceStream()` yields nil
   // as soon as no device satisfies `AutoDeviceSelector`'s eligibility test, and
@@ -765,6 +766,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
 
     if deviceSession == nil {
+      investigationParentId = nil
       let session = try Wearables.shared.createSession(deviceSelector: deviceSelector)
       deviceSession = session
       observeDeviceSession(session)
@@ -855,13 +857,30 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   private func observeDeviceSession(_ session: DeviceSession) {
     let parentId = UUID().uuidString
     investigationParentId = parentId
+    investigationDeviceObserver?.stop()
+    investigationDeviceObserver = nil
+    if StreamInvestigationTrace.enabled {
+      investigationDeviceObserver = InvestigationDeviceObserver(
+        device: session.device ?? Wearables.shared.deviceForIdentifier(session.deviceId),
+        parentId: parentId)
+    }
     StreamInvestigationTrace.record("deviceSessionObserved", ["parentId": parentId])
     deviceSessionStateTask?.cancel()
     deviceSessionStateTask = Task { [weak self] in
       for await state in session.stateStream() {
         StreamInvestigationTrace.record("deviceState", ["parentId": parentId, "state": String(describing: state)])
         guard let self else { return }
+        if StreamInvestigationTrace.enabled, state == .started,
+           self.investigationParentId == parentId,
+           self.investigationDeviceObserver == nil {
+          self.investigationDeviceObserver = InvestigationDeviceObserver(
+            device: session.device, parentId: parentId)
+        }
         if state == .stopped {
+          if self.investigationParentId == parentId {
+            self.investigationDeviceObserver?.stop()
+            self.investigationDeviceObserver = nil
+          }
           // DeviceSession stopped externally — tear down associated stream
           // and drop our reference. A fresh session is created on demand.
           await self.teardownStreamOnly()
@@ -878,7 +897,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceSessionErrorTask?.cancel()
     deviceSessionErrorTask = Task { [weak self] in
       for await error in session.errorStream() {
-        StreamInvestigationTrace.record("deviceErrorReceived", ["parentId": parentId])
+        StreamInvestigationTrace.record("deviceErrorReceived",
+          InvestigationDeviceObserver.errorFields(error, parentId: parentId,
+            origin: "errorStream", sessionState: session.state))
         self?.lastDeviceSessionError = error
         self?.streamErrorHandler.send(deviceSessionError: error)
       }
@@ -1225,7 +1246,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func teardownDeviceSession(traceParent: StreamInvestigationTrace.Span? = nil) async {
     let trace = StreamInvestigationTrace.begin("deviceSessionTeardown", parent: traceParent)
-    defer { StreamInvestigationTrace.end(trace) }
+    let observer = investigationDeviceObserver
+    defer {
+      observer?.stop()
+      if investigationDeviceObserver === observer { investigationDeviceObserver = nil }
+      StreamInvestigationTrace.end(trace)
+    }
     await teardownStreamOnly(traceParent: trace)
     let observers = StreamInvestigationTrace.begin("deviceObserverTasksCancel", parent: trace)
     deviceSessionStateTask?.cancel()
@@ -2017,6 +2043,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       do {
         deviceSession = try await ensureDeviceSessionStarted()
       } catch let e as DeviceSessionError {
+        StreamInvestigationTrace.record("deviceErrorCaught",
+          InvestigationDeviceObserver.errorFields(e, parentId: investigationParentId,
+            origin: "ensureSessionStarted", sessionState: self.deviceSession?.state))
         streamErrorHandler.send(deviceSessionError: e)
         result(FlutterError(code: "DEVICE_SESSION_ERROR", message: "Could not start device session: \(e)", details: nil))
         return
@@ -2047,6 +2076,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       do {
         newCamera = try deviceSession.addCamera(config: streamConfig)
       } catch let e as DeviceSessionError {
+        StreamInvestigationTrace.record("deviceErrorCaught",
+          InvestigationDeviceObserver.errorFields(e, parentId: investigationParentId,
+            origin: "addCamera", sessionState: deviceSession.state))
         streamErrorHandler.send(deviceSessionError: e)
         await teardownStreamOnly()
         result(FlutterError(code: "ADD_CAMERA_ERROR", message: "Could not add camera capability: \(e)", details: nil))
