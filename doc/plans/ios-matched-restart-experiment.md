@@ -1,7 +1,8 @@
 # Matched restart timing experiment
 
-Status: stage 1 implemented after maintainer approval on 2026-10-14; physical
-validation pending. Stage 2 remains a proposal, with no delay implementation.
+Status: stage 1 implemented on 2026-10-14 and tested on 2026-10-15: one
+foreground recovery passed and one failed. Stage 2 remains a proposal, with no
+delay implementation. Repeat the same condition before introducing a delay.
 
 ## Stage 1 controls and trace interpretation
 
@@ -166,3 +167,76 @@ the normal release and restore Agent Access off when the test batch ends.
 
 No changes to existing timeouts, transport, audio session configuration, public
 diagnostics or SDK error handling are proposed for production by this plan.
+
+
+## Physical stage 1 results — 2026-10-15
+
+Tested commit `80e6868` on the connected iPhone 17, iOS 27.0 (24A437), with
+DAT 1.0.0, Bluetooth Classic transport (`com.meta.ar.wearable`), background
+streaming enabled, RAW / medium / 30 FPS. Both compile-time investigation flags
+and the native launch opt-in were active. The user confirmed the glasses stayed
+worn and connected throughout, including the failed restart. Firmware was not
+independently read in this batch. The visible thermal indicator was normal.
+
+The app remained foreground: trial Dart records say `resumed`, native frame
+snapshots say `isAppInBackground: false`, and no native background transition was
+captured. Diagnostics closed on each trigger and remained closed during recovery.
+iPhoneMirror reconnected between observations; guarded stale actions were rejected,
+and a fresh observation was obtained before dispatch. The separate native console
+capture continued with one process/run and no detected sequence loss.
+
+| Measurement | Trial 1 | Trial 2 |
+| --- | --- | --- |
+| Trial ID | `1792079656344983-1` | `1792079824577310-2` |
+| Healthy baseline through last pre-trigger watchdog | 33.068 s / 947 frames | 64.086 s / 1,831 frames |
+| Native device-session cleanup duration | 131.489 ms | 119.021 ms |
+| Cleanup completion to native replacement start | 0.823 ms | 1.745 ms |
+| Replacement result | Camera created; first frame 2.528 s after start | Device-session error 127.061 ms after start; no camera or first frame |
+| Frame observation after replacement first frame | 28.902 s; 826 received frames at last watchdog; 27–28 FPS | None |
+| Outcome | Pass | Fail |
+
+Trial 1 replaced camera `9803957E-F847-4586-B7BD-C4232324956A` with
+`4BD72BA2-3DA7-4596-AAF9-39F413951D25`, using a new texture (0 → 1).
+Its last observation reported 23 FPS submitted; submission is not display proof.
+The preview was also visible after recovery. One automatic recovery attempt ran;
+no authentic platform error was reported in that trial.
+
+Trial 2 began from camera `5A3FEAE0-2127-4961-9C6D-24369F71D641`.
+Its replacement device session emitted `unexpectedError`; Dart recorded
+`errorSource: platform` and cancelled in the `starting` phase. The synthetic
+`videoStreamingError` had its own `errorSource: synthetic` record. No teardown or
+startup deadline expired and no second automatic recovery attempt ran. The UI
+returned to the idle Start screen. This reproduces the replacement failure class
+in the foreground; it does not identify the underlying SDK/device/transport cause.
+
+**Separate failed baseline:** after the successful first trial, manual Stop/Start
+created camera `8050BD48-614B-4D0E-9BD2-7DFDDCC0A31F`, which failed with
+`unexpectedError` before delivering any frame. That manual start was 10.885741 s
+after cleanup completion. No synthetic trigger ran against this camera. A further
+manual start established the healthy baseline used for trial 2. Preserve this as
+a startup failure, not as a third experiment trial or evidence that a ten-second
+post-cleanup delay guarantees success.
+
+**Decision:** results are mixed. Keep the existing recovery policy and repeat the
+same zero-delay foreground condition after checking device/SDK readiness before
+introducing another variable. Background state alone is insufficient to explain
+this failure class. A synthetic trigger on a healthy camera does not recreate the
+native failure context of a natural background camera error. These data establish
+neither a reliable restart delay nor a production fix.
+
+Capture retained locally (ignored, not published):
+`build/investigations/2026-10-15-foreground-recovery/records.jsonl` and
+`summary.json`. Native run `EE9B4AD0-7DE6-43B8-AB39-0E1627CCE1F9` has sequences
+1–280; Dart run `1792079566734124-867509392` has 1–51; bridge run
+`A1922C99-0088-4150-9473-00D0B06AFF09` has its startup record. Collector reports
+`operatorStopped`, startup verified, no gaps/duplicates/out-of-order/truncation,
+and no malformed/rejected payloads. As always, sequence checks cannot detect a
+missing tail without a later sequence number. Native uptime, not cross-runtime
+wall-clock subtraction, was used for cleanup/start timing.
+
+Cleanup: stopped the owned collector, rebuilt/installed/launched the normal
+release without investigation defines, and visually verified background streaming
+off on the idle app. Restored Agent Access off and verified its menu status. No
+production code changes, new timeouts, delay implementation or lock tests were
+made in this batch. The normal signed release build and documentation diff checks
+passed; unchanged automated suites were not rerun for this documentation-only step.
