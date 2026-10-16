@@ -106,3 +106,70 @@ sh scripts/test-investigation-device.sh
 sh scripts/test-stream-investigation.sh
 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 ```
+
+## First instrumented device trial — 2026-10-16, approximately 12:41–12:42 CEST
+
+The maintainer authorized one device trial and reported the phone connected,
+unlocked, Agent Access enabled and glasses connected; wear confirmation arrived
+later and agreed with the captured SDK state. We ran one synthetic foreground
+recovery, not a lock/background test. Built and installed `b288676` with both
+investigation flags, preserving app data. Native/bridge/Dart preflight passed.
+
+Environment: wired iPhone 17, iOS **27.0.1 (24A446)**, Bluetooth Classic,
+RAW / medium / 30 FPS, background streaming enabled. This differs from the earlier
+27.0 trials, and SDK warning logging is newly enabled; do not call this a matched
+OS/logging comparison. Glasses firmware/Meta AI app versions were not independently
+read. SDK snapshots for both baseline and replacement reported connected,
+compatible, donned, hinges open, battery 100 and thermal none.
+
+**Outcome: failed replacement, with useful new error evidence.**
+
+- Baseline camera `26E23F55-E822-44FA-B907-179A0A967C7C`, parent
+  `EBB0BE02-7A05-409E-A653-15F4051B6E4C`, delivered 670 frames before teardown;
+  last watchdog had 621 frames, 23.292 s after the first frame. Preview was visible.
+- Trial `1792147321101557-1` triggered one synthetic `videoStreamingError` and one
+  automatic recovery attempt. Diagnostics closed before the trigger took effect.
+- Device-session cleanup took **109.328 ms**. Cleanup completion to replacement
+  native start was **0.910 ms**; no post-cleanup delay was added.
+- Replacement parent `87A5AB2C-E7F8-4D2F-87D9-1F5E07AFACF2` emitted an SDK
+  `unexpectedError` **94.073 ms** after native start. The new record identifies
+  origin `errorStream`, device session state `starting`, and complete SDK/associated
+  descriptions **"Session ended by device"** (both truncation flags false).
+- The replacement then reported stopping/stopped. The startup catch recorded the
+  same description with origin `ensureSessionStarted`; it is not a second failure.
+  No replacement camera/texture or first frame was created, and no recovery
+  deadline expired. Dart cancelled recovery during starting; the app showed Start.
+- Link events/snapshots reported connected and no disconnect, doff, hinge-close or
+  thermal change was captured before the failure. These app-observed SDK states
+  narrow the evidence; they do not rule out a transport fault that the SDK did not
+  report through those listeners. All relevant native snapshots were foreground
+  and Dart lifecycle stayed resumed. No further start was attempted.
+
+Capture retained locally under ignored `build/investigations/2026-10-16-sdk-details/`:
+`trial/records.jsonl`, `trial/summary.json`, `sdk-before.log`, `sdk-after.log` and
+`sdk-delta.log`. Native run `A30DE121-8E69-41EE-8A90-4DEE7E6619E3` has sequences
+1–115, Dart run `1792147122211510-1044678926` has 1–19, and bridge run
+`B81E41A6-2EE6-45DC-B7C0-E2B4A6249514` has its startup record. Collector ended
+`operatorStopped`, startup verified, with no detected gaps, duplicates, out-of-order,
+truncation or malformed/rejected records. The missing-tail limitation remains.
+
+The SDK file preserved its entire pre-trial prefix: 148,704 → 614,704 bytes,
+5,002 appended lines. Of these, 4,987 were repeated StreamSecurer `No data returned`
+warnings and 12 were IORoute zero-byte read warnings. No timestamps identify
+whether those lines occurred at startup, normal streaming, deliberate teardown or
+failed replacement. They are not proof of cause; warning-volume overhead is also
+unmeasured. The timestamped native error record is the decisive new observation.
+
+Cleanup: stopped the owned collector, rebuilt/installed/launched the normal signed
+release, verified no Logging override in its built plist, visually checked idle
+Start and background streaming off, and restored Agent Access off with menu
+verification. No production code or recovery policy changed. Both builds/signatures
+and documentation diff checks passed; unchanged automated suites were not rerun.
+
+Interpretation: the new instrumentation works on the physical device and captures
+the previously missing description and device state. The foreground restart failure
+persists after the iOS update. Across five synthetic trials there are three passes
+and two failures under differing OS/logging conditions; this is not a failure-rate
+estimate or a fix. A controlled investigation-only two-second post-cleanup-delay
+comparison remains a reasonable next plan, not a guaranteed remedy: an earlier
+manual start also failed after a gap longer than ten seconds.
