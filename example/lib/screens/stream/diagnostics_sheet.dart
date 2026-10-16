@@ -6,8 +6,15 @@ import 'package:flutter_meta_wearables_dat_example/providers/diagnostics_control
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart';
 import 'package:provider/provider.dart';
 
-class DiagnosticsSheet extends StatelessWidget {
+class DiagnosticsSheet extends StatefulWidget {
   const DiagnosticsSheet({super.key});
+
+  @override
+  State<DiagnosticsSheet> createState() => _DiagnosticsSheetState();
+}
+
+class _DiagnosticsSheetState extends State<DiagnosticsSheet> {
+  RecoveryExperimentDelay _delay = RecoveryExperimentDelay.immediate;
 
   @override
   Widget build(BuildContext context) => ChangeNotifierProvider(
@@ -64,24 +71,54 @@ class DiagnosticsSheet extends StatelessWidget {
                     'Submitted frames are not a measurement of displayed frames.',
                   ),
                   const SizedBox(height: 12),
-                  if (StreamSessionProvider.recoveryExperimentEnabled)
+                  if (StreamSessionProvider.recoveryExperimentEnabled) ...[
+                    Row(
+                      children: [
+                        const Text('Wait after cleanup: '),
+                        DropdownButton<RecoveryExperimentDelay>(
+                          value: _delay,
+                          items: const [
+                            DropdownMenuItem(
+                              value: RecoveryExperimentDelay.immediate,
+                              child: Text('0 seconds'),
+                            ),
+                            DropdownMenuItem(
+                              value: RecoveryExperimentDelay.twoSeconds,
+                              child: Text('2 seconds'),
+                            ),
+                          ],
+                          onChanged: stream.recoveryExperimentToken == null
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    setState(() => _delay = value);
+                                  }
+                                },
+                        ),
+                      ],
+                    ),
                     OutlinedButton(
                       onPressed: stream.recoveryExperimentToken == null
                           ? null
                           : () async {
                               final token = stream.recoveryExperimentToken;
+                              final delay = _delay;
                               final route = ModalRoute.of(context);
                               if (token == null || route == null) return;
                               Navigator.of(context).pop();
                               // Wait for disposal and polling shutdown, not
                               // merely the start of the dismissal animation.
                               await route.completed;
-                              stream.triggerRecoveryExperiment(token);
+                              stream.triggerRecoveryExperiment(
+                                token,
+                                delay: delay,
+                              );
                             },
                       child: const Text(
                         'Investigation: synthetic foreground recovery (once)',
                       ),
                     ),
+                  ],
                   if (controller.error != null) Text(controller.error!),
                   if (snapshot != null) ...[
                     Text(

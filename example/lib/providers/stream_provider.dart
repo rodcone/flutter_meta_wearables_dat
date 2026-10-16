@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding;
+import 'package:flutter/widgets.dart'
+    show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
@@ -10,12 +11,26 @@ import 'package:flutter_meta_wearables_dat_example/utils/photo_sharing.dart';
 import 'package:flutter_meta_wearables_dat_example/utils/stream_investigation_trace.dart';
 import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
 
-enum _RecoveryPhase { backoff, stopping, starting, awaitingStreaming }
+enum _RecoveryPhase {
+  backoff,
+  stopping,
+  experimentWaiting,
+  starting,
+  awaitingStreaming,
+}
+
+enum RecoveryExperimentDelay {
+  immediate(Duration.zero),
+  twoSeconds(Duration(seconds: 2));
+
+  const RecoveryExperimentDelay(this.duration);
+  final Duration duration;
+}
 
 /// Provider to manage streaming state and active device monitoring.
 /// Depends on DeviceProvider for registration state and permissions.
 /// Depends on MockDeviceProvider for mock device UUID.
-class StreamSessionProvider extends ChangeNotifier {
+class StreamSessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   final DeviceProvider deviceProvider;
   final MockDeviceProvider mockDeviceProvider;
 
@@ -110,8 +125,25 @@ class StreamSessionProvider extends ChangeNotifier {
       StreamInvestigationTrace.enabled &&
       bool.fromEnvironment('MWDAT_RECOVERY_EXPERIMENT');
   bool _experimentUsed = false;
+  bool _experimentRecoveryActive = false;
   String? _experimentTrialId;
   int _experimentTrialNumber = 0;
+  RecoveryExperimentDelay _experimentDelay = RecoveryExperimentDelay.immediate;
+  Timer? _experimentWaitTimer;
+  Completer<bool>? _experimentWaitCompletion;
+  Stopwatch? _experimentWaitClock;
+  StreamSubscription<StreamSessionError>? _experimentWaitErrors;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (recoveryExperimentEnabled &&
+        _experimentRecoveryActive &&
+        _isRecovering &&
+        state != AppLifecycleState.resumed) {
+      _trace('recoveryExperimentLifecycleCancelled');
+      unawaited(stopStreamSession());
+    }
+  }
 
   /// Capture before dismissing diagnostics; a changed session invalidates it.
   int? get recoveryExperimentToken =>
@@ -129,9 +161,14 @@ class StreamSessionProvider extends ChangeNotifier {
       : null;
 
   /// Exercises app recovery policy, not a real SDK fault. Verify frames first.
-  bool triggerRecoveryExperiment(int token) {
+  bool triggerRecoveryExperiment(
+    int token, {
+    RecoveryExperimentDelay delay = RecoveryExperimentDelay.immediate,
+  }) {
     if (recoveryExperimentToken != token) return false;
     _experimentUsed = true;
+    _experimentRecoveryActive = true;
+    _experimentDelay = delay;
     _experimentTrialId =
         '${DateTime.now().microsecondsSinceEpoch}-${++_experimentTrialNumber}';
     _trace('recoveryExperimentTriggered');
@@ -185,6 +222,7 @@ class StreamSessionProvider extends ChangeNotifier {
   String? _lastMockUUID;
 
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
+    if (recoveryExperimentEnabled) WidgetsBinding.instance.addObserver(this);
     _lastMockUUID = mockDeviceProvider.deviceUUID;
     mockDeviceProvider.addListener(_onMockDeviceChanged);
     _initializeActiveDeviceMonitoring();
@@ -442,6 +480,7 @@ class StreamSessionProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (recoveryExperimentEnabled) WidgetsBinding.instance.removeObserver(this);
     _disposed = true;
     _streamingIntended = false;
     _sessionGeneration++;
@@ -523,6 +562,7 @@ class StreamSessionProvider extends ChangeNotifier {
     String event, {
     StreamSessionError? error,
     String? errorSource,
+    int? actualWaitUs,
   }) {
     if (!StreamInvestigationTrace.enabled) return;
     StreamInvestigationTrace.record(event, {
@@ -544,8 +584,12 @@ class StreamSessionProvider extends ChangeNotifier {
         'trialId': _experimentTrialId,
         // Trial origin only: errorSource identifies each received error.
         'triggerSource': 'synthetic',
-        'postCleanupDelayMs': 0,
+        'postCleanupDelayMs': _experimentRecoveryActive
+            ? _experimentDelay.duration.inMilliseconds
+            : 0,
+        'selectedPostCleanupDelayMs': _experimentDelay.duration.inMilliseconds,
       },
+      'actualWaitUs': ?actualWaitUs,
       'errorSource': ?errorSource,
       if (error != null) ...{
         'code': error.code,
@@ -607,7 +651,8 @@ class StreamSessionProvider extends ChangeNotifier {
       // Duplicate notifications from the failed session share the same backoff.
       // Errors from a replacement are retained until its start future settles,
       // so failures advance the budget without overlapping native operations.
-      if (_recoveryBackoffTimer != null) {
+      if (_recoveryBackoffTimer != null ||
+          _recoveryPhase == _RecoveryPhase.experimentWaiting) {
         _trace('recoveryErrorCoalesced', error: error);
         return;
       }
@@ -766,6 +811,18 @@ class StreamSessionProvider extends ChangeNotifier {
       if (!_disposed) notifyListeners();
       return;
     }
+    if (recoveryExperimentEnabled && _experimentRecoveryActive) {
+      _recoveryWatchdogTimer?.cancel();
+      _recoveryWatchdogTimer = null;
+      if (_experimentDelay != RecoveryExperimentDelay.immediate &&
+          !await _waitForExperiment(generation)) {
+        return;
+      }
+      if (!_isCurrentRecovery(generation) ||
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+        return;
+      }
+    }
     _recoveryPhase = _RecoveryPhase.starting;
     _trace('recoveryStarting', error: error);
     _armRecoveryDeadline(_recoveryWatchdog, error, generation);
@@ -792,6 +849,51 @@ class StreamSessionProvider extends ChangeNotifier {
     // Otherwise wait for STREAMING, an error, or the watchdog.
   }
 
+  Future<bool> _waitForExperiment(int generation) {
+    _recoveryPhase = _RecoveryPhase.experimentWaiting;
+    final completion = Completer<bool>();
+    _experimentWaitCompletion = completion;
+    _experimentWaitClock = Stopwatch()..start();
+    // Teardown detached the old error stream. Observe only during this wait,
+    // so a late terminal error can still cancel the experiment before start.
+    _experimentWaitErrors = MetaWearablesDat.streamSessionErrorStream().listen((
+      error,
+    ) {
+      if (_isCurrentRecovery(generation) &&
+          _recoveryPhase == _RecoveryPhase.experimentWaiting) {
+        unawaited(_setError(error));
+      }
+    });
+    _trace('recoveryExperimentWaitStarted');
+    _experimentWaitTimer = Timer(_experimentDelay.duration, () {
+      _finishExperimentWait(
+        completed:
+            _isCurrentRecovery(generation) &&
+            WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      );
+    });
+    return completion.future;
+  }
+
+  void _finishExperimentWait({required bool completed}) {
+    final completion = _experimentWaitCompletion;
+    if (completion == null) return;
+    _experimentWaitTimer?.cancel();
+    _experimentWaitTimer = null;
+    _experimentWaitClock?.stop();
+    _trace(
+      completed
+          ? 'recoveryExperimentWaitCompleted'
+          : 'recoveryExperimentWaitCancelled',
+      actualWaitUs: _experimentWaitClock?.elapsedMicroseconds,
+    );
+    _experimentWaitClock = null;
+    _experimentWaitCompletion = null;
+    unawaited(_experimentWaitErrors?.cancel());
+    _experimentWaitErrors = null;
+    completion.complete(completed);
+  }
+
   void _completeRecovery() {
     _recoveryAttempts = 0;
     // STREAMING alone does not prove frames arrived: keep the frame-stall
@@ -800,7 +902,9 @@ class StreamSessionProvider extends ChangeNotifier {
   }
 
   void _cancelRecovery() {
+    _finishExperimentWait(completed: false);
     if (_isRecovering) _trace('recoveryCancelledOrCompleted');
+    _experimentRecoveryActive = false;
     _recoveryGeneration++;
     _recoveryPhase = null;
     _replacementError = null;
@@ -816,9 +920,10 @@ class StreamSessionProvider extends ChangeNotifier {
     if (_disposed || _startInFlight || _isTearingDown || _isRecovering) {
       return false;
     }
-    if (recoveryExperimentEnabled && !_streamingIntended) {
+    if (recoveryExperimentEnabled && !_isStreaming) {
       _experimentUsed = false;
       _experimentTrialId = null;
+      _experimentDelay = RecoveryExperimentDelay.immediate;
     }
     _trace('manualStartRequested');
     _recoveryAttempts = 0;

@@ -1,7 +1,7 @@
 # Two-second foreground restart experiment
 
-Prepared 2026-10-16 after the maintainer selected planning. Status: proposed;
-no implementation or additional device trial is authorized by this planning step.
+Prepared 2026-10-16. The maintainer subsequently selected implementation and
+local validation only. Status: implemented; physical comparison remains pending.
 This replaces the earlier stage-2 proposal comparing zero versus ten seconds.
 
 ## Question and current evidence
@@ -132,3 +132,37 @@ For each trial:
 - Any production change needs separate approval, repeat evidence and natural
   background/normal-release validation. This synthetic experiment does not resolve
   the original locked-phone streaming issue on its own.
+
+## Implementation and local validation (2026-10-16)
+
+The example diagnostics selector now offers 0 or 2 seconds only when both
+investigation defines are enabled. The chosen delay is fixed for the active
+synthetic recovery, including replacement retries. Completed trials do not delay
+later natural recoveries; a fresh manual start resets the selection context.
+
+The wait has its own cancellable phase after cleanup, outside both deadlines.
+A temporary error subscription catches terminal/nonrecoverable errors while the
+normal session listeners are detached. Lifecycle loss, Stop, disposal and
+background opt-out cancel pending work. Trace events are
+`recoveryExperimentWaitStarted`, `recoveryExperimentWaitCompleted` and
+`recoveryExperimentWaitCancelled`; completed/cancelled records include
+`actualWaitUs`. `selectedPostCleanupDelayMs` retains the trial choice while
+`postCleanupDelayMs` is zero outside the active synthetic recovery.
+
+Local automated checks:
+
+- Scoped formatting and analysis: clean. Dart MCP analysis had no configured
+  roots, so the repository-pinned Flutter analyzer was used.
+- Normal example suite: 73 tests passed.
+- Recovery suite with investigation-only, experiment-only and both defines:
+  52 tests passed in each configuration. Experiment-specific bodies run only
+  when both defines are present; gate assertions run in every configuration.
+- Coverage includes independent deadlines, delayed cleanup, duplicate callbacks,
+  retry delay retention, cancellation, manual reset, modal dismissal and traces.
+- Signed investigation and normal iOS release builds passed, including strict
+  codesign verification. Investigation plist logging was `warning`; the final
+  normal build contained no investigation Logging entry. Neither was installed.
+- DTD discovery found no running debug app to reload.
+
+No device installation, launch, streaming or settings changes were performed.
+These checks establish local behavior, not whether the delay fixes the SDK fault.

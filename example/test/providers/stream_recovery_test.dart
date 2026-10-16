@@ -492,8 +492,16 @@ void main() {
           'Investigation: synthetic foreground recovery (once)',
         );
         expect(action, enabled ? findsOneWidget : findsNothing);
+        expect(
+          find.byType(DropdownButton<RecoveryExperimentDelay>),
+          enabled ? findsOneWidget : findsNothing,
+        );
         expect(diagnosticReads, greaterThan(0));
         if (enabled) {
+          await tester.tap(find.text('0 seconds'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('2 seconds').last);
+          await tester.pumpAndSettle();
           await tester.tap(action);
           // No injection while the panel is still dismissing.
           expect(stream.isRecovering, isFalse);
@@ -501,6 +509,8 @@ void main() {
           expect(find.byType(DiagnosticsSheet), findsNothing);
           expect(stream.isRecovering, isTrue);
           final readsAfterClose = diagnosticReads;
+          await tester.pump(const Duration(milliseconds: 400));
+          expect(starts, 1);
           await tester.pump(const Duration(seconds: 2));
           expect(diagnosticReads, readsAfterClose);
           expect(starts, 2);
@@ -618,6 +628,207 @@ void main() {
         );
       }
     }
+
+    testWidgets('delay starts after cleanup; startup keeps its full deadline', (
+      tester,
+    ) async {
+      await ready(tester);
+      if (!enabled) return;
+      pendingStop = Completer<bool>();
+      final replacement = Completer<int>();
+      startReplacement = () => replacement.future;
+      stream.triggerRecoveryExperiment(
+        stream.recoveryExperimentToken!,
+        delay: RecoveryExperimentDelay.twoSeconds,
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(seconds: 19));
+      expect(starts, 1);
+      pendingStop!.complete(true);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1999));
+      expect(starts, 1);
+      expect(stream.isRecovering, isTrue);
+      expect(await stream.startStreamSession(), isFalse);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(starts, 2);
+      await tester.pump(const Duration(milliseconds: 9999));
+      expect(stream.isRecovering, isTrue);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(stream.isRecovering, isFalse);
+      replacement.complete(42);
+      await tester.pump();
+    });
+
+    testWidgets('replacement retry retains the selected wait', (tester) async {
+      await ready(tester);
+      if (!enabled) return;
+      stream.triggerRecoveryExperiment(
+        stream.recoveryExperimentToken!,
+        delay: RecoveryExperimentDelay.twoSeconds,
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(seconds: 2));
+      expect(starts, 2);
+      await error();
+      await tester.pump(const Duration(milliseconds: 800));
+      expect(starts, 2);
+      await tester.pump(const Duration(milliseconds: 1999));
+      expect(starts, 2);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(starts, 3);
+      await event('stream_session_state', 4);
+      await tester.pump();
+      expect(stream.isRecovering, isFalse);
+    });
+
+    testWidgets('duplicate errors do not extend wait or spend an attempt', (
+      tester,
+    ) async {
+      await ready(tester);
+      if (!enabled) return;
+      final token = stream.recoveryExperimentToken!;
+      stream.triggerRecoveryExperiment(
+        token,
+        delay: RecoveryExperimentDelay.twoSeconds,
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(seconds: 1));
+      for (var i = 0; i < 3; i++) {
+        await error();
+      }
+      await event('stream_session_state', 4);
+      expect(stream.triggerRecoveryExperiment(token), isFalse);
+      await tester.pump(const Duration(milliseconds: 999));
+      expect(starts, 1);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(starts, 2);
+      await event('stream_session_state', 4);
+      await tester.pump(const Duration(seconds: 3));
+      expect(starts, 2);
+      expect(stream.isRecovering, isFalse);
+      // Once the synthetic recovery completes, natural recovery adds no wait.
+      await error();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(starts, 3);
+      await event('stream_session_state', 4);
+      await tester.pump();
+    });
+
+    for (final cause in [
+      'stop',
+      'dispose',
+      'terminal',
+      'unexpected',
+      'optOut',
+      'inactive',
+    ]) {
+      testWidgets('$cause cancels and resolves the experimental wait', (
+        tester,
+      ) async {
+        await ready(tester);
+        if (!enabled) return;
+        await stream.setBackgroundStreamingEnabled(true);
+        stream.triggerRecoveryExperiment(
+          stream.recoveryExperimentToken!,
+          delay: RecoveryExperimentDelay.twoSeconds,
+        );
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(seconds: 1));
+        switch (cause) {
+          case 'stop':
+            await stream.stopStreamSession();
+          case 'dispose':
+            stream.dispose();
+            disposed = true;
+          case 'terminal':
+            await error('insufficientSDKVersion');
+          case 'unexpected':
+            await error('unexpectedError');
+          case 'optOut':
+            await stream.setBackgroundStreamingEnabled(false);
+          case 'inactive':
+            tester.binding.handleAppLifecycleStateChanged(
+              AppLifecycleState.inactive,
+            );
+        }
+        await tester.pump(const Duration(seconds: 30));
+        expect(starts, 1);
+        expect(stream.isRecovering, isFalse);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        if (!disposed && cause != 'terminal') {
+          await stream.stopStreamSession();
+          await begin(tester);
+          // A new trial defaults to immediate, without retaining the old wait.
+          stream.triggerRecoveryExperiment(stream.recoveryExperimentToken!);
+          await tester.pump(const Duration(milliseconds: 400));
+          expect(starts, 3);
+          await event('stream_session_state', 4);
+          await tester.pump();
+        }
+      });
+    }
+
+    testWidgets(
+      'wait traces have requested duration, outcome and no startup deadline',
+      (tester) async {
+        if (!enabled) return;
+        final records = <Map<String, dynamic>>[];
+        await runZoned(
+          () async {
+            await ready(tester);
+            stream.triggerRecoveryExperiment(
+              stream.recoveryExperimentToken!,
+              delay: RecoveryExperimentDelay.twoSeconds,
+            );
+            await tester.pump(const Duration(milliseconds: 400));
+            await tester.pump(const Duration(seconds: 2));
+            await event('stream_session_state', 4);
+            await tester.pump();
+            await stream.stopStreamSession();
+            await begin(tester);
+            stream.triggerRecoveryExperiment(
+              stream.recoveryExperimentToken!,
+              delay: RecoveryExperimentDelay.twoSeconds,
+            );
+            await tester.pump(const Duration(milliseconds: 400));
+            await stream.stopStreamSession();
+            await tester.pump();
+          },
+          zoneSpecification: ZoneSpecification(
+            print: (self, parent, zone, line) {
+              const prefix = '[MWDAT-TRACE-DART] ';
+              if (line.startsWith(prefix)) {
+                records.add(
+                  jsonDecode(line.substring(prefix.length))
+                      as Map<String, dynamic>,
+                );
+              }
+            },
+          ),
+        );
+        final waits = records
+            .where(
+              (r) =>
+                  (r['event'] as String).startsWith('recoveryExperimentWait'),
+            )
+            .toList();
+        expect(waits.map((r) => r['event']), [
+          'recoveryExperimentWaitStarted',
+          'recoveryExperimentWaitCompleted',
+          'recoveryExperimentWaitStarted',
+          'recoveryExperimentWaitCancelled',
+        ]);
+        expect(waits.map((r) => r['postCleanupDelayMs']), everyElement(2000));
+        expect(waits.map((r) => r['recoveryDeadlineMs']), everyElement(isNull));
+        expect(waits[1]['actualWaitUs'], isNonNegative);
+        expect(waits[3]['actualWaitUs'], isNonNegative);
+        expect(waits[0]['trialId'], waits[1]['trialId']);
+        expect(waits[2]['trialId'], isNot(waits[0]['trialId']));
+      },
+    );
 
     testWidgets(
       'trace separates synthetic origin from subsequent platform errors',
