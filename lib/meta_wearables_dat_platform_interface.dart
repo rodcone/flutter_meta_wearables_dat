@@ -27,6 +27,10 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     _instance = instance;
   }
 
+  Future<StreamDiagnostics> getDiagnostics() {
+    throw UnimplementedError('getDiagnostics() has not been implemented.');
+  }
+
   Future<bool> requestAndroidPermissions() {
     throw UnimplementedError(
       'requestAndroidPermissions() has not been implemented.',

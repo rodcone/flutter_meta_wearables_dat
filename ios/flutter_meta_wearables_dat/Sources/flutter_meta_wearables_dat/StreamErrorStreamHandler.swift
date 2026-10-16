@@ -14,8 +14,13 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
   /// The active stream to observe. Setting this property re-subscribes to the
   /// stream's error publisher.
   var session: MWDATCamera.Stream? {
-    didSet { resubscribe() }
+    didSet {
+      if session == nil { investigationSessionId = nil }
+      resubscribe()
+    }
   }
+
+  var investigationSessionId: String?
 
   private var eventSink: FlutterEventSink?
   private var listenerToken: AnyListenerToken?
@@ -94,6 +99,7 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
   /// must reach Dart even though it opens the suppression window immediately
   /// afterwards.
   func sendError(code: String, message: String, bypassSuppression: Bool = false) {
+    StreamInvestigationTrace.record("errorRequested", ["code": code, "sessionId": investigationSessionId ?? "none"])
     guard let events = eventSink else { return }
     Task { @MainActor in
       guard bypassSuppression || !self.isStoppingForBackground else {
@@ -102,6 +108,14 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
       }
       events(["code": code, "message": message])
     }
+  }
+
+  // Called on the platform thread before recovery can replace the session.
+  @MainActor
+  func sendFrameStall(message: String, reason: String, diagnostics: [String: Any]) {
+    guard !isStoppingForBackground else { return }
+    eventSink?(["code": "frameStalled", "message": message,
+                "stallReason": reason, "diagnostics": diagnostics])
   }
 
   /// Maps a `DeviceSessionError` onto the Flutter channel. Matches the
@@ -117,7 +131,9 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     guard let session = session, let events = eventSink else { return }
 
     let generation = subscriptionGeneration
+    let traceSessionId = investigationSessionId ?? "none"
     listenerToken = session.errorPublisher.listen { [weak self] error in
+      StreamInvestigationTrace.record("cameraErrorReceived", ["sessionId": traceSessionId, "code": Self.errorToMap(error)?["code"] ?? "photoCaptureFailed"])
       Task { @MainActor in
         guard let self, self.subscriptionGeneration == generation else { return }
         // Teardown noise from a stop we asked for is not an error. This is the

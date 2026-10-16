@@ -21,3 +21,26 @@ description: Diagnosing common DAT integration issues — registration failures,
 ## Links
 - [Known Issues](https://wearables.developer.meta.com/docs/knownissues)
 - [Version Dependencies](https://wearables.developer.meta.com/docs/version-dependencies)
+
+## Read-only stream diagnostics (unreleased)
+
+`await MetaWearablesDat.getDiagnostics()` works without frame subscriptions and
+is safe before SDK initialization. `StreamDiagnostics` reports per-camera
+identity, state/configuration, actual arrival/submission counts and ages, rolling
+approximately two-second rates and background flags. Submitted does not mean
+displayed. Idle session metrics are null/zero. iOS-only audio port types and queue
+depth are null on Android; reading audio routing has no activation side effect.
+Use `toMap()` for a report; wire durations explicitly end in `Us`.
+
+`StreamSessionError.stallReason` is optional: `firstFrameTimeout` (10 eligible
+streaming seconds with no frame), `sdkFramesStopped` (>1.5s arrival gap), or
+`textureSubmissionsStopped` (>6s submission gap, foreground only). The optional
+`diagnostics` snapshot is captured before recovery. Ignore unknown optional
+fields from future versions. First-frame timing excludes STARTING, PAUSED,
+long watchdog scheduling gaps and foreground grace. A late first frame clears
+the reason; post-first-frame stalls may also recover automatically. If a stall
+persists, stop then start explicitly and use the new texture ID. Do not compare
+pixels to detect a stall. The example keeps a maximum of three frame-stall
+retries per manual start and retains the failure snapshot in its diagnostics
+panel. Poll only while the panel is open/foreground; never subscribe to frame
+bytes just to measure health.

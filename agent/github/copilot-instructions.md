@@ -22,7 +22,7 @@ All methods are static on `MetaWearablesDat`. Single import: `import 'package:fl
 - `getDevices()` → `List<WearableDevice>` (id, name, type, linkState, compatibility, supportsDisplay, isActive, isStreamingDevice). Pass an `id` to `startStreamSession` to pin that pair; requesting a *different* device while one is streaming throws `PlatformException` `STREAM_ACTIVE`. Android throws `NOT_INITIALIZED` if called before Bluetooth permission.
 - `streamSessionStateStream()` — stopping(0), stopped(1), waitingForDevice(2), starting(3), streaming(4), paused(5)
 - `streamSessionErrorStream()` — StreamSessionError with code/message. Codes: thermalCritical, thermalEmergency (legacy; DAT 1.0 uses deviceThermalEmergency on both platforms), peakPowerShutdown, batteryCritical, hingesClosed (closed hinges; removal behavior varies by device/firmware), permissionDenied, deviceNotConnected, datAppOnTheGlassesUpdateRequired (recover via `openDATGlassesAppUpdate()`), dwaUnavailable, plus device-session variants (deviceThermalCritical etc.) and the Android-only sessionEndedByDevice / capabilityDenied. Capture failures are not on this stream — they reject the `capturePhoto()` future.
-- Two codes are raised by the plugin, not the SDK: `stoppedForBackground` (deliberate background stop — not a fault) and `frameStalled` (the stream still reports streaming but no frame has arrived for ~1.5s, so the preview is frozen). `frameStalled` never clears itself: stop the session, start a new one, use the new textureId. The plugin will not restart for you, because that would change the textureId underneath a live widget.
+- Two codes are raised by the plugin, not the SDK: `stoppedForBackground` (deliberate background stop — not a fault) and `frameStalled` (native streaming with no first frame after 10 eligible seconds, an SDK gap >1.5s, or a foreground texture submission gap >6s). A `frameStalled` episode can recover; if it persists, stop the session, start a new one, use the new textureId. The plugin will not restart for you, because that would change the textureId underneath a live widget.
 - Errors with no auto-resume (hingesClosed, permissionDenied, thermalEmergency, peakPowerShutdown, batteryCritical, deviceThermalEmergency, devicePeakPowerShutdown, deviceBatteryCritical, sessionEndedByDevice) need a teardown, not a retry — clear textureId + streaming flag or the Texture widget freezes on its last frame. Excluded: thermalCritical / deviceThermalCritical, which pause the stream and leave the session up — warn and keep rendering.
 - `deviceStateStream()` — `Stream<DeviceState>` of live `ThermalLevel` (unknown, none, light, moderate, severe, critical, emergency, shutdown). Use to warn the user *before* a thermal error stops the stream.
 - `openDATGlassesAppUpdate()` — opens the Meta AI app to the DAT-app-update screen. Pair with the `datAppOnTheGlassesUpdateRequired` error code to drive a "tap to update" UI.
@@ -72,3 +72,26 @@ Subscribe BEFORE starting operations. Cancel in dispose(). Always handle errors.
 See AGENTS.md at repository root for complete API signatures, configuration XML/Kotlin snippets, and debugging guide.
 
 DAT 1.0 compatibility: `insufficientSDKVersion` is terminal and requires an app update; `dwaOutOfStuRange` is a nonblocking warning and must not stop or restart the stream. The plugin retains app-initiated registration; Meta-AI-initiated registration requests and new experimental capabilities are not exposed.
+
+## Read-only stream diagnostics (unreleased)
+
+`await MetaWearablesDat.getDiagnostics()` works without frame subscriptions and
+is safe before SDK initialization. `StreamDiagnostics` reports per-camera
+identity, state/configuration, actual arrival/submission counts and ages, rolling
+approximately two-second rates and background flags. Submitted does not mean
+displayed. Idle session metrics are null/zero. iOS-only audio port types and queue
+depth are null on Android; reading audio routing has no activation side effect.
+Use `toMap()` for a report; wire durations explicitly end in `Us`.
+
+`StreamSessionError.stallReason` is optional: `firstFrameTimeout` (10 eligible
+streaming seconds with no frame), `sdkFramesStopped` (>1.5s arrival gap), or
+`textureSubmissionsStopped` (>6s submission gap, foreground only). The optional
+`diagnostics` snapshot is captured before recovery. Ignore unknown optional
+fields from future versions. First-frame timing excludes STARTING, PAUSED,
+long watchdog scheduling gaps and foreground grace. A late first frame clears
+the reason; post-first-frame stalls may also recover automatically. If a stall
+persists, stop then start explicitly and use the new texture ID. Do not compare
+pixels to detect a stall. The example keeps a maximum of three frame-stall
+retries per manual start and retains the failure snapshot in its diagnostics
+panel. Poll only while the panel is open/foreground; never subscribe to frame
+bytes just to measure health.

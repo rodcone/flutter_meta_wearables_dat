@@ -2,16 +2,35 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart'
+    show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/utils/photo_sharing.dart';
+import 'package:flutter_meta_wearables_dat_example/utils/stream_investigation_trace.dart';
 import 'package:flutter_meta_wearables_dat_mock_device/flutter_meta_wearables_dat_mock_device.dart';
+
+enum _RecoveryPhase {
+  backoff,
+  stopping,
+  experimentWaiting,
+  starting,
+  awaitingStreaming,
+}
+
+enum RecoveryExperimentDelay {
+  immediate(Duration.zero),
+  twoSeconds(Duration(seconds: 2));
+
+  const RecoveryExperimentDelay(this.duration);
+  final Duration duration;
+}
 
 /// Provider to manage streaming state and active device monitoring.
 /// Depends on DeviceProvider for registration state and permissions.
 /// Depends on MockDeviceProvider for mock device UUID.
-class StreamSessionProvider extends ChangeNotifier {
+class StreamSessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   final DeviceProvider deviceProvider;
   final MockDeviceProvider mockDeviceProvider;
 
@@ -38,27 +57,21 @@ class StreamSessionProvider extends ChangeNotifier {
   bool _isCapturingPhoto = false;
 
   // --- Transparent recovery from transient mid-stream errors -------------
-  // The DAT SDK auto-stops the stream when it hits certain errors ("The
-  // session automatically stops when an error occurs" — SDK docs). The most
-  // common trigger in practice is locking the phone while streaming: the app
-  // is suspended, the pipeline breaks, and the SDK emits `videoStreamingError`
-  // (and transitions the stream to `stopped`). Rather than dead-ending on a
-  // red banner the user can only clear by manually stopping + starting, we
-  // restart the session automatically a few times.
+  // Transient errors can arrive in bursts while native state still says
+  // STREAMING. Coalesce notifications, then explicitly stop and restart with
+  // a fresh texture. Terminal errors and user cancellation always take priority.
   static const Set<String> _recoverableStreamErrors = {
     'videoStreamingError',
     'timeout',
     'internalError',
     'deviceNotConnected',
     'deviceNotFound',
-    // Raised by the plugin, not the SDK: the stream still says `streaming` but
-    // frames stopped arriving, so the Texture is frozen. Unlike the codes above
-    // the stream is never stopped for us, so recovery means an explicit stop +
-    // start — which is what `_scheduleRecovery` does.
+    // Plugin watchdog: STREAMING without frame delivery or submission.
     'frameStalled',
   };
   static const int _maxRecoveryAttempts = 3;
   static const Duration _recoveryWatchdog = Duration(seconds: 10);
+  static const Duration _recoveryTeardownDeadline = Duration(seconds: 20);
 
   // --- Terminal errors: the stream is dead and will not come back ---------
   // The SDK does not auto-resume after these, so retrying is pointless — the
@@ -98,6 +111,78 @@ class StreamSessionProvider extends ChangeNotifier {
   // stream up. Gates auto-recovery so we never fight a deliberate stop.
   bool _streamingIntended = false;
   bool _isRecovering = false;
+  _RecoveryPhase? _recoveryPhase;
+  bool get _recoveryRunning =>
+      _recoveryPhase == _RecoveryPhase.stopping ||
+      _recoveryPhase == _RecoveryPhase.starting;
+  StreamSessionError? _replacementError;
+  int _recoveryGeneration = 0;
+  int _sessionGeneration = 0;
+  bool _startInFlight = false;
+  bool _disposed = false;
+
+  static const bool recoveryExperimentEnabled =
+      StreamInvestigationTrace.enabled &&
+      bool.fromEnvironment('MWDAT_RECOVERY_EXPERIMENT');
+  bool _experimentUsed = false;
+  bool _experimentRecoveryActive = false;
+  String? _experimentTrialId;
+  int _experimentTrialNumber = 0;
+  RecoveryExperimentDelay _experimentDelay = RecoveryExperimentDelay.immediate;
+  Timer? _experimentWaitTimer;
+  Completer<bool>? _experimentWaitCompletion;
+  Stopwatch? _experimentWaitClock;
+  StreamSubscription<StreamSessionError>? _experimentWaitErrors;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (recoveryExperimentEnabled &&
+        _experimentRecoveryActive &&
+        _isRecovering &&
+        state != AppLifecycleState.resumed) {
+      _trace('recoveryExperimentLifecycleCancelled');
+      unawaited(stopStreamSession());
+    }
+  }
+
+  /// Capture before dismissing diagnostics; a changed session invalidates it.
+  int? get recoveryExperimentToken =>
+      recoveryExperimentEnabled &&
+          !_disposed &&
+          !_experimentUsed &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+          _streamingIntended &&
+          _sessionState == StreamSessionState.streaming &&
+          !_isRecovering &&
+          !_startInFlight &&
+          !_isTearingDown &&
+          _pendingUserAction == null
+      ? _sessionGeneration
+      : null;
+
+  /// Exercises app recovery policy, not a real SDK fault. Verify frames first.
+  bool triggerRecoveryExperiment(
+    int token, {
+    RecoveryExperimentDelay delay = RecoveryExperimentDelay.immediate,
+  }) {
+    if (recoveryExperimentToken != token) return false;
+    _experimentUsed = true;
+    _experimentRecoveryActive = true;
+    _experimentDelay = delay;
+    _experimentTrialId =
+        '${DateTime.now().microsecondsSinceEpoch}-${++_experimentTrialNumber}';
+    _trace('recoveryExperimentTriggered');
+    unawaited(
+      _setError(
+        const StreamSessionError(
+          code: 'videoStreamingError',
+          message: 'Synthetic foreground recovery experiment',
+        ),
+        errorSource: 'synthetic',
+      ),
+    );
+    return true;
+  }
 
   // --- "Fix something first" latch ----------------------------------------
   // Terminal errors need a physical action before a restart can succeed: put
@@ -113,11 +198,12 @@ class StreamSessionProvider extends ChangeNotifier {
   StreamSessionError? _pendingUserAction;
   Timer? _pendingUserActionTimer;
   static const Duration _userActionGrace = Duration(seconds: 15);
-  // Guards [_teardownSession] against re-entry: it awaits a platform call, and
-  // a second terminal error arriving during that await would otherwise start a
-  // concurrent teardown.
-  bool _isTearingDown = false;
+  // Keep the actual platform completion even after a recovery deadline expires.
+  // Every caller shares it; no new start may overlap unresolved cleanup.
+  Future<void>? _teardownFuture;
+  bool get _isTearingDown => _teardownFuture != null;
   int _recoveryAttempts = 0;
+  int _frameStallRecoveryAttempts = 0;
   Timer? _recoveryBackoffTimer;
   Timer? _recoveryWatchdogTimer;
 
@@ -136,6 +222,7 @@ class StreamSessionProvider extends ChangeNotifier {
   String? _lastMockUUID;
 
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
+    if (recoveryExperimentEnabled) WidgetsBinding.instance.addObserver(this);
     _lastMockUUID = mockDeviceProvider.deviceUUID;
     mockDeviceProvider.addListener(_onMockDeviceChanged);
     _initializeActiveDeviceMonitoring();
@@ -231,6 +318,9 @@ class StreamSessionProvider extends ChangeNotifier {
   /// even while a previously pinned pair is gone (the native selector re-pins
   /// on the next [startStreamSession], which is what makes that pair active).
   bool get canStartSelected {
+    if (_disposed || _startInFlight || _isTearingDown || _isRecovering) {
+      return false;
+    }
     // A terminal error left the glasses in a state no restart can fix until the
     // user acts. Device connectivity below can't see that — doff usually keeps
     // the link up — so the latch has to gate this first.
@@ -390,6 +480,11 @@ class StreamSessionProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (recoveryExperimentEnabled) WidgetsBinding.instance.removeObserver(this);
+    _disposed = true;
+    _streamingIntended = false;
+    _sessionGeneration++;
+    _cancelRecovery();
     mockDeviceProvider.removeListener(_onMockDeviceChanged);
     _activeDeviceSubscription?.cancel();
     _sessionStateSubscription?.cancel();
@@ -463,7 +558,52 @@ class StreamSessionProvider extends ChangeNotifier {
   /// and the plugin would reject it with `APP_BACKGROUNDED` anyway.
   static const String _backgroundStopCode = 'stoppedForBackground';
 
-  Future<void> _setError(StreamSessionError error) async {
+  void _trace(
+    String event, {
+    StreamSessionError? error,
+    String? errorSource,
+    int? actualWaitUs,
+  }) {
+    if (!StreamInvestigationTrace.enabled) return;
+    StreamInvestigationTrace.record(event, {
+      'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
+      'textureId': _textureId,
+      'state': _sessionState?.name,
+      'streamingIntended': _streamingIntended,
+      'isRecovering': _isRecovering,
+      'recoveryPhase': _recoveryPhase?.name,
+      'recoveryDeadlineMs': switch (_recoveryPhase) {
+        _RecoveryPhase.stopping => _recoveryTeardownDeadline.inMilliseconds,
+        _RecoveryPhase.starting ||
+        _RecoveryPhase.awaitingStreaming => _recoveryWatchdog.inMilliseconds,
+        _ => null,
+      },
+      'sdkRetries': _recoveryAttempts,
+      'frameStallRetries': _frameStallRecoveryAttempts,
+      if (_experimentTrialId != null) ...{
+        'trialId': _experimentTrialId,
+        // Trial origin only: errorSource identifies each received error.
+        'triggerSource': 'synthetic',
+        'postCleanupDelayMs': _experimentRecoveryActive
+            ? _experimentDelay.duration.inMilliseconds
+            : 0,
+        'selectedPostCleanupDelayMs': _experimentDelay.duration.inMilliseconds,
+      },
+      'actualWaitUs': ?actualWaitUs,
+      'errorSource': ?errorSource,
+      if (error != null) ...{
+        'code': error.code,
+        'reason': error.stallReason?.name,
+        'failedSessionId': error.diagnostics?.sessionId,
+      },
+    });
+  }
+
+  Future<void> _setError(
+    StreamSessionError error, {
+    String errorSource = 'platform',
+  }) async {
+    _trace('errorReceived', error: error, errorSource: errorSource);
     if (error.code == _backgroundStopCode) {
       // Disarm recovery before the terminal `stopped` lands. Without this the
       // SDK's own `videoStreamingError` death-rattle races the deliberate stop
@@ -480,7 +620,12 @@ class StreamSessionProvider extends ChangeNotifier {
     return _setStreamError(error);
   }
 
+  /// Retained across automatic recovery so the failure remains inspectable.
+  StreamDiagnostics? get lastFailureDiagnostics => _lastFailureDiagnostics;
+  StreamDiagnostics? _lastFailureDiagnostics;
+
   Future<void> _setStreamError(StreamSessionError error) async {
+    if (error.diagnostics != null) _lastFailureDiagnostics = error.diagnostics;
     if (error.code == 'dwaOutOfStuRange') {
       // Compatibility advice must not interrupt a usable stream or recovery.
       _lastError = error;
@@ -501,16 +646,26 @@ class StreamSessionProvider extends ChangeNotifier {
       return;
     }
 
-    // Transient mid-stream failures (notably `videoStreamingError`, which the
-    // SDK emits when the pipeline breaks — e.g. after the phone is locked and
-    // the app is suspended) auto-stop the stream. Rather than dead-ending on a
-    // red banner the user can only clear by manually restarting, transparently
-    // restart the session a few times before surfacing the error.
     final isRecoverable = _recoverableStreamErrors.contains(error.code);
-    if (_streamingIntended &&
-        isRecoverable &&
-        _recoveryAttempts < _maxRecoveryAttempts) {
-      _scheduleRecovery(error);
+    if (_streamingIntended && isRecoverable) {
+      // Duplicate notifications from the failed session share the same backoff.
+      // Errors from a replacement are retained until its start future settles,
+      // so failures advance the budget without overlapping native operations.
+      if (_recoveryBackoffTimer != null ||
+          _recoveryPhase == _RecoveryPhase.experimentWaiting) {
+        _trace('recoveryErrorCoalesced', error: error);
+        return;
+      }
+      if (_recoveryRunning) {
+        _replacementError ??= error;
+        _trace('replacementErrorCoalesced', error: error);
+        return;
+      }
+      if (_canRecover(error)) {
+        _scheduleRecovery(error);
+      } else {
+        await _endSessionWithError(error);
+      }
       return;
     }
     // Two ways the stream is dead for good: a terminal error, or a recoverable
@@ -547,9 +702,12 @@ class StreamSessionProvider extends ChangeNotifier {
     StreamSessionError error, {
     bool needsUserAction = false,
   }) async {
+    _trace('endSessionWithError', error: error);
     _cancelRecovery();
     _streamingIntended = false;
+    final generation = _recoveryGeneration;
     await _teardownSession(preserveError: true);
+    if (_disposed || generation != _recoveryGeneration) return;
     if (needsUserAction) _latchUserAction(error);
     _lastError = error;
     notifyListeners();
@@ -578,62 +736,178 @@ class StreamSessionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _canRecover(StreamSessionError error) =>
+      _recoveryAttempts < _maxRecoveryAttempts &&
+      (!error.isFrameStalled ||
+          _frameStallRecoveryAttempts < _maxRecoveryAttempts);
+
   void _scheduleRecovery(StreamSessionError error) {
-    _recoveryAttempts++;
     _isRecovering = true;
-    // Suppress the error banner while we retry; the UI shows a lightweight
-    // "Reconnecting…" state driven by [isRecovering] instead.
-    notifyListeners();
-    debugPrint(
-      '[MetaWearablesDAT] transient stream error "${error.code}" — '
-      'auto-recovery attempt $_recoveryAttempts/$_maxRecoveryAttempts',
-    );
-
-    _recoveryBackoffTimer?.cancel();
-    _recoveryBackoffTimer = Timer(
-      Duration(milliseconds: 400 * _recoveryAttempts),
-      () => unawaited(_runRecovery(error)),
-    );
-
-    // Safety net: if the stream never gets back to `streaming` and no further
-    // error arrives (e.g. the device is genuinely gone), stop pretending to
-    // reconnect and surface the error.
+    _recoveryPhase = _RecoveryPhase.backoff;
     _recoveryWatchdogTimer?.cancel();
-    _recoveryWatchdogTimer = Timer(_recoveryWatchdog, () {
-      if (!_isRecovering) return;
-      // Same reasoning as the give-up branch in [_setError]: a stream that never
-      // came back leaves a frozen texture unless the session is torn down.
-      unawaited(_endSessionWithError(error));
+    _recoveryWatchdogTimer = null;
+    final generation = ++_recoveryGeneration;
+    _trace('recoveryScheduled', error: error);
+    notifyListeners();
+    _recoveryBackoffTimer = Timer(
+      Duration(milliseconds: 400 * (_recoveryAttempts + 1)),
+      () {
+        _recoveryBackoffTimer = null;
+        unawaited(_runRecovery(error, generation));
+      },
+    );
+  }
+
+  void _armRecoveryDeadline(
+    Duration deadline,
+    StreamSessionError error,
+    int generation,
+  ) {
+    // Called only on phase entry. Duplicate errors/states never extend it.
+    _recoveryWatchdogTimer?.cancel();
+    _recoveryWatchdogTimer = Timer(deadline, () {
+      if (!_isCurrentRecovery(generation)) return;
+      _trace('recoveryWatchdogExpired', error: error);
+      final stopping = _recoveryPhase == _RecoveryPhase.stopping;
+      _streamingIntended = false;
+      _cancelRecovery();
+      // Publish failure even if cleanup never returns. Its shared future and
+      // any pending start still block new work after this deadline is cancelled.
+      final cleanup = _teardownSession(preserveError: true);
+      _lastError = stopping
+          ? const StreamSessionError(
+              code: 'recoveryTeardownTimeout',
+              message:
+                  'Stream cleanup is taking too long. Wait for it to finish '
+                  'before restarting. If it stays stuck, close and reopen the app.',
+            )
+          : error;
+      notifyListeners();
+      unawaited(
+        cleanup.then((_) {
+          if (!_disposed) notifyListeners();
+        }),
+      );
     });
   }
 
-  Future<void> _runRecovery(StreamSessionError error) async {
-    if (!_streamingIntended) {
-      _cancelRecovery();
-      notifyListeners();
+  bool _isCurrentRecovery(int generation) =>
+      !_disposed && _streamingIntended && generation == _recoveryGeneration;
+
+  Future<void> _runRecovery(StreamSessionError error, int generation) async {
+    if (!_isCurrentRecovery(generation)) return;
+    _recoveryPhase = _RecoveryPhase.stopping;
+    _replacementError = null;
+    // Count executed attempts, not SDK error notifications.
+    _recoveryAttempts++;
+    if (error.isFrameStalled) _frameStallRecoveryAttempts++;
+    _trace('recoveryStarted', error: error);
+    // SDK errors can arrive while native state is still STREAMING. Explicitly
+    // stop for every recovery so start cannot return the failed session's texture.
+    final teardown = _teardownSession();
+    _armRecoveryDeadline(_recoveryTeardownDeadline, error, generation);
+    await teardown;
+    if (!_isCurrentRecovery(generation)) {
+      if (!_disposed) notifyListeners();
       return;
     }
-    // Reuse the normal start path: the native side tears down the auto-stopped
-    // stream and mints a fresh texture, and [startStreamSession] re-subscribes
-    // the state/error streams. Success is confirmed asynchronously when the
-    // state stream reaches `streaming` (see the state subscription), which
-    // clears the recovery flags; a fresh async error re-enters [_setError] and
-    // drives the next attempt.
-    final started = await startStreamSession();
-    if (started || !_streamingIntended) return;
-
-    // Synchronous failure with no error event (e.g. the device session could
-    // not be started): retry or give up.
-    if (_recoveryAttempts >= _maxRecoveryAttempts) {
-      _cancelRecovery();
-      _lastError = error;
-      notifyListeners();
-    } else {
-      _scheduleRecovery(error);
+    if (recoveryExperimentEnabled && _experimentRecoveryActive) {
+      _recoveryWatchdogTimer?.cancel();
+      _recoveryWatchdogTimer = null;
+      if (_experimentDelay != RecoveryExperimentDelay.immediate &&
+          !await _waitForExperiment(generation)) {
+        return;
+      }
+      if (!_isCurrentRecovery(generation) ||
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+        return;
+      }
     }
+    _recoveryPhase = _RecoveryPhase.starting;
+    _trace('recoveryStarting', error: error);
+    _armRecoveryDeadline(_recoveryWatchdog, error, generation);
+    final started = await _startStreamSession();
+    if (!_isCurrentRecovery(generation)) return;
+    _recoveryPhase = _RecoveryPhase.awaitingStreaming;
+    final replacementError = _replacementError;
+    _replacementError = null;
+    _trace(
+      started ? 'recoveryStartReturned' : 'recoveryStartFailed',
+      error: error,
+    );
+    if (!started || replacementError != null) {
+      final failure = replacementError ?? error;
+      if (_canRecover(failure)) {
+        _scheduleRecovery(failure);
+      } else {
+        await _endSessionWithError(failure);
+      }
+    } else if (_sessionState == StreamSessionState.streaming) {
+      _completeRecovery();
+      notifyListeners();
+    }
+    // Otherwise wait for STREAMING, an error, or the watchdog.
+  }
+
+  Future<bool> _waitForExperiment(int generation) {
+    _recoveryPhase = _RecoveryPhase.experimentWaiting;
+    final completion = Completer<bool>();
+    _experimentWaitCompletion = completion;
+    _experimentWaitClock = Stopwatch()..start();
+    // Teardown detached the old error stream. Observe only during this wait,
+    // so a late terminal error can still cancel the experiment before start.
+    _experimentWaitErrors = MetaWearablesDat.streamSessionErrorStream().listen((
+      error,
+    ) {
+      if (_isCurrentRecovery(generation) &&
+          _recoveryPhase == _RecoveryPhase.experimentWaiting) {
+        unawaited(_setError(error));
+      }
+    });
+    _trace('recoveryExperimentWaitStarted');
+    _experimentWaitTimer = Timer(_experimentDelay.duration, () {
+      _finishExperimentWait(
+        completed:
+            _isCurrentRecovery(generation) &&
+            WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      );
+    });
+    return completion.future;
+  }
+
+  void _finishExperimentWait({required bool completed}) {
+    final completion = _experimentWaitCompletion;
+    if (completion == null) return;
+    _experimentWaitTimer?.cancel();
+    _experimentWaitTimer = null;
+    _experimentWaitClock?.stop();
+    _trace(
+      completed
+          ? 'recoveryExperimentWaitCompleted'
+          : 'recoveryExperimentWaitCancelled',
+      actualWaitUs: _experimentWaitClock?.elapsedMicroseconds,
+    );
+    _experimentWaitClock = null;
+    _experimentWaitCompletion = null;
+    unawaited(_experimentWaitErrors?.cancel());
+    _experimentWaitErrors = null;
+    completion.complete(completed);
+  }
+
+  void _completeRecovery() {
+    _recoveryAttempts = 0;
+    // STREAMING alone does not prove frames arrived: keep the frame-stall
+    // budget until the next manual start.
+    _cancelRecovery();
   }
 
   void _cancelRecovery() {
+    _finishExperimentWait(completed: false);
+    if (_isRecovering) _trace('recoveryCancelledOrCompleted');
+    _experimentRecoveryActive = false;
+    _recoveryGeneration++;
+    _recoveryPhase = null;
+    _replacementError = null;
     _recoveryBackoffTimer?.cancel();
     _recoveryBackoffTimer = null;
     _recoveryWatchdogTimer?.cancel();
@@ -641,13 +915,29 @@ class StreamSessionProvider extends ChangeNotifier {
     _isRecovering = false;
   }
 
-  /// Starts (or, during recovery, restarts) the stream session. Returns true
-  /// once a texture is obtained. A user-initiated start (i.e. not an internal
-  /// recovery restart, which runs while [_isRecovering]) refreshes the
-  /// recovery budget and marks intent to keep streaming.
+  /// Starts a session on user request, refreshing both retry budgets.
   Future<bool> startStreamSession() async {
-    if (!_isRecovering) _recoveryAttempts = 0;
+    if (_disposed || _startInFlight || _isTearingDown || _isRecovering) {
+      return false;
+    }
+    if (recoveryExperimentEnabled && !_isStreaming) {
+      _experimentUsed = false;
+      _experimentTrialId = null;
+      _experimentDelay = RecoveryExperimentDelay.immediate;
+    }
+    _trace('manualStartRequested');
+    _recoveryAttempts = 0;
+    _frameStallRecoveryAttempts = 0;
     _streamingIntended = true;
+    return _startStreamSession();
+  }
+
+  Future<bool> _startStreamSession() async {
+    if (_disposed || !_streamingIntended || _startInFlight) return false;
+    _startInFlight = true;
+    final generation = ++_sessionGeneration;
+    bool isCurrent() => !_disposed && generation == _sessionGeneration;
+    if (_isRecovering) _trace('automaticStartRequested');
     try {
       // Set camera feed if video is selected (only for mock devices)
       if (_selectedVideo != null && mockDeviceProvider.deviceUUID != null) {
@@ -665,20 +955,24 @@ class StreamSessionProvider extends ChangeNotifier {
         );
       }
 
+      if (!isCurrent() || !_streamingIntended) return false;
       // Subscribe to session state and error streams
       unawaited(_sessionStateSubscription?.cancel());
       _sessionStateSubscription = MetaWearablesDat.streamSessionStateStream()
           .listen(
             (state) {
+              if (!isCurrent()) return;
               _sessionState = state;
+              _trace('stateReceived');
               if (state == StreamSessionState.stopped) {
                 _isStreaming = false;
                 _textureId = null;
               } else if (state == StreamSessionState.streaming) {
-                // A (re)established stream confirms recovery succeeded: clear
-                // the in-flight recovery and refresh the retry budget.
-                _recoveryAttempts = 0;
-                _cancelRecovery();
+                // Ignore old-session STREAMING during backoff. While a native
+                // start is pending, its result and any error must settle first.
+                if (_recoveryBackoffTimer == null && !_recoveryRunning) {
+                  _completeRecovery();
+                }
               }
               notifyListeners();
               // Keep an open paired-devices sheet's "Streaming" badge in sync as
@@ -695,7 +989,9 @@ class StreamSessionProvider extends ChangeNotifier {
       unawaited(_sessionErrorSubscription?.cancel());
       _sessionErrorSubscription = MetaWearablesDat.streamSessionErrorStream()
           .listen(
-            _setError,
+            (error) {
+              if (isCurrent()) unawaited(_setError(error));
+            },
             onError: (dynamic error) {
               debugPrint(
                 '[MetaWearablesDAT] Session error stream error: $error',
@@ -708,6 +1004,7 @@ class StreamSessionProvider extends ChangeNotifier {
       _videoStreamSizeSubscription = MetaWearablesDat.videoStreamSizeStream()
           .listen(
             (size) {
+              if (!isCurrent()) return;
               _videoStreamSize = size;
               notifyListeners();
             },
@@ -728,23 +1025,31 @@ class StreamSessionProvider extends ChangeNotifier {
       // A terminal error (or an explicit stop) can land while the start above is
       // still in flight. Without this check we'd re-mark the session as
       // streaming right after it was torn down, resurrecting the frozen texture.
-      if (!_streamingIntended) {
-        unawaited(MetaWearablesDat.stopStreamSession(_selectedDeviceId));
+      if (!isCurrent() || !_streamingIntended) {
+        // Hold the start guard until cleanup settles; a late result must not
+        // stop a newer manual session or restore its obsolete texture.
+        await _teardownSession(preserveError: true);
         return false;
       }
 
       _textureId = textureId;
+      _trace('startReturnedTexture');
       _isStreaming = true;
       notifyListeners();
     } catch (e) {
       debugPrint('[MetaWearablesDAT] Error starting stream session: $e');
+      if (!isCurrent() || !_streamingIntended) return false;
       _isStreaming = false;
       notifyListeners();
+    } finally {
+      _startInFlight = false;
+      if (!_disposed) notifyListeners();
     }
     return _isStreaming;
   }
 
   Future<void> stopStreamSession() async {
+    _trace('manualStopRequested');
     unawaited(HapticFeedback.mediumImpact());
 
     // An explicit stop cancels any in-flight auto-recovery and clears intent
@@ -756,7 +1061,7 @@ class StreamSessionProvider extends ChangeNotifier {
     _clearPendingUserAction(force: true);
 
     await _teardownSession();
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   /// Drops every trace of the current session: subscriptions, texture, stream
@@ -772,9 +1077,15 @@ class StreamSessionProvider extends ChangeNotifier {
   ///
   /// Never notifies: callers own that, so a caller can pair the cleared state
   /// with an error in a single notification.
-  Future<void> _teardownSession({bool preserveError = false}) async {
-    if (_isTearingDown) return;
-    _isTearingDown = true;
+  Future<void> _teardownSession({bool preserveError = false}) {
+    return _teardownFuture ??= _performTeardownSession(
+      preserveError: preserveError,
+    ).whenComplete(() => _teardownFuture = null);
+  }
+
+  Future<void> _performTeardownSession({required bool preserveError}) async {
+    _sessionGeneration++;
+    _trace('teardownStarted');
     try {
       unawaited(_sessionStateSubscription?.cancel());
       _sessionStateSubscription = null;
@@ -796,7 +1107,7 @@ class StreamSessionProvider extends ChangeNotifier {
         debugPrint('[MetaWearablesDAT] Error stopping stream session: $e');
       }
     } finally {
-      _isTearingDown = false;
+      _trace('teardownCompleted');
     }
   }
 
@@ -818,6 +1129,17 @@ class StreamSessionProvider extends ChangeNotifier {
 
   Future<void> setBackgroundStreamingEnabled(bool enabled) async {
     if (_backgroundStreamingEnabled == enabled) return;
+    // Native errors may be detached while cleanup is pending. Cancel directly
+    // on opt-out rather than depending on a stoppedForBackground callback.
+    if (!enabled && _isRecovering) {
+      _streamingIntended = false;
+      _cancelRecovery();
+      unawaited(
+        _teardownSession().then((_) {
+          if (!_disposed) notifyListeners();
+        }),
+      );
+    }
     try {
       if (enabled) {
         await MetaWearablesDat.enableBackgroundStreaming(
