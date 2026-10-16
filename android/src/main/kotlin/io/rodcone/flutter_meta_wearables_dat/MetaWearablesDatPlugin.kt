@@ -1177,7 +1177,8 @@ class MetaWearablesDatPlugin :
     private fun enqueueLifecycle(call: MethodCall, result: Result, operation: (Result) -> Unit) {
         val previous = lifecycleJob
         val generation = lifecycleGeneration
-        lifecycleJob = scope.launch {
+        // Preserve immediate admission and audio invalidation when the queue is idle.
+        lifecycleJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             previous?.join()
             if (call.method.startsWith("start") && generation != lifecycleGeneration) {
                 result.error("START_CANCELLED", "Start superseded by stop.", null)
