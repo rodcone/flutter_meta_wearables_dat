@@ -212,3 +212,53 @@ rebuilt, signature-verified, installed and relaunched the normal release without
 deleting app data. Its plist had no investigation Logging entry. Verified idle
 Start UI and background toggle off. Restored iPhoneMirror Agent Access off and
 verified its menu. No additional camera start, lock test, or delayed trial ran.
+
+
+## Physical delayed trial 2 — 2026-10-16, 13:04–13:07 Europe/Madrid
+
+**PASS for the first two-second replacement.** Same implementation `03e2b14`
+(documentation-only HEAD `74de7e6`), both investigation flags, SDK warning logging,
+Bluetooth Classic, RAW/medium/30 FPS and background streaming enabled. The user
+confirmed ready with glasses worn/connected and phone unlocked. iPhoneMirror
+reported iOS 27.0.1. Native snapshots stayed connected/donned/open/compatible and
+thermal none; battery 97 → 95 percent. SDK remains the vendored DAT 1.0.0.
+Glasses firmware and Meta AI version were unavailable in the captured metadata.
+
+Previous trial's final cleanup end → this baseline start was approximately
+292.830 seconds, using native uptime across captures. A fresh launch preceded the
+baseline. This interval is not evidence of a reset of glasses state.
+
+| Measurement | Result |
+| --- | --- |
+| Baseline first frame → last pre-trigger watchdog | 79.310 s, 2,101 frames |
+| Native stop-method cleanup | 120.200 ms |
+| Selected wait / Dart measured wait | 2,000 ms / 2,001.854 ms |
+| Native cleanup operation end → replacement startRequested | 2,004.845 ms |
+| Replacement startRequested → firstFrame | 2.468 s |
+| Replacement first frame → last watchdog before manual Stop | 43.999 s, 1,168 frames, 23–26.5 FPS |
+| Executed replacements / genuine SDK errors / watchdog expiry | 1 / 0 / 0 |
+
+Trial `1792148777561738-1` emitted one wait-start and one wait-completed event,
+with no startup deadline during the wait. Baseline camera
+`4E3DEFBC-BC48-443F-9B1A-3A6EA9399F1C`, texture 0; replacement
+`7FCA1FB2-975E-43B4-B20F-57F5546975C4`, texture 1. All recorded lifecycle states
+were foreground/resumed. No persistent stall or additional recovery occurred.
+
+Comparison caveat: baseline watchdog samples ranged 23.5–33 FPS, but the live
+diagnostics panel briefly showed 16.5 and then 10.5 FPS immediately before
+injection, with recent arrivals and no stall. The longer baseline and this rate
+dip differ from the control. Do not use this pair to claim a throughput or timing
+benefit. Both first replacements passed; a benefit from adding delay remains
+unproven, and the original locked-phone issue remains unresolved.
+
+Capture: `/tmp/dat-two-second-20261016-trial/records.jsonl` and `summary.json`.
+Verified startup; contiguous native 1–171, Dart 1–27 and bridge 1, no malformed or
+rejected records, duplicate/out-of-order sequences, detected gaps or truncation.
+Operator-stopped capture; trailing loss remains undetectable. Only tagged
+structured traces were retained, not the full untagged SDK console.
+
+Restored normal signed release, verified no investigation Logging plist entry,
+installed/relaunched without deleting app data, and verified idle Start UI and
+background streaming off. Restored and verified iPhoneMirror Agent Access off.
+No extra trial or lock test ran. The next planned condition, if selected, is
+another two-second foreground trial; it is not authorized by this result.
