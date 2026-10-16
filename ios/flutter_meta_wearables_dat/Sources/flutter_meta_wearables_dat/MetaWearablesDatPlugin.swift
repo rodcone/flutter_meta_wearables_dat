@@ -918,7 +918,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   /// Read-only snapshot; frame metrics are coherent under the tracker lock.
   @MainActor
-  private func diagnosticsSnapshot(includeAudioRoute: Bool = true) -> [String: Any] {
+  private func diagnosticsSnapshot(includeAudioRoute: Bool = true, includeCallbackActivity: Bool = false) -> [String: Any] {
     var result: [String: Any] = [
       "sessionState": streamSession.map { StreamStateStreamHandler.stateToInt($0.state) } ?? 1,
       "framesReceived": 0, "framesSubmitted": 0, "waitingForFirstFrame": false,
@@ -927,6 +927,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     ]
     if let diagnostics {
       result.merge(diagnostics.snapshot()) { _, new in new }
+      if includeCallbackActivity, let activity = diagnostics.callbackActivity {
+        result.merge(activity.snapshot()) { _, new in new }
+      }
       result.merge(diagnosticsConfiguration) { _, new in new }
       let queue = liveness.snapshot()
       result["queuedFrames"] = queue.inFlight
@@ -944,7 +947,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func reportStall(_ reason: String, message: String) {
     diagnostics?.setStallReason(reason)
-    StreamInvestigationTrace.record("stall", diagnosticsSnapshot(includeAudioRoute: false))
+    StreamInvestigationTrace.record("stall", diagnosticsSnapshot(includeAudioRoute: false, includeCallbackActivity: true))
     streamErrorHandler.sendFrameStall(message: message, reason: reason, diagnostics: diagnosticsSnapshot())
   }
 
@@ -979,7 +982,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       let interval = investigationLastTick.map { now - $0 } ?? 0
       investigationLastTick = now
       if interval > 2 || now - investigationLastSummary >= 5 {
-        var fields = diagnosticsSnapshot(includeAudioRoute: false)
+        var fields = diagnosticsSnapshot(includeAudioRoute: false, includeCallbackActivity: true)
         fields["tickIntervalUs"] = Int(interval * 1_000_000)
         fields["parentId"] = investigationParentId
         StreamInvestigationTrace.record("watchdog", fields)
@@ -1066,7 +1069,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let trace = StreamInvestigationTrace.begin("performStreamTeardown", parent: traceParent)
     defer { StreamInvestigationTrace.end(trace) }
     let snapshot = StreamInvestigationTrace.begin("teardownSnapshot", parent: trace)
-    StreamInvestigationTrace.record("cameraTeardown", diagnosticsSnapshot(includeAudioRoute: false))
+    StreamInvestigationTrace.record("cameraTeardown", diagnosticsSnapshot(includeAudioRoute: false, includeCallbackActivity: true))
     StreamInvestigationTrace.end(snapshot)
     NSLog("[MWDAT] teardownStreamOnly — stopping camera, awaiting stop cascade")
 
@@ -1362,7 +1365,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func handleDidEnterBackground() {
     isInBackground = true
-    StreamInvestigationTrace.record("background", diagnosticsSnapshot(includeAudioRoute: false))
+    StreamInvestigationTrace.record("background", diagnosticsSnapshot(includeAudioRoute: false, includeCallbackActivity: true))
     if let session = decompressionSession {
       VTDecompressionSessionInvalidate(session)
       decompressionSession = nil
@@ -1446,7 +1449,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func handleWillEnterForeground() {
     isInBackground = false
-    StreamInvestigationTrace.record("foreground", diagnosticsSnapshot(includeAudioRoute: false))
+    StreamInvestigationTrace.record("foreground", diagnosticsSnapshot(includeAudioRoute: false, includeCallbackActivity: true))
     // With background streaming on, frames kept arriving while backgrounded but
     // the texture was deliberately not written. Measure the push clock from
     // here, or the first watchdog tick reports the whole background window.
@@ -2114,6 +2117,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // a previous stream before the first frame of this one arrives.
       videoFrameHandler.resetSessionState()
       videoListenerToken = session.videoFramePublisher.listen { [weak self] videoFrame in
+        let callback = tracker.callbackActivity?.enter()
+        defer {
+          if let callback, var fields = tracker.callbackActivity?.complete(callback) {
+            fields["sessionId"] = tracker.sessionId
+            StreamInvestigationTrace.record("firstCallbackBodyCompleted", fields)
+          }
+        }
         guard let self else { return }
         // Stamp arrival on the SDK's own callback, not inside the frame queue:
         // those are different instants, and conflating them makes a backlog of

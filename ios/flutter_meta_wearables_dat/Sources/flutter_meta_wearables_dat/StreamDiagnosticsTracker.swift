@@ -12,6 +12,7 @@ final class StreamDiagnosticsTracker {
 
   private let lock = NSLock()
   private let clock: () -> Double
+  let callbackActivity = StreamInvestigationTrace.enabled ? InvestigationCallbackActivity() : nil
   let sessionId = UUID().uuidString
   private let created: Double
   private var first: Double?
@@ -126,6 +127,50 @@ final class StreamDiagnosticsTracker {
     if let submitted { result["timeSinceLastSubmissionUs"] = Int(max(0, now - submitted) * 1_000_000) }
     if let stallReason { result["stallReason"] = stallReason }
     if first == nil && reportedFirst { result["stallReason"] = "firstFrameTimeout" }
+    return result
+  }
+}
+
+
+/// Investigation-only callback accounting. Stores timestamps, never frame buffers.
+/// The owner is per camera; outstanding old callbacks cannot mutate a replacement.
+final class InvestigationCallbackActivity {
+  private let lock = NSLock()
+  private let clock: () -> Double
+  private var entered = 0
+  private var completed = 0
+  private var active: [Int: Double] = [:]
+
+  init(clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) {
+    self.clock = clock
+  }
+
+  func enter() -> Int {
+    lock.lock(); defer { lock.unlock() }
+    entered += 1
+    active[entered] = clock()
+    return entered
+  }
+
+  /// Returns a bounded first-body completion record. Emit it after unlocking.
+  /// A defer marker is not proof that SDK code resumed after the callback.
+  func complete(_ token: Int) -> [String: Any]? {
+    lock.lock(); defer { lock.unlock() }
+    guard let started = active.removeValue(forKey: token) else { return nil }
+    completed += 1
+    guard token == 1 else { return nil }
+    return ["callbackId": token,
+            "callbackBodyDurationUs": Int(max(0, clock() - started) * 1_000_000)]
+  }
+
+  func snapshot() -> [String: Any] {
+    lock.lock(); defer { lock.unlock() }
+    var result: [String: Any] = ["callbacksEntered": entered,
+                                "callbackBodiesCompleted": completed,
+                                "activeCallbacks": active.count]
+    if let oldest = active.values.min() {
+      result["oldestActiveCallbackAgeUs"] = Int(max(0, clock() - oldest) * 1_000_000)
+    }
     return result
   }
 }

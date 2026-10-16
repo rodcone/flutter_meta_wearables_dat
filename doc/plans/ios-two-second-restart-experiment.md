@@ -378,3 +378,37 @@ This is a proposed investigation step, not a confirmed fix. Leave the
 zero/two-second comparison paused rather than collecting more synthetic passes
 that cannot explain the observed manual-start failure. No upstream report should
 claim an SDK root cause on the present evidence.
+
+
+## Callback completion instrumentation — implemented 2026-10-16
+
+The maintainer selected the local-only implementation plan above. Per-camera
+investigation state now counts callback entries and bodies reaching their defer
+exit marker. It tracks active callback IDs and timestamps under a separate short
+lock; no frame/sample buffer is retained by diagnostics. Normal launches allocate
+no callback tracker. No recovery policy, frame ownership, threshold or delay
+changed; no public diagnostics fields were added.
+
+Native investigation stall/watchdog, teardown and lifecycle snapshots include
+`callbacksEntered`, `callbackBodiesCompleted`, `activeCallbacks`, and (only while
+active) `oldestActiveCallbackAgeUs`. Each camera emits at most one
+`firstCallbackBodyCompleted` record, with session ID, callback ID and
+`callbackBodyDurationUs`. Accounting locks are released before trace emission and
+are never held across frame processing. The defer is installed before the weak
+owner guard, so that early exit also completes accounting.
+
+Interpretation: an active callback whose age covers an arrival gap points toward
+an unfinished callback body; completed bodies with no new entries show silence
+after our completion marker. Neither proves SDK buffer reclamation or transport
+root cause. The marker precedes trace emission and actual return to SDK code.
+Arrival/submission and callback snapshots use separate locks and are not one
+atomic cross-counter observation; small transient differences are possible.
+
+Local checks: stream diagnostics harness passes 60 assertions with tracing off
+and 60 with tracing on, covering active age, out-of-order and duplicate exits,
+early-return defer, 500 concurrent callbacks, per-camera isolation, opt-in
+allocation and unchanged public snapshot. Existing investigation trace/sink
+harnesses pass. Signed investigation and normal iOS release builds pass strict
+codesign verification. Investigation Logging was `warning`; the final normal
+build has no investigation Logging plist entry. `git diff --check` is clean.
+No installation, launch, stream, phone setting change or device QA was performed.

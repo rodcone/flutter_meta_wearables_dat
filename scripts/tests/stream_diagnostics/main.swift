@@ -58,4 +58,39 @@ now += 1; check(!g.pollFirstFrame(), "Foreground grace excluded")
 check(g.snapshot()["firstFrameWaitUs"] as? Int == 9_000_000, "Grace preserves wait")
 now += 1; check(!g.pollFirstFrame(), "Only half a second eligible after grace")
 now += 0.5; check(g.pollFirstFrame(), "Deadline after grace")
+// Callback accounting is independent from arrival/submission and per camera.
+let activity = InvestigationCallbackActivity(clock: { now })
+let firstCallback = activity.enter()
+now += 2
+check(activity.snapshot()["activeCallbacks"] as? Int == 1, "Callback remains active without exit")
+check(activity.snapshot()["oldestActiveCallbackAgeUs"] as? Int == 2_000_000, "Active callback age")
+let secondCallback = activity.enter()
+check(activity.complete(secondCallback) == nil, "Only first callback emits completion")
+check(activity.snapshot()["activeCallbacks"] as? Int == 1, "Out-of-order completion retains oldest")
+let firstCompletion = activity.complete(firstCallback)
+check(firstCompletion?["callbackBodyDurationUs"] as? Int == 2_000_000, "First completion duration")
+check(activity.complete(firstCallback) == nil, "Duplicate completion ignored")
+check(activity.snapshot()["callbackBodiesCompleted"] as? Int == 2, "No duplicate accounting")
+check(activity.snapshot()["oldestActiveCallbackAgeUs"] == nil, "Idle has no active age")
+let freshActivity = InvestigationCallbackActivity(clock: { now })
+func earlyExit() {
+  let token = activity.enter()
+  defer { _ = activity.complete(token) }
+  return
+}
+earlyExit()
+check(activity.snapshot()["callbacksEntered"] as? Int == 3, "Early exit entered")
+check(activity.snapshot()["callbackBodiesCompleted"] as? Int == 3, "Defer completes early exit")
+check(freshActivity.snapshot()["callbacksEntered"] as? Int == 0, "Replacement isolated")
+let concurrentActivity = InvestigationCallbackActivity()
+DispatchQueue.concurrentPerform(iterations: 500) { _ in
+  let token = concurrentActivity.enter()
+  _ = concurrentActivity.snapshot()
+  _ = concurrentActivity.complete(token)
+}
+check(concurrentActivity.snapshot()["callbacksEntered"] as? Int == 500, "Concurrent entries retained")
+check(concurrentActivity.snapshot()["callbackBodiesCompleted"] as? Int == 500, "Concurrent exits retained")
+check(concurrentActivity.snapshot()["activeCallbacks"] as? Int == 0, "Concurrent callbacks all resolved")
+check((tracker().callbackActivity != nil) == StreamInvestigationTrace.enabled, "Activity allocation gated")
+check(tracker().snapshot()["callbacksEntered"] == nil, "Public snapshot unchanged")
 print("Stream diagnostics: \(checks) assertions passed")
