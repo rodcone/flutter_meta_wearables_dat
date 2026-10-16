@@ -310,3 +310,71 @@ or lock test followed. Current comparison remains one zero-delay pass and one
 two-second pass, plus this separately recorded baseline failure. Review the
 natural stall before choosing further device work; no production timing change
 is justified by these results.
+
+
+## Analysis of the natural baseline stall — 2026-10-16
+
+Read-only analysis of the existing capture and current native implementation;
+no additional device operation or production change.
+
+Timeline relative to baseline native startRequested:
+
+| Time | Observation |
+| --- | --- |
+| +2.379 s | First SDK publisher callback recorded; one frame subsequently submitted |
+| +4.121 s | Stall snapshot: one arrival, one submission, last arrival 1.742 s ago |
+| +4.528 s | Existing recovery requests native Stop after approximately 400 ms backoff |
+| +4.643 s | Replacement start, 1.348 ms after native cleanup completed |
+| +7.084 s | Replacement first frame |
+
+The failed first frame reached submission approximately 2.1 ms after arrival
+(the two ages in the same stall snapshot differ by 2,109 us). Arrival is counted
+at the beginning of `videoFramePublisher.listen`, before `frameQueue.sync`,
+decoding/copying, throttling or texture submission. Submission is counted after
+`textureFrameAvailable`. Consequently this is not evidence of continuing SDK
+arrivals with a frozen Flutter preview. No second callback reached the arrival
+counter before teardown. RAW was selected, so HEVC decoding is not involved.
+
+Important limit: `queuedFrames` decreases when processing **starts**, not when
+the publisher callback finishes. Zero queue depth therefore cannot prove the
+first callback returned or exclude all plugin-side backpressure. Successful
+submission shows the first callback progressed far through processing, but there
+is no callback-exit record. The immediate cause can be localized to absent new
+callback arrivals; the underlying cause cannot be assigned to SDK, transport,
+glasses or callback completion with this capture.
+
+There was no captured background transition, disconnect, doff/hinge closure,
+thermal change, SDK error, or audio-route change around the gap. Audio activated
+roughly 26 seconds before start on built-in microphone/Bluetooth A2DP. This is
+context, not proof that audio/transport has no effect. Recovery began before we
+could observe whether the original session would resume spontaneously. The gap
+is a real violation of the existing 1.5-second post-first-frame rule; it does not
+prove a permanent wedge or justify lengthening that rule.
+
+Unlike the earlier synthetic replacement rejection (`unexpectedError("Session
+ended by device")`), this failure delivered a frame and then went silent on a
+fresh manual baseline. Treat them as separate observed failure modes unless
+additional evidence connects them. A post-cleanup delay cannot prevent the
+initial manual-start gap by construction. Successful immediate recovery here
+also does not establish that immediate restarts always work.
+
+### Recommended next implementation plan (not implemented)
+
+Before more comparisons, close the specific callback-completion evidence gap:
+
+1. Under existing investigation opt-in only, maintain per-camera callback
+   entered/completed counts and active-callback start age, using a short lock
+   that is never held across processing or tracing. Use `defer` to record exit
+   on every callback path. Retain no sample buffer in diagnostic state.
+2. Add a bounded first-callback exit record and include callback activity in
+   stall/watchdog snapshots. Do not log every frame, add sleeps, subscribe to
+   frame bytes, change the synchronous ownership strategy, or alter retries.
+3. Validate completion accounting, early exits and session isolation with the
+   smallest native harness scope; verify normal/investigation builds. A later,
+   separately selected natural baseline test may distinguish an outstanding
+   callback from SDK silence after callback return.
+
+This is a proposed investigation step, not a confirmed fix. Leave the
+zero/two-second comparison paused rather than collecting more synthetic passes
+that cannot explain the observed manual-start failure. No upstream report should
+claim an SDK root cause on the present evidence.
