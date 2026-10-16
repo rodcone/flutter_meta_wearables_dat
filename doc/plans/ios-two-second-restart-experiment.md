@@ -262,3 +262,51 @@ installed/relaunched without deleting app data, and verified idle Start UI and
 background streaming off. Restored and verified iPhoneMirror Agent Access off.
 No extra trial or lock test ran. The next planned condition, if selected, is
 another two-second foreground trial; it is not authorized by this result.
+
+
+## Attempted delayed trial 3 — baseline failure, 2026-10-16 13:11–13:12
+
+**Comparison not executed.** The fresh manual baseline stalled after its first
+frame, before opening diagnostics or selecting/injecting the two-second trial.
+The example automatically recovered under its existing natural-error policy.
+The operator then stopped the stream and ended the batch rather than treating
+the recovered session as a clean baseline. No synthetic trigger or experimental
+wait event appears in the capture; this is neither a delayed pass nor failure.
+
+Same implementation `03e2b14`, documentation HEAD `a6bfb33`, both investigation
+flags and warning logging; RAW/medium/30 FPS, Bluetooth Classic, foreground with
+background streaming enabled. User confirmed unlocked/connected/worn. Native
+snapshots reported connected/donned/open/compatible/thermal none (battery 93%).
+iPhoneMirror reported iOS 27.0.1; DAT 1.0.0 unchanged. Glasses firmware and Meta AI
+version remain unavailable. Previous final cleanup → baseline start was 266.572
+seconds by native uptime; this does not prove a device-state reset.
+
+Baseline camera `2566F8BD-3490-462A-A6BD-F9703A70D2E1`, texture 0, received and
+submitted exactly one frame. The native stall snapshot then reported
+`sdkFramesStopped`, 1,741,601 us since last frame, 1,739,492 us since submission,
+zero queued frames, foreground, native state STREAMING. The plugin-generated
+`frameStalled` reached Dart as a platform error. No genuine SDK session error,
+disconnect, thermal event or background transition was captured.
+
+One existing automatic recovery ran with no experimental delay: native cleanup
+113.626 ms, cleanup-end → next start 1.348 ms. Replacement camera
+`B3C4B833-A569-47B3-BB75-EEE962765872`, texture 1, delivered 1,040 frames over
+39.008 seconds through the last watchdog before manual Stop, at 25.5–27 FPS.
+This shows successful natural recovery in this attempt, not uninterrupted
+baseline delivery and not a known cause of the original interruption.
+
+Capture: `/tmp/dat-two-second-repeat-20261016-trial/records.jsonl` and
+`summary.json`. Startup verified, native 1–152, Dart 1–24 and bridge 1 contiguous;
+no malformed/rejected records, detected gaps, duplicates, out-of-order or
+truncated records. Operator-stopped; unobserved trailing records cannot be ruled
+out. Full untagged SDK console was not retained. Mirroring sometimes returned
+older frames during idle UI setup, but native capture stayed coherent; no pixel
+comparison was used as health evidence.
+
+Restored normal signed build with no investigation Logging entry, reinstalled
+without deleting data, relaunched and verified idle Start UI/background off.
+Agent Access off was verified in iPhoneMirror. No manual retry, synthetic trial,
+or lock test followed. Current comparison remains one zero-delay pass and one
+two-second pass, plus this separately recorded baseline failure. Review the
+natural stall before choosing further device work; no production timing change
+is justified by these results.
