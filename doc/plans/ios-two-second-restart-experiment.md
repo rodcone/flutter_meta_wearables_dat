@@ -166,3 +166,49 @@ Local automated checks:
 
 No device installation, launch, streaming or settings changes were performed.
 These checks establish local behavior, not whether the delay fixes the SDK fault.
+
+
+## Physical control trial 1 — 2026-10-16, 12:57–13:00 Europe/Madrid
+
+**PASS for the first zero-delay replacement.** Tested implementation `03e2b14`
+with both investigation defines and SDK warning logging. One synthetic injection,
+one executed recovery, no extra attempt. This does not demonstrate a delay effect
+or resolve background reliability; the two-second condition has not been run.
+
+Conditions: wired iPhone 17, iOS 27.0.1 (24A446), Bluetooth Classic,
+RAW/medium/30 FPS, background streaming enabled, app foreground throughout.
+The user confirmed unlocked, connected and worn before capture. Native snapshots
+reported connected/donned/open/compatible/thermal none before and after replacement;
+battery changed from 100 to 98 percent over the capture. Glasses firmware and
+Meta AI version were not available in this capture. Diagnostics showed zero
+seconds and closed before injection; no frame-byte subscription was added.
+
+| Measurement | Result |
+| --- | --- |
+| Baseline observed after first frame, through last pre-trigger watchdog | 49.204 s, 1,321 frames, 24.5–27.5 FPS |
+| Native stop-method cleanup | 130.292 ms |
+| Cleanup operation end → replacement startRequested | 1.290 ms |
+| Replacement startRequested → firstFrame | 2.441 s |
+| Replacement first frame → last watchdog before manual Stop | 44.127 s, 1,163 frames, 24.5–26.5 FPS |
+| Replacement attempts / genuine SDK errors / watchdog expiry | 1 / 0 / 0 |
+
+Baseline camera `19C2BAD4-C8A4-4138-84E7-36E72E52A3B2`, texture 0;
+replacement `B1098198-42F1-4F12-A0DA-DB1B2D49E818`, texture 1.
+Trial `1792148348614716-1` recorded `postCleanupDelayMs: 0`; no experimental
+wait event occurred. All watchdog snapshots were foreground and no background
+transition was captured. Actual native arrivals, not just STREAMING state or
+screen pixels, support the outcome. Frame counts/rates are sampled diagnostics,
+not a claim that every scheduled frame arrived.
+
+Capture: `/tmp/dat-zero-control-20261016/trial/records.jsonl` and `summary.json`.
+Startup verified; native sequences 1–165, Dart 1–25 and bridge 1 were contiguous,
+with no duplicates, rejected payloads, malformed records, truncation or ordering
+errors. Collector ended intentionally (`operatorStopped`). Sequence validation
+cannot exclude an unobserved trailing record. The collector retains tagged
+structured traces, not the full untagged SDK console.
+
+Restoration: manually stopped streaming and turned background streaming off;
+rebuilt, signature-verified, installed and relaunched the normal release without
+deleting app data. Its plist had no investigation Logging entry. Verified idle
+Start UI and background toggle off. Restored iPhoneMirror Agent Access off and
+verified its menu. No additional camera start, lock test, or delayed trial ran.
