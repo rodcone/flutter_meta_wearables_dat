@@ -446,3 +446,52 @@ codesign verification passed and MWDAT Logging was absent. Installed in place,
 relaunched and verified idle with background streaming off. Agent Access was
 turned off and verified in iPhoneMirror. No production code changed, no additional
 stream trial ran, and nothing was pushed or posted externally.
+
+## Instrumented natural baseline repeat — 2026-10-16
+
+The maintainer selected one further foreground trial and confirmed readiness.
+Built from `adf142a` with investigation enabled and recovery experiment disabled;
+RAW/medium/30 fps, background streaming enabled, no lock or synthetic trigger.
+Capture preflight passed. One manual start was performed; the app's existing
+natural recovery made one automatic restart. No second manual start was made.
+
+The failure reproduced. Camera `6508D127-DB75-47CE-BDD1-5873D815F11B` (texture 0)
+received and submitted exactly one frame, 2.425 s after native start request.
+`firstCallbackBodyCompleted` recorded 2,040 us. At the stall (4.097 s after start),
+`callbacksEntered=1`, `callbackBodiesCompleted=1`, `activeCallbacks=0`, queue zero,
+peak queue one. Last arrival age was 1,672,731 us; last submission age 1,671,199 us.
+The camera still reported streaming in foreground, with `sdkFramesStopped`.
+The same completed/active counts persisted at teardown roughly 409 ms later.
+
+Natural recovery then stopped the session (stop-method duration 117.167 ms), and
+requested a new session 1.486 ms after cleanup completion. Replacement parent
+`D2039866-481F-48EA-BE81-53A0E32EA7B8` failed while starting: SDK error stream
+reported `unexpectedError("Session ended by device")` about 83 ms after the new
+start request; `ensureSessionStarted` also caught it. These are two reporting
+paths for the replacement failure, not evidence of two independent failures.
+No replacement camera or first frame was created. The app returned to idle.
+
+Both parent snapshots reported connected/donned/open/compatible, battery 83%,
+thermal none. No background transition, disconnect, doff, thermal change or
+failure-time audio-route change was captured. Audio activated about 24 s before
+manual start using built-in microphone and Bluetooth A2DP output.
+
+Interpretation: this closes the pending callback-body question for this failure:
+frame delivery ceased after the first body reached its completion marker, with
+no recorded active callback at stall or teardown. It does not prove actual SDK
+return/buffer reclamation, nor identify an SDK, transport or firmware root cause.
+It also shows fresh-start silence and replacement rejection in one natural run;
+causality between them remains unproven. Recovery interrupts observation of
+possible spontaneous resumption. Do not change timeouts or claim a delay fix
+from this result; next review the evidence and plan a discriminating experiment.
+
+Evidence: `/tmp/dat-callback-repeat-20261016/{records.jsonl,summary.json}`. Native
+1–113, Dart 1–18 and bridge 1 contiguous, no malformed/rejected/duplicate/
+out-of-order/truncated records; missing trailing records remain undetectable.
+This is tagged investigation capture, not the full SDK console.
+
+Cleanup: verified stopped UI, disabled background streaming, ended collector,
+rebuilt normal release without defines, verified strict codesign and absence of
+MWDAT Logging, installed in place and relaunched. Normal app verified idle with
+background streaming off; iPhoneMirror Agent Access verified off. No production
+code changes or external publication. Device reliability remains unresolved.
