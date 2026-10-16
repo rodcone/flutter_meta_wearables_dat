@@ -113,6 +113,9 @@ measurement, not Dart-to-native wall-clock differences.
 
 ## Stage 2, only if warranted: controlled post-cleanup delay
 
+Superseded on 2026-10-16 by [the two-second comparison plan](ios-two-second-restart-experiment.md).
+The ten-second proposal below is retained as historical context, not the active plan.
+
 Add an experiment-only selection of **0 ms or 10,000 ms after teardown returns**.
 Ten seconds is a comparison point from the successful manual test, not a proposed
 production fix or a known SDK requirement. Snapshot it at trial entry; never

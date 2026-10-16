@@ -1,0 +1,134 @@
+# Two-second foreground restart experiment
+
+Prepared 2026-10-16 after the maintainer selected planning. Status: proposed;
+no implementation or additional device trial is authorized by this planning step.
+This replaces the earlier stage-2 proposal comparing zero versus ten seconds.
+
+## Question and current evidence
+
+Does waiting two seconds **after cleanup completes** reduce failed replacement
+starts under the same foreground conditions? The existing 400 ms recovery backoff
+runs before cleanup and does not test this question.
+
+On `b288676`, the October 16 trial had a 0.910 ms cleanup-to-start gap and the
+replacement emitted `unexpectedError("Session ended by device")` 94.073 ms after
+start. SDK snapshots reported connected, donned, hinges open and thermal none.
+Three earlier synthetic trials passed and one failed. An earlier manual start
+also failed after a gap over ten seconds: delay cannot be assumed sufficient.
+The October 16 phone ran iOS 27.0.1 with added warning logging, unlike the previous
+trials. Historical runs are context, not the control group for this comparison.
+
+Two seconds follows the workaround discussed in Meta iOS issue 231, already linked
+in the SDK-error investigation. It is an experimental value, not a confirmed fix,
+SDK contract, or reason to match free-text errors or retry unexpectedError broadly.
+
+## Proposed implementation
+
+1. Add a zero/two-second selection beside the existing synthetic recovery action
+   in the example diagnostics panel. Both MWDAT_INVESTIGATION and
+   MWDAT_RECOVERY_EXPERIMENT must be true. Default to zero, use a closed set of
+   supported values, and snapshot the selection when a valid trial is triggered.
+   Close diagnostics before triggering as today. No public plugin API or native
+   timing change; both conditions run in the same installed build.
+2. In StreamProvider._runRecovery, after the shared teardown future completes and
+   the generation guard passes, cancel the teardown deadline and enter a separate
+   experimental waiting phase. For the two-second condition, await a cancellable
+   timer; for zero, go straight to starting without an added asynchronous wait.
+   Start the existing startup watchdog only immediately before replacement start.
+   The waiting phase reports no startup/cleanup deadline. Preserve the existing
+   pre-teardown backoff, native cleanup and attempt accounting in both conditions.
+3. Keep the trial selection fixed for any subsequent recovery attempts belonging
+   to that trial; do not increase existing retry budgets. The first executed attempt
+   is the primary outcome; report subsequent attempts separately. A new manual
+   start clears the trial context. Manual starts and natural errors outside a
+   synthetic trial get no experimental delay, even in an investigation build.
+4. Cancel and resolve the pending wait on Stop, disposal, terminal/nonrecoverable
+   failure, invalidated recovery generation, background opt-out, or leaving resumed
+   lifecycle. The last rule is investigation-only: this is a foreground experiment.
+   Reject new manual/experimental starts while recovery/cleanup is active. Recheck
+   generation, streaming intent and resumed lifecycle immediately before starting.
+   Duplicate errors/states must not restart the timer, extend deadlines or consume
+   another attempt. A late timer callback must never start a cancelled session.
+5. Add trace events for wait begin/end/cancellation, requested delay, measured
+   elapsed wait and trial identity. Preserve errorSource and native parent/camera
+   identity. Use native cleanup-end-to-start timestamps for the primary actual-gap
+   measurement; Dart elapsed wait is supplementary, never subtracted from native
+   uptime. Delayed scheduling is reported as observed, not rounded to two seconds.
+
+## Local validation before device use
+
+Use existing example provider/widget-test conventions and fake time:
+
+- All four compile-time flag combinations: controls and timing change exist only
+  with both flags; normal/manual/natural recovery remains unchanged.
+- A blocked teardown never starts the delay or a replacement. Once cleanup returns,
+  two seconds must elapse before start; the zero condition adds no new wait.
+- Teardown and startup deadlines retain their full independent budgets; neither
+  counts the experimental wait. Duplicate callbacks cannot extend a wait/deadline.
+- Stop, disposal, terminal error, generation invalidation, opt-out and lifecycle
+  loss during the wait prevent late start. Cancellation releases pending work.
+- A selection change cannot alter an active trial; repeated injections cannot
+  overlap work. Trial reset and retry accounting follow the existing contract.
+- Wait records distinguish completion from cancellation and carry the selected
+  delay consistently. Existing genuine SDK error forwarding remains intact.
+
+Run scoped Dart formatting/analysis, the existing recovery/experiment suites and
+new widget/provider cases. Build signed normal and investigation iOS releases;
+verify logging configuration and flag behavior. No device installation in this
+implementation stage; report local results and stop for the next device step.
+
+## Proposed physical comparison
+
+Use one instrumented build, Bluetooth Classic, RAW/medium/30 FPS, background
+streaming enabled, foreground/resumed throughout, and unchanged warning logging.
+Record iOS, SDK, glasses firmware and Meta AI versions where available; record
+unavailable metadata explicitly. Check connected/donned/open/compatible/thermal
+state from the new native records and preserve SDK logs before and after.
+
+Run at most four valid trials, **one explicitly selected trial at a time**:
+
+| Trial | Added post-cleanup delay |
+| --- | --- |
+| 1 | 0 seconds |
+| 2 | 2 seconds |
+| 3 | 2 seconds |
+| 4 | 0 seconds |
+
+This reverses order in the second pair but does not eliminate device-history or
+thermal effects. Do not run an automatic loop or repeatedly retry a failed baseline.
+
+For each trial:
+
+1. Verify capture preflight and clean sequence state. Explicitly stop/reset before
+   establishing a fresh manual baseline; allow at least 30 seconds between trials,
+   record the actual interval, and confirm readiness again. This spacing applies
+   equally to both conditions and is not a proven glasses-state reset.
+2. Establish at least 20 seconds of actual baseline frame delivery. If manual start
+   fails, retain it as a baseline failure and stop the batch for review; do not
+   count it as a synthetic trial or keep restarting until it succeeds.
+3. Choose the condition, trigger once and leave controls untouched. Check actual
+   native cleanup completion and replacement start, SDK state/error/link/wear
+   events, new camera/texture identity, and first-frame arrival.
+4. Pass only if the first replacement delivers frames continuously for at least
+   20 seconds after its first frame, with no persistent stall, terminal error or
+   extra recovery. State=streaming or a new texture alone is insufficient.
+   A startup rejection/no frame is failure. Incomplete capture, changed lifecycle,
+   removal, lost connection or thermal change makes the comparison confounded;
+   preserve the observation without attributing its cause to the delay.
+5. Stop on any unexpected persistent device state or missing capture. A failure
+   requires review before the next trial; it does not authorize more attempts.
+   After each selected trial restore the normal build, background streaming off
+   and Agent Access off, unless the maintainer explicitly selects continuing the
+   same batch. Rebuild the identical instrumented commit for the next trial.
+
+## Decision rules
+
+- Delayed passes and immediate failures suggest a timing effect under these
+  conditions; four trials cannot establish reliability or a production fix.
+- Both conditions passing is inconclusive because the failure is intermittent.
+- Both failing, mixed delayed outcomes, or a confounded pair: preserve evidence
+  and consider a minimal native reproduction/upstream report rather than lengthen
+  the delay or retry budget without another plan.
+- Any production change needs separate approval, repeat evidence and natural
+  background/normal-release validation. This synthetic experiment does not resolve
+  the original locked-phone streaming issue on its own.
