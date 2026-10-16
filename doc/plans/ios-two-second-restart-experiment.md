@@ -412,3 +412,37 @@ harnesses pass. Signed investigation and normal iOS release builds pass strict
 codesign verification. Investigation Logging was `warning`; the final normal
 build has no investigation Logging plist entry. `git diff --check` is clean.
 No installation, launch, stream, phone setting change or device QA was performed.
+
+## Instrumented natural baseline — 2026-10-16
+
+One user-authorized foreground manual start on `fa5f5c0`, with glasses confirmed
+connected/worn, phone unlocked, RAW/medium/30 fps and background streaming enabled.
+Only `MWDAT_INVESTIGATION` was enabled; no synthetic recovery trigger, experimental
+delay, lock interval or second start was used. Capture preflight passed.
+
+Result: healthy baseline; the intermittent failure did not reproduce. Camera
+`061ECD51-A406-4359-83C9-858D2A86F719` (texture 0) received its first frame 2.597 s
+after native start request. First-frame-to-teardown observation lasted 42.413 s,
+with 1,135 arrivals and 1,051 submissions. Rolling watchdog arrival rates were
+23.5–27.5 fps. The first callback body reached its completion marker in 1,930 us.
+All eight post-first-frame watchdog samples reported zero active callbacks; at
+teardown, entries and completed bodies both equaled 1,135, with queue zero and
+peak queue one. No stall, recovery, SDK error or background transition was captured.
+Device snapshots reported connected/donned/open/compatible and thermal none.
+
+This validates callback instrumentation during a healthy device run, not the
+cause or resolution of the intermittent silence. The marker still precedes actual
+return to SDK code; no failure-time callback conclusion is available. Submitted
+frames are not proof of displayed frames. Keep the delay comparison paused.
+
+Local evidence: `/tmp/dat-callback-baseline-20261016/{records.jsonl,summary.json}`.
+Capture ended by operator after manual stop and background-streaming disable.
+Native sequences 1–95, Dart 1–10 and bridge 1 were contiguous, without malformed,
+rejected, duplicate, out-of-order or truncated records. Missing trailing records
+remain undetectable; this collector does not capture the entire SDK console.
+
+Restoration: normal signed release rebuilt without investigation defines, strict
+codesign verification passed and MWDAT Logging was absent. Installed in place,
+relaunched and verified idle with background streaming off. Agent Access was
+turned off and verified in iPhoneMirror. No production code changed, no additional
+stream trial ran, and nothing was pushed or posted externally.
