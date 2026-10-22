@@ -1,136 +1,191 @@
 package io.rodcone.flutter_meta_wearables_dat
 
-import android.util.Log
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
-import com.meta.wearable.dat.core.types.ThermalLevel
+import com.meta.wearable.dat.core.types.*
 import io.flutter.plugin.common.EventChannel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 
-/** Observes the selected device's thermal state through DAT 1.0 metadata. */
+/** Observes physical and connection metadata without owning a device session. */
 internal class DeviceStateStreamHandler(
         private val deviceSelectorProvider: () -> DeviceSelector,
         private val isInitialized: () -> Boolean,
+        private val metadata: (DeviceIdentifier) -> Flow<Device>? = { Wearables.devicesMetadata[it] },
+        private val registrations: () -> Flow<RegistrationState> = { Wearables.registrationState },
+        private val devices: () -> Flow<Set<DeviceIdentifier>> = { Wearables.devices },
 ) : EventChannel.StreamHandler {
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var outerJob: Job? = null
     private var innerJob: Job? = null
     private var eventSink: EventChannel.EventSink? = null
+    private var monitoringGeneration = 0L
+    private var deviceGeneration = 0L
+    private var disposed = false
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-        if (events == null) return
+        if (disposed || events == null) return
         eventSink = events
-        if (!isInitialized()) {
-            // SDK not yet initialized — bail. The plugin can call
-            // [restartMonitoring] once Bluetooth permissions are granted and
-            // `Wearables.initialize` has run.
-            Log.d(TAG, "DeviceStateStream onListen — SDK not initialized yet")
-            return
-        }
-        startCollecting(events)
+        startCollecting()
     }
 
     override fun onCancel(arguments: Any?) {
-        outerJob?.cancel()
-        outerJob = null
-        innerJob?.cancel()
-        innerJob = null
+        invalidateMonitoring()
         eventSink = null
     }
 
-    /**
-     * Restart the active-device subscription. Called after BT permissions are
-     * granted so we don't miss the first device emission.
-     */
     fun restartMonitoring(force: Boolean = false) {
-        val sink = eventSink ?: return
-        // `force` rebinds to a freshly-swapped selector even while the outer job
-        // is live (e.g. after a device-pin change); startCollecting() cancels and
-        // re-reads the selector provider.
+        if (disposed || eventSink == null) return
         if (!force && outerJob?.isActive == true) return
-        if (!isInitialized()) return
-        startCollecting(sink)
+        startCollecting()
     }
 
-    private fun startCollecting(events: EventChannel.EventSink) {
-        outerJob?.cancel()
+    private fun invalidateDevice() {
+        deviceGeneration++
         innerJob?.cancel()
         innerJob = null
-        val selector = deviceSelectorProvider()
-        var currentDeviceId: com.meta.wearable.dat.core.types.DeviceIdentifier? = null
+    }
 
-        // Seed: if a device is already active, attach the inner subscription
-        // immediately so Dart subscribers see the first thermal reading
-        // without waiting for an `activeDeviceFlow` tick.
-        selector.activeDevice()?.let { deviceId ->
-            currentDeviceId = deviceId
-            innerJob = subscribe(deviceId, events)
-        }
+    private fun invalidateMonitoring() {
+        monitoringGeneration++
+        invalidateDevice()
+        outerJob?.cancel()
+        outerJob = null
+    }
 
-        outerJob =
-                scope.launch {
-                    selector.activeDeviceFlow().collect { deviceId ->
-                        // `activeDeviceFlow()` replays the current value to
-                        // new collectors. The SDK's
-                        // `Wearables.getDeviceState(...)` doesn't tolerate
-                        // unnecessary cancel+resubscribe for the same device, so
-                        // only tear down + restart when the device actually
-                        // changes (mirrors the iOS handler's behaviour).
-                        if (deviceId == currentDeviceId) return@collect
-                        innerJob?.cancel()
-                        innerJob = null
-                        currentDeviceId = deviceId
-                        if (deviceId != null) {
-                            innerJob = subscribe(deviceId, events)
+    private fun startCollecting() {
+        invalidateMonitoring()
+        val events = eventSink ?: return
+        events.success(emptySnapshot())
+        if (!isInitialized()) return // Restarted after Bluetooth permission/initialization.
+        val generation = monitoringGeneration
+        outerJob = scope.launch {
+            try {
+                registrations().distinctUntilChanged().collectLatest { registration ->
+                    if (generation != monitoringGeneration) return@collectLatest
+                    invalidateDevice()
+                    events.success(emptySnapshot())
+                    if (registration != RegistrationState.REGISTERED) return@collectLatest
+                    val selector = deviceSelectorProvider()
+                    var currentId: DeviceIdentifier? = null
+                    try {
+                        // Device-list changes retry a missing metadata lookup, without polling.
+                        combine(
+                            selector.activeDeviceFlow().onStart { emit(selector.activeDevice()) },
+                            devices().onStart { emit(emptySet()) },
+                        ) { id, known -> id?.takeIf { it in known } }.collect { id ->
+                            if (generation != monitoringGeneration) return@collect
+                            if (id == currentId && (id == null || innerJob?.isActive == true)) return@collect
+                            invalidateDevice()
+                            currentId = id
+                            events.success(emptySnapshot(id))
+                            if (id != null) subscribe(id, generation, events)
+                        }
+                    } finally {
+                        if (generation == monitoringGeneration) {
+                            invalidateDevice()
+                            events.success(emptySnapshot())
                         }
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (generation == monitoringGeneration) {
+                    events.error("DEVICE_STATE_ERROR", error.message, null)
+                }
+            } finally {
+                if (generation == monitoringGeneration) {
+                    invalidateDevice()
+                    events.success(emptySnapshot())
+                }
+            }
+        }
     }
 
-    private fun subscribe(
-            deviceId: com.meta.wearable.dat.core.types.DeviceIdentifier,
-            events: EventChannel.EventSink,
-    ): Job {
-        return scope.launch {
-            Wearables.devicesMetadata[deviceId]?.collect { state ->
-                events.success(mapOf("thermalLevel" to thermalLevelToInt(state.thermalLevel)))
+    private fun subscribe(id: DeviceIdentifier, generation: Long, events: EventChannel.EventSink) {
+        val source = metadata(id) ?: return
+        val device = deviceGeneration
+        innerJob = scope.launch {
+            try {
+                source.collect { state ->
+                    if (generation == monitoringGeneration && device == deviceGeneration) {
+                        events.success(snapshot(id, state))
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (generation == monitoringGeneration && device == deviceGeneration) {
+                    events.error("DEVICE_STATE_ERROR", error.message, null)
+                }
+            } finally {
+                if (generation == monitoringGeneration && device == deviceGeneration) {
+                    events.success(emptySnapshot(id))
+                }
             }
         }
     }
 
     fun dispose() {
-        outerJob?.cancel()
-        outerJob = null
-        innerJob?.cancel()
-        innerJob = null
-        eventSink = null
+        onCancel(null)
+        disposed = true
         scope.cancel()
     }
 
     companion object {
-        private const val TAG = "MetaWearablesDat"
+        private fun emptySnapshot(id: DeviceIdentifier? = null): Map<String, Any?> = mapOf(
+            "deviceId" to id?.identifier, "linkState" to "unknown", "compatibility" to "undefined",
+            "thermalLevel" to 0, "batteryLevel" to null, "chargingState" to "unknown",
+            "donState" to "unknown", "hingeState" to "unknown",
+        )
 
-        /**
-         * Mirrors the int values the Dart `ThermalLevel` enum uses
-         * (also the same as the iOS handler emits). Keep these aligned.
-         */
-        private fun thermalLevelToInt(level: ThermalLevel): Int {
-            return when (level) {
-                ThermalLevel.UNKNOWN -> 0
-                ThermalLevel.NONE -> 1
-                ThermalLevel.LIGHT -> 2
-                ThermalLevel.MODERATE -> 3
-                ThermalLevel.SEVERE -> 4
-                ThermalLevel.CRITICAL -> 5
-                ThermalLevel.EMERGENCY -> 6
-                ThermalLevel.SHUTDOWN -> 7
-            }
+        private fun snapshot(id: DeviceIdentifier, state: Device): Map<String, Any?> {
+            val connected = state.linkState == LinkState.CONNECTED
+            return mapOf(
+                "deviceId" to id.identifier,
+                "linkState" to when (state.linkState) {
+                    LinkState.CONNECTED -> "connected"
+                    LinkState.CONNECTING -> "connecting"
+                    LinkState.DISCONNECTED -> "disconnected"
+                    else -> "unknown"
+                },
+                "compatibility" to when (state.compatibility) {
+                    DeviceCompatibility.COMPATIBLE -> "compatible"
+                    DeviceCompatibility.DEVICE_UPDATE_REQUIRED -> "deviceUpdateRequired"
+                    DeviceCompatibility.SDK_UPDATE_REQUIRED -> "sdkUpdateRequired"
+                    else -> "undefined"
+                },
+                "thermalLevel" to if (connected) thermalLevelToInt(state.thermalLevel) else 0,
+                // DAT uses zero for unknown OR empty; never fabricate an empty battery.
+                "batteryLevel" to state.batteryLevel.takeIf { connected && it in 1..100 },
+                "chargingState" to if (!connected) "unknown" else when (state.chargingState) {
+                    ChargingState.CHARGING -> "charging"
+                    ChargingState.NOT_CHARGING -> "notCharging"
+                    else -> "unknown"
+                },
+                "donState" to if (!connected) "unknown" else when (state.donState) {
+                    DonState.DONNED -> "donned"
+                    DonState.DOFFED -> "doffed"
+                    else -> "unknown"
+                },
+                "hingeState" to if (!connected) "unknown" else when (state.hingeState) {
+                    HingeState.OPEN -> "open"
+                    HingeState.CLOSED -> "closed"
+                    else -> "unknown"
+                },
+            )
+        }
+
+        private fun thermalLevelToInt(level: ThermalLevel): Int = when (level) {
+            ThermalLevel.UNKNOWN -> 0
+            ThermalLevel.NONE -> 1
+            ThermalLevel.LIGHT -> 2
+            ThermalLevel.MODERATE -> 3
+            ThermalLevel.SEVERE -> 4
+            ThermalLevel.CRITICAL -> 5
+            ThermalLevel.EMERGENCY -> 6
+            ThermalLevel.SHUTDOWN -> 7
         }
     }
 }
