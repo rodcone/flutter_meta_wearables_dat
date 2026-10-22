@@ -63,6 +63,68 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     'flutter_meta_wearables_dat/device_state',
   );
 
+  /// The event channel used to receive motion sensor readings.
+  @visibleForTesting
+  final motionSamplesEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/motion_samples',
+  );
+
+  /// The event channel used to receive motion capability state changes.
+  @visibleForTesting
+  final motionStateEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/motion_state',
+  );
+
+  /// The event channel used to receive motion capability failures.
+  @visibleForTesting
+  final motionErrorEventChannel = const EventChannel(
+    'flutter_meta_wearables_dat/motion_errors',
+  );
+
+  late final Stream<MotionSample> _motionSamples = motionSamplesEventChannel
+      .receiveBroadcastStream()
+      .map(
+        (dynamic event) => MotionSample.fromMap(event as Map<Object?, Object?>),
+      );
+
+  late final Stream<MotionState> _motionStates = motionStateEventChannel
+      .receiveBroadcastStream()
+      .map((dynamic event) => MotionState.fromCode(event as String));
+
+  late final Stream<MotionError> _motionErrors = motionErrorEventChannel
+      .receiveBroadcastStream()
+      .map(
+        (dynamic event) => MotionError.fromMap(event as Map<Object?, Object?>),
+      );
+
+  @override
+  Future<bool> startMotion(
+    String? deviceId, {
+    MotionSamplingRate samplingRate = MotionSamplingRate.hz10,
+  }) async {
+    final args = <String, Object>{'samplingRate': samplingRate.value};
+    if (deviceId != null) {
+      args['deviceId'] = deviceId;
+    }
+    final ok = await methodChannel.invokeMethod<bool>('startMotion', args);
+    return ok ?? false;
+  }
+
+  @override
+  Future<bool> stopMotion() async {
+    final ok = await methodChannel.invokeMethod<bool>('stopMotion');
+    return ok ?? false;
+  }
+
+  @override
+  Stream<MotionSample> motionSamplesStream() => _motionSamples;
+
+  @override
+  Stream<MotionState> motionStateStream() => _motionStates;
+
+  @override
+  Stream<MotionError> motionErrorStream() => _motionErrors;
+
   @override
   Future<bool> requestAndroidPermissions() async {
     final ok = await methodChannel.invokeMethod<bool>(

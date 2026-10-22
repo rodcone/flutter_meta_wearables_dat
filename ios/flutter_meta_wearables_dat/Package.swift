@@ -20,11 +20,16 @@ let package = Package(
             name: "MWDATCamera",
             path: "Frameworks/MWDATCamera.xcframework"
         ),
+        .binaryTarget(
+            name: "MWDATMotion",
+            path: "Frameworks/MWDATMotion.xcframework"
+        ),
         .target(
             name: "flutter_meta_wearables_dat",
             dependencies: [
                 "MWDATCore",
                 "MWDATCamera",
+                "MWDATMotion",
                 .product(name: "FlutterFramework", package: "FlutterFramework")
             ],
             resources: [

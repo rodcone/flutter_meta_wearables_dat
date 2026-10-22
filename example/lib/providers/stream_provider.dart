@@ -823,7 +823,7 @@ class StreamSessionProvider extends ChangeNotifier {
         await MetaWearablesDat.enableBackgroundStreaming(
           androidNotification: const BackgroundNotification(
             title: 'Streaming from your glasses',
-            text: 'Keeps the camera stream alive in the background.',
+            text: 'Keeps camera and motion streaming in the background.',
             channelId: 'mwdat_example.streaming',
             channelName: 'Stream Session',
           ),
