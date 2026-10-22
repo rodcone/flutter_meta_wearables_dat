@@ -29,9 +29,9 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 - **Developer-ready frame access:** Consume raw RGBA, YUV, or HEVC payloads for OCR, on-device ML, computer vision, or recording.
 - **Background streaming:** Keep a session alive when the app is backgrounded or the phone is locked, on iOS and Android.
 - **Optional mock glasses:** Develop with a simulated pair driven by the phone's camera, without including mock-device dependencies in production.
-- **Reactive API:** Follow registration, availability, session, error, and thermal state with Dart `Stream`s.
+- **Reactive API:** Follow registration, availability, session, error, and device state with Dart `Stream`s.
 
-**Coming soon:** Support for more DAT capabilities is planned for future releases, starting with motion, inputs, and richer device state (battery, charging, wear detection, and hinge state). These APIs are not available yet; version 1.0.1 updates DAT and adds optional iOS glasses-microphone streaming alongside the existing camera workflow.
+**Coming soon:** Motion and inputs are planned for future releases. Richer device state (battery, charging, wear detection, and hinges) is implemented in the [unreleased API below](#device-state-unreleased-extension) and awaits physical-glasses QA. The published version 1.0.1 updates DAT and adds optional iOS glasses-microphone streaming alongside the existing camera workflow.
 
 ## Quick start
 
@@ -441,7 +441,7 @@ The plugin follows Meta's integration lifecycle as documented in the [Meta Weara
 - Monitor session state via `MetaWearablesDat.streamSessionStateStream()`
 - Monitor errors via `MetaWearablesDat.streamSessionErrorStream()`
 - (Optional) Pin which pair streams by passing its `WearableDevice.id`; switching to a *different* pair while one is streaming throws a `PlatformException` with code `STREAM_ACTIVE` — stop the current stream first
-- (Optional) Monitor device thermal level via `MetaWearablesDat.deviceStateStream()` to warn the user *before* a thermal error stops the stream
+- (Optional) Monitor battery, charging, worn/removed, hinge, and thermal state via `MetaWearablesDat.deviceStateStream()` ([unreleased extension](#device-state-unreleased-extension))
 - (Optional) On `datAppOnTheGlassesUpdateRequired`, call `MetaWearablesDat.openDATGlassesAppUpdate()` to drive a "tap to update" UI
 - Call `MetaWearablesDat.stopStreamSession(deviceId)` to end the session
 
@@ -483,7 +483,7 @@ MetaWearablesDat.streamSessionErrorStream().listen((error) {
 });
 
 // (Optional) Live thermal level — drive a "device is getting hot" indicator
-// before a thermal error stops the stream entirely.
+// before the device pauses or stops streaming due to heat.
 MetaWearablesDat.deviceStateStream().listen((state) {
   // state.thermalLevel: unknown, none, light, moderate, severe, critical, emergency, shutdown
   print('Thermal: ${state.thermalLevel}');
@@ -511,6 +511,53 @@ await MetaWearablesDat.stopStreamSession(null);
 Video frames are pushed directly from native (CVPixelBuffer on iOS, SurfaceTexture on Android) to the Flutter engine — no JPEG encoding, no byte copying, no Dart-side decoding.
 
 Store every `StreamSubscription` created for registration, device, session, error, thermal, or frame streams, and cancel it from your widget or provider's `dispose()` method.
+
+#### Device state (unreleased extension)
+
+`deviceStateStream()` observes the device selected by the native SDK before or
+while a camera session runs. After the existing Bluetooth initialization and
+registration flow, it requires no camera/microphone permission or session start.
+
+```dart
+final stateSubscription = MetaWearablesDat.deviceStateStream().listen((state) {
+  // All fields refer to state.deviceId, matching a WearableDevice.id.
+  final battery = state.batteryLevel; // int? percentage; null means unknown
+  print(battery == null ? 'Battery unknown' : 'Battery $battery%');
+  print(state.chargingState); // unknown, charging, notCharging
+  print(state.donState); // unknown, donned (worn), doffed (removed)
+  print(state.hingeState); // unknown, open, closed
+  print(state.linkState); // WearableLinkState
+  print(state.compatibility); // WearableCompatibility
+  print(state.thermalLevel); // existing ThermalLevel values are unchanged
+});
+// In your provider/widget dispose():
+// stateSubscription.cancel();
+```
+
+Android DAT uses zero battery for either unknown or empty, so the plugin returns
+`null` for that ambiguous reading; Android known values are 1–100. iOS uses a
+nullable reading and preserves a reported 0–100. Unsupported/unreported enums stay
+`unknown`; do not interpret them as removed glasses, closed hinges, or an empty
+battery. These fields do not guarantee that a device session can start.
+
+Each event includes identity and connection metadata. Non-connected snapshots
+clear physical readings; losing the selected device or unregistering emits an
+unknown snapshot with a null `deviceId`. A device change clears the old reading
+before attaching the new one. The stream follows the plugin's native selector,
+not an app's prospective selection for a future start.
+
+Calls share one broadcast stream and one native subscription. The first native
+listener, and a listener after all previous subscriptions are cancelled, receive
+current SDK state. An additional Dart listener joining an existing subscription
+receives future events; retain the latest value in your provider for newly built
+widgets. Cancelling the last listener stops observation. Metadata observation
+adds no background service and does not promise delivery while the app is suspended.
+
+Existing `DeviceState(thermalLevel: ...)` calls and thermal-only native payloads
+remain valid. Equality now considers every field, and events may reflect a change
+other than temperature. Custom classes implementing `DeviceState` must provide the
+new getters. See [Meta's Device State guide](https://wearables.developer.meta.com/docs/develop/dat/device-state)
+and the [implementation and QA plan](doc/plans/device-state.md).
 
 #### Video codecs
 
@@ -794,7 +841,7 @@ Common issues:
 
 ## Example app
 
-The [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) is a Flutter port of Meta's native Camera Access sample. It exercises the full lifecycle — registration, permissions, streaming, photo capture, background streaming, thermal monitoring, and the mock device add-on.
+The [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) is a Flutter port of Meta's native Camera Access sample. It exercises the full lifecycle — registration, permissions, streaming, photo capture, background streaming, device-state monitoring, and the mock device add-on.
 
 ## Contributing
 
