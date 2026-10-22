@@ -3,6 +3,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_meta_wearables_dat/meta_wearables_dat_platform_interface.dart';
+import 'package:flutter_meta_wearables_dat/src/motion.dart';
+
+export 'package:flutter_meta_wearables_dat/src/motion.dart';
 
 /// Represents the current state of user registration with the Meta Wearables platform.
 enum RegistrationState {
@@ -788,6 +791,62 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.disconnect();
   }
 
+  /// Starts receiving motion sensor readings from a wearable.
+  ///
+  /// Motion is available in DAT development and beta release channels only.
+  /// It needs no additional permission, including camera or microphone access.
+  /// Registration and [requestAndroidPermissions] on Android are still required.
+  /// Pass a [WearableDevice.id] as [deviceId] to select a specific device, or
+  /// `null` to use the active device.
+  ///
+  /// Motion works independently of the camera. When both capabilities are
+  /// active, they share one device session and must target the same device.
+  /// [stopMotion] leaves an active camera stream running, and
+  /// [stopStreamSession] leaves active motion running.
+  ///
+  /// A `true` result means the start request was accepted, not that a sample
+  /// has arrived. Subscribe to [motionStateStream], [motionErrorStream], and
+  /// [motionSamplesStream] before starting. Synchronous failures throw a
+  /// `PlatformException`; later failures arrive on [motionErrorStream].
+  ///
+  /// Backgrounding stops motion unless [enableBackgroundStreaming] was called
+  /// while the app was in the foreground. Motion does not restart automatically
+  /// when the app returns to the foreground.
+  static Future<bool> startMotion(
+    String? deviceId, {
+    MotionSamplingRate samplingRate = MotionSamplingRate.hz10,
+  }) {
+    return MetaWearablesDatPlatform.instance.startMotion(
+      deviceId,
+      samplingRate: samplingRate,
+    );
+  }
+
+  /// Stops motion while preserving an active camera stream.
+  ///
+  /// Ends the shared device session when no camera stream remains.
+  static Future<bool> stopMotion() {
+    return MetaWearablesDatPlatform.instance.stopMotion();
+  }
+
+  /// Receives motion samples with independently optional sensor readings.
+  ///
+  /// Multiple callers share a broadcast stream. Cancelling a subscription does
+  /// not stop the motion capability; call [stopMotion] when finished.
+  static Stream<MotionSample> motionSamplesStream() {
+    return MetaWearablesDatPlatform.instance.motionSamplesStream();
+  }
+
+  /// Receives motion capability state changes on a shared broadcast stream.
+  static Stream<MotionState> motionStateStream() {
+    return MetaWearablesDatPlatform.instance.motionStateStream();
+  }
+
+  /// Receives motion capability failures on a shared broadcast stream.
+  static Stream<MotionError> motionErrorStream() {
+    return MetaWearablesDatPlatform.instance.motionErrorStream();
+  }
+
   /// Starts a stream session.
   ///
   /// Pass a [WearableDevice.id] (from [getDevices]) as [deviceId] to stream
@@ -856,12 +915,9 @@ class MetaWearablesDat {
   /// Stops the active stream session. [deviceId] is accepted for call symmetry
   /// but isn't required — there is a single active session.
   ///
-  /// Since 0.9.1 this ends the whole device session, not just the stream, on
-  /// both platforms — the glasses play their stream-ended tone, which they
-  /// previously only did when the app was backgrounded or killed. The
-  /// trade-off is that the next [startStreamSession] is a full session
-  /// reconnect rather than a fast capability re-attach, so restarting takes
-  /// noticeably longer than it did on 0.9.0.
+  /// If motion is active, this stops only the camera and leaves motion running
+  /// on the shared device session. Otherwise it ends the whole device session,
+  /// so the next [startStreamSession] requires a full session reconnect.
   ///
   /// The returned future resolves once the stop handshake with the glasses has
   /// completed. That is normally quick, but is bounded by backstops of a few

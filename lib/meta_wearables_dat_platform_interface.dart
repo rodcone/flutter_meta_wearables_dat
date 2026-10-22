@@ -76,6 +76,29 @@ abstract class MetaWearablesDatPlatform extends PlatformInterface {
     throw UnimplementedError('disconnect() has not been implemented.');
   }
 
+  Future<bool> startMotion(
+    String? deviceId, {
+    MotionSamplingRate samplingRate = MotionSamplingRate.hz10,
+  }) {
+    throw UnimplementedError('startMotion() has not been implemented.');
+  }
+
+  Future<bool> stopMotion() {
+    throw UnimplementedError('stopMotion() has not been implemented.');
+  }
+
+  Stream<MotionSample> motionSamplesStream() {
+    throw UnimplementedError('motionSamplesStream() has not been implemented.');
+  }
+
+  Stream<MotionState> motionStateStream() {
+    throw UnimplementedError('motionStateStream() has not been implemented.');
+  }
+
+  Stream<MotionError> motionErrorStream() {
+    throw UnimplementedError('motionErrorStream() has not been implemented.');
+  }
+
   /// Starts a stream session. Returns a texture ID (int) for rendering
   /// via the Flutter `Texture` widget (zero-copy path).
   Future<int> startStreamSession(

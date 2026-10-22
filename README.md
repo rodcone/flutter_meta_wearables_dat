@@ -10,7 +10,7 @@
 
 <!-- <img width="500" height="95" alt="flutter_dat" src="https://github.com/user-attachments/assets/b3958072-1bb5-434d-8006-8f35ae054213" /> -->
 
-Build Flutter camera experiences for Meta AI glasses. Register a device, request camera access, and render its live video stream on iOS and Android through one Dart API.
+Build Flutter camera and motion experiences for Meta AI glasses. Register a device, stream its motion sensors, or request camera access and render live video on iOS and Android through one Dart API.
 
 ![Demo of the example app](https://github.com/user-attachments/assets/4947911e-5a37-4369-acb7-fdc005899821)
 
@@ -26,12 +26,13 @@ No app-side platform-channel or native video-rendering code, JPEG encoding, or D
 
 - **Native-to-Flutter video rendering:** Directly render the native stream in a Flutter `Texture`.
 - **Complete camera workflow:** Registration, camera permission, streaming, photo capture, device selection, and device-state monitoring.
+- **Motion (unreleased, beta):** Accelerometer, gyroscope, magnetometer, and orientation samples, independently of the camera or alongside it. Requires a development or beta DAT release channel.
 - **Developer-ready frame access:** Consume raw RGBA, YUV, or HEVC payloads for OCR, on-device ML, computer vision, or recording.
 - **Background streaming:** Keep a session alive when the app is backgrounded or the phone is locked, on iOS and Android.
 - **Optional mock glasses:** Develop with a simulated pair driven by the phone's camera, without including mock-device dependencies in production.
 - **Reactive API:** Follow registration, availability, session, error, and thermal state with Dart `Stream`s.
 
-**Coming soon:** Support for more DAT capabilities is planned for future releases, starting with motion, inputs, and richer device state (battery, charging, wear detection, and hinge state). These APIs are not available yet; version 1.0.1 updates DAT and adds optional iOS glasses-microphone streaming alongside the existing camera workflow.
+**Coming soon:** Inputs and richer device state (battery, charging, wear detection, and hinge state) remain planned. Motion support described below is unreleased; the published plugin 1.0.1 includes optional glasses-microphone streaming on iOS and Android alongside the camera workflow.
 
 ## Quick start
 
@@ -76,7 +77,7 @@ Future<int?> completeRegistration(Uri callbackUri) async {
 }
 ```
 
-Render the returned ID with `Texture(textureId: textureId)`, and stop the session with `await MetaWearablesDat.stopStreamSession(null)` when finished. Since 0.9.1, stopping ends the whole device session — the glasses play their stream-ended tone, and the next start is a full reconnect rather than an instant re-attach.
+Render the returned ID with `Texture(textureId: textureId)`, and stop the camera with `await MetaWearablesDat.stopStreamSession(null)` when finished. Stopping the camera ends the device session when no Motion capability remains active. With Motion running, only the camera stops; the shared device session stays alive until you also call `stopMotion()`.
 
 For a complete implementation, see the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example), which ports Meta's native Camera Access sample to Flutter.
 
@@ -112,6 +113,7 @@ For a complete implementation, see the [example app](https://github.com/rodcone/
       - [Background streaming](#background-streaming)
       - [Stream quality](#stream-quality)
       - [Accessing raw frame bytes](#accessing-raw-frame-bytes)
+    - [Motion (unreleased, beta)](#motion-unreleased-beta)
   - [Optional: mock device add-on](#optional-mock-device-add-on)
   - [AI Assistant Integration](#ai-assistant-integration)
   - [Troubleshooting](#troubleshooting)
@@ -231,7 +233,7 @@ Add the following to your `Info.plist`:
 
 The DAT SDK streams video over one of two high-bandwidth links to the glasses, and on iOS **you select which one purely through `Info.plist` + entitlements — there is no runtime switch.** Configure exactly one.
 
-**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture). The SDK joins the glasses' Wi‑Fi access point, so iOS shows a *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. DAT 0.9.0 requests that consent again whenever a new device session acquires the Wi‑Fi link. Since `stopStreamSession()` ends the whole device session, expect another prompt after each stop/start cycle; iOS does not let the plugin accept or suppress it. Keeping the stream active avoids another join. **Trade-off:** that Wi‑Fi association makes `startStreamSession()` noticeably slower — expect roughly **10 seconds** more before the first frame arrives, vs. Bluetooth Classic's near-instant connect. Add to `Info.plist`:
+**Wi‑Fi (recommended).** Higher bandwidth (better resolution / frame rate, faster photo capture). The SDK joins the glasses' Wi‑Fi access point, so iOS shows a *"Join Wi‑Fi Network"* prompt and the phone associates to that AP — its internet then rides cellular, which matters if you also upload frames to the cloud. DAT 0.9.0 requests that consent again whenever a new device session acquires the Wi‑Fi link. When no Motion capability remains, `stopStreamSession()` ends the device session, so expect another prompt after a subsequent start; iOS does not let the plugin accept or suppress it. Keeping the stream active avoids another join. **Trade-off:** that Wi‑Fi association makes `startStreamSession()` noticeably slower — expect roughly **10 seconds** more before the first frame arrives, vs. Bluetooth Classic's near-instant connect. Add to `Info.plist`:
 
 ```xml
 <key>NSLocalNetworkUsageDescription</key>
@@ -720,6 +722,68 @@ void stopFrameProcessing() => _processing = false;
 > **Memory note:** Raw RGBA at 720×1280 is ~3.7 MB per frame. Capture on demand (every 200–500 ms is typical for OCR/ML) rather than every rendered frame.
 
 **Note:** See the [example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example) for a complete implementation.
+
+### Motion (unreleased, beta)
+
+DAT Motion is available on **development and beta release channels only**. It is not supported in production release channels, and Meta may change this beta API. The plugin exposes the capability shipped in DAT 1.0.1; upstream introduced it experimentally in DAT 1.0.0. See the [official Motion guide](https://wearables.developer.meta.com/docs/develop/dat/motion/).
+
+After registration, Motion works with the camera off. It does **not** require camera or microphone permission. On Android, call `requestAndroidPermissions()` before DAT operations as usual. The plugin creates and starts a device session when needed, or attaches Motion to the camera's existing session on the same pair of glasses.
+
+```dart
+// Retain all three subscriptions and cancel them when your owner is disposed.
+// Subscribe before starting so initial samples and lifecycle events are observed.
+final motionStates = MetaWearablesDat.motionStateStream().listen((state) {
+  // stopped, starting, started, stopping; paused is Android-only in DAT 1.0.1.
+  // unknown safely represents a future state this plugin does not recognize.
+});
+final motionErrors = MetaWearablesDat.motionErrorStream().listen((error) {
+  // error.code and error.message describe asynchronous capability/session errors.
+});
+final motionSamples = MetaWearablesDat.motionSamplesStream().listen((sample) {
+  final acceleration = sample.accelerometer;
+  final orientation = sample.orientation;
+  // Each reading is optional independently; either may be useful without the other.
+  // sample.timestampNs is the glasses' monotonic timestamp, not wall-clock time.
+});
+
+try {
+  await MetaWearablesDat.startMotion(
+    null, // Automatic selection, or a WearableDevice.id from getDevices().
+    samplingRate: MotionSamplingRate.hz10,
+  );
+} on PlatformException catch (error) {
+  // Handle immediate start failures separately from motionErrorStream().
+}
+
+// The camera can start or stop while Motion continues on the same device.
+// Camera permission is needed only if you also start the camera.
+
+await MetaWearablesDat.stopMotion(); // Stops/removes Motion; keeps camera running.
+await motionSamples.cancel();
+await motionStates.cancel();
+await motionErrors.cancel();
+```
+
+`startMotion()` returns whether the start request was accepted; use `MotionState.started` and samples to confirm delivery. `stopMotion()` releases Motion. Stopping the last active capability ends the device session. Keep the same device selection when using camera and Motion together; starting either capability on another pair while the first is active is rejected. Stop both capabilities before switching pairs. Stop Motion before changing its sampling rate.
+
+| Sample field | Type | Meaning |
+| --- | --- | --- |
+| `timestampNs` | `int` | Nanoseconds on the glasses' monotonic clock. Use for ordering and intervals, not a `DateTime`. |
+| `source` | `MotionSource` | `glasses`, `neuralBand`, or `unknown`. A source value does not guarantee that every device supplies samples. |
+| `accelerometer` | `MotionVector3?` | `x/y/z` in m/s², including gravity. |
+| `gyroscope` | `MotionVector3?` | `x/y/z` angular velocity in rad/s. |
+| `magnetometer` | `MotionVector3?` | `x/y/z` in µT; may be unavailable on the connected device. |
+| `orientation` | `MotionQuaternion?` | `x/y/z/w` quaternion, with `w` the scalar component. |
+
+All four sensor readings are independently nullable. A missing accelerometer does not invalidate an available orientation. A new accelerometer reading normally triggers a sample carrying the newest other readings, which may be older. The plugin forwards native coordinates unchanged. Do not assume the phone's axes or compare this timestamp directly with phone wall-clock time.
+
+Available rates are `hz5`, `hz10` (default), `hz15`, `hz24`, `hz30`, and `hz60`. Higher rates use more battery and bandwidth; the requested rate is a target, so calculate actual intervals from timestamps. The example counts every delivered sample and limits sample-driven screen updates to 10 Hz.
+
+`MotionError` preserves the native code and message. `sensorUnavailable` ends a start attempt; retry after `stopped`. `capabilityClosed` means the capability instance can no longer be used. `deviceDisconnected` means the connection was lost: Android may resume the attached capability when its parent session reconnects; iOS requires a fresh attachment once a session can start. Session-level failures may also be forwarded, so keep an unknown-code fallback and observe `motionStateStream()`. The plugin does not promise automatic recovery.
+
+Motion follows the existing [background streaming policy](#background-streaming). Without opt-in, backgrounding stops active camera and Motion capabilities; Motion reports `stoppedForBackground` and `stopped`, and foregrounding does not restart it. Call `enableBackgroundStreaming()` before starting either capability to opt in, with the existing iOS configuration and Android notification requirements. The known iOS locked-background limitation still applies; this feature has no claim of uninterrupted locked-device delivery.
+
+The example's **Motion** button is available after registration, before starting the camera and while camera streaming. Closing its sheet leaves Motion running so you can exercise both capabilities. The example requests camera access only when you choose a camera action. See the [Motion device QA checklist](doc/motion-qa.md) for reproducible lifecycle checks.
 
 ## Optional: mock device add-on
 

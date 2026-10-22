@@ -205,7 +205,7 @@ class StreamErrorStreamHandler: NSObject, FlutterStreamHandler {
     return ["code": code, "message": message]
   }
 
-  private static func map(deviceSessionError error: DeviceSessionError) -> (String, String) {
+  static func map(deviceSessionError error: DeviceSessionError) -> (String, String) {
     switch error {
     case .noEligibleDevice:
       return ("noEligibleDevice", "No eligible device is available to start the session.")

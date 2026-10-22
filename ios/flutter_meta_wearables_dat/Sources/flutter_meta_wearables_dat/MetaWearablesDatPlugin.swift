@@ -2,15 +2,14 @@ import Flutter
 import UIKit
 import MWDATCore
 import MWDATCamera
+import MWDATMotion
 import AVFoundation
 import CoreMedia
 import VideoToolbox
 
 public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
-  // Device session (DAT 0.7.0): created lazily on first startStreamSession
-  // call using the shared selector. Kept alive across stream start/stop so
-  // toggling streaming is fast. Torn down only when the underlying device
-  // disappears or when the plugin is disabled.
+  // Camera and Motion share one lazily created device session. A capability
+  // stop keeps its sibling alive; the last stop ends the device session.
   //
   // Identifier of the pinned device, or nil for auto-select. Honored by
   // `makeDeviceSelector()` at every construction site so a blind rebuild
@@ -36,6 +35,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // Guards concurrent startStreamSession calls: a second start that tore down
   // the first's in-flight session would leave the first awaiting `.started`.
   private var isStartingSession = false
+  private var isStartingMotion = false
+  private var startCancellationGeneration: UInt64 = 0
+  private let motionController = MotionController()
   private let streamTeardownGate = StreamTeardownGate()
   private var deviceSession: DeviceSession?
   private var deviceSessionStateTask: Task<Void, Never>?
@@ -113,6 +115,12 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
   // to. They are set and cleared together (see `teardownStreamOnly`).
   private var camera: MWDATCamera.Camera?
   private var streamSession: MWDATCamera.Stream?
+  private var cameraStartPending = false
+  private var cameraOwnershipToken: (any MWDATCore.AnyListenerToken)?
+  @MainActor private var cameraKeepsSessionAlive: Bool {
+    guard let stream = streamSession else { return false }
+    return cameraStartPending || (stream.state != .stopped && stream.state != .stopping)
+  }
   private var videoListenerToken: (any MWDATCore.AnyListenerToken)?
   // Microphone audio carried on the camera stream, when `startStreamSession`
   // is called with `audio: true`. Cancelled before the camera stops, as Meta's
@@ -244,6 +252,16 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // Event channel for the glasses' microphone audio (16-bit PCM, mono, 16 kHz).
     let audioFramesChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/audio_frames", binaryMessenger: registrar.messenger())
     audioFramesChannel.setStreamHandler(instance.audioFrameHandler)
+    MainActor.assumeIsolated {
+      for (name, handler) in [
+        ("motion_samples", instance.motionController.samples),
+        ("motion_state", instance.motionController.states),
+        ("motion_errors", instance.motionController.errors),
+      ] {
+        FlutterEventChannel(name: "flutter_meta_wearables_dat/\(name)", binaryMessenger: registrar.messenger())
+          .setStreamHandler(handler)
+      }
+    }
     // Event channel for per-device state (thermal level). Tracks the active
     // device and switches subscription on device change.
     let deviceStateChannel = FlutterEventChannel(name: "flutter_meta_wearables_dat/device_state", binaryMessenger: registrar.messenger())
@@ -268,6 +286,21 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // devices that surface after a permission grant are actually observed.
       instance.startDeviceListMonitoring()
       instance.startDeviceAvailabilityMonitoring()
+    }
+  }
+
+  public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
+    Task { @MainActor in
+      startCancellationGeneration &+= 1
+      lifecycleObserver.stop()
+      deviceAvailabilityTask?.cancel()
+      devicesStreamTask?.cancel()
+      cancelAvailabilityTeardown()
+      _ = motionController.samples.onCancel(withArguments: nil)
+      _ = motionController.states.onCancel(withArguments: nil)
+      _ = motionController.errors.onCancel(withArguments: nil)
+      await teardownDeviceSession()
+      backgroundController.disable()
     }
   }
 
@@ -320,6 +353,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         startStreamSession(call: call, result: result)
       case "stopStreamSession":
         stopStreamSession(call: call, result: result)
+      case "startMotion":
+        startMotion(call: call, result: result)
+      case "stopMotion":
+        stopMotion(result: result)
       case "capturePhoto":
         capturePhoto(call: call, result: result)
       case "getRegistrationState":
@@ -556,6 +593,8 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   func disconnect(result: @escaping FlutterResult) {
     Task { @MainActor in
+      startCancellationGeneration &+= 1
+      await teardownDeviceSession()
       do {
         try await Wearables.shared.startUnregistration()
         result(true)
@@ -690,6 +729,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // Re-check rather than trust the emission that armed us: the device may
       // have come back during the grace period without a new emission racing us.
       guard self.deviceSelector.activeDevice == nil else { return }
+      self.startCancellationGeneration &+= 1
+      if self.motionController.isAttached {
+        self.motionController.sendError(code: "deviceDisconnected", message: "The active device disconnected.")
+      }
       await self.teardownDeviceSession()
     }
   }
@@ -868,14 +911,14 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     case .started:
       return session
     case .stopped:
-      // `observeDeviceSession` also reacts to `.stopped` and clears state; just
-      // drop our reference and surface the genuine error if one was seen.
-      deviceSession = nil
+      // Complete cleanup before clearing ownership: the observer uses identity
+      // guards, so dropping this reference first could strand a sibling.
+      if deviceSession === session { await teardownDeviceSession() }
       throw lastDeviceSessionError ?? DeviceSessionError.noEligibleDevice
     case .timedOut:
       // Nothing will advance a wedged session — stop it and cancel its
       // observers so the next startStreamSession creates a fresh one.
-      await teardownDeviceSession()
+      if deviceSession === session { await teardownDeviceSession() }
       throw lastDeviceSessionError ?? DeviceSessionError.unexpectedError(
         description: "Device session did not reach .started within \(Int(timeout))s")
     case .streamEnded:
@@ -883,7 +926,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // *finishes* (a stream created after stop finishes immediately), so an
       // ended stream means the session died — surface the genuine error the
       // error stream reported, like the `.stopped` and `.timedOut` branches.
-      deviceSession = nil
+      if deviceSession === session { await teardownDeviceSession() }
       throw lastDeviceSessionError ?? DeviceSessionError.unexpectedError(
         description: "Device session state stream ended before reaching .started")
     }
@@ -896,11 +939,17 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceSessionStateTask?.cancel()
     deviceSessionStateTask = Task { [weak self] in
       for await state in session.stateStream() {
-        guard let self else { return }
+        guard let self, self.deviceSession === session, !Task.isCancelled else { return }
         if state == .stopped {
           // DeviceSession stopped externally — tear down associated stream
           // and drop our reference. A fresh session is created on demand.
+          self.startCancellationGeneration &+= 1
+          self.streamTeardownGate.enter()
+          defer { self.streamTeardownGate.leave() }
+          await self.motionController.stopDelivery()
+          self.motionController.release()
           await self.teardownStreamOnly()
+          guard self.deviceSession === session else { return }
           self.deviceSession = nil
           self.deviceSessionStateTask?.cancel()
           self.deviceSessionStateTask = nil
@@ -914,8 +963,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceSessionErrorTask?.cancel()
     deviceSessionErrorTask = Task { [weak self] in
       for await error in session.errorStream() {
-        self?.lastDeviceSessionError = error
-        self?.streamErrorHandler.send(deviceSessionError: error)
+        guard let self, self.deviceSession === session, !Task.isCancelled else { return }
+        self.lastDeviceSessionError = error
+        self.streamErrorHandler.send(deviceSessionError: error)
+        if self.motionController.isAttached {
+          let (code, message) = StreamErrorStreamHandler.map(deviceSessionError: error)
+          self.motionController.sendError(code: code, message: message)
+        }
       }
     }
   }
@@ -1038,6 +1092,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     let stoppingCamera = camera
     let stoppingStream = streamSession
     let stoppingTextureId = textureId
+    cameraStartPending = false
+    let ownershipToken = cameraOwnershipToken
+    cameraOwnershipToken = nil
+    if let ownershipToken { await ownershipToken.cancel() }
 
     // Detach *and* tell Dart. This teardown is reachable from paths the SDK
     // never reports on (the device-availability watchdog, a DeviceSession that
@@ -1180,6 +1238,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     defer { streamTeardownGate.leave() }
 
     await teardownStreamOnly()
+    await motionController.stopDelivery()
     deviceSessionStateTask?.cancel()
     deviceSessionStateTask = nil
     deviceSessionErrorTask?.cancel()
@@ -1196,6 +1255,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       session.stop()
       await awaitDeviceSessionStopped(session, stateStream: stateStream)
     }
+    motionController.release()
   }
 
   /// Suspends until `session` reaches `.stopped`, with
@@ -1288,6 +1348,10 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     // backgrounding would emit a terminal `stopped` at idle apps that merely
     // subscribed to the state channel.
     guard streamSession != nil || deviceSession != nil else { return }
+    startCancellationGeneration &+= 1
+    if motionController.isAttached {
+      motionController.sendError(code: "stoppedForBackground", message: "The app was backgrounded and background streaming is not enabled.")
+    }
 
     NSLog("[MWDAT] lifecycle: stopping session (background streaming off)")
     // Tell Dart *why* before the terminal `stopped` lands, so consumers can
@@ -1830,6 +1894,151 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     return types
   }
 
+  // MARK: - Motion
+
+  func startMotion(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let args = call.arguments as? [String: Any] ?? [:]
+    let requestedDeviceId = args["deviceId"] as? String
+    let samplingRateValue = args["samplingRate"] as? Int ?? 10
+    Task { @MainActor in
+      guard let samplingRate = MotionController.samplingRate(samplingRateValue) else {
+        result(FlutterError(code: "INVALID_ARGS", message: "Motion samplingRate must be 5, 10, 15, 24, 30 or 60 Hz.", details: nil))
+        return
+      }
+      guard !mustNotStreamNow else {
+        result(FlutterError(code: "APP_BACKGROUNDED", message: "Enable background streaming before starting Motion in the background.", details: nil))
+        return
+      }
+      guard !isStartingSession, !streamTeardownGate.isActive else {
+        result(FlutterError(code: "MOTION_ACTIVE", message: "A capability is starting or stopping. Wait for it to finish.", details: nil))
+        return
+      }
+      isStartingSession = true
+      isStartingMotion = true
+      defer { isStartingSession = false; isStartingMotion = false }
+      let startGeneration = startCancellationGeneration
+      let sharesSession = streamSession != nil || motionController.isAttached
+      if sharesSession, !SharedSessionPolicy.canReuseDevice(
+        requestedId: requestedDeviceId, sessionDeviceId: deviceSession?.deviceId) {
+        result(FlutterError(code: "DEVICE_ACTIVE", message: "A capability is active on another device. Stop both capabilities before switching devices.", details: nil))
+        return
+      }
+      if let motion = motionController.motion {
+        if motion.state == .started || motion.state == .starting {
+          guard motion.configuration.samplingRate == samplingRate else {
+            result(FlutterError(code: "MOTION_ACTIVE", message: "Stop Motion before changing its sampling rate.", details: nil))
+            return
+          }
+          result(true)
+          return
+        }
+        do { try await removeMotionCapability() }
+        catch {
+          result(FlutterError(code: "REMOVE_MOTION_ERROR", message: "Could not remove the previous Motion capability: \(error)", details: nil))
+          return
+        }
+      }
+      if sharesSession, deviceSession?.state != .started {
+        result(FlutterError(code: "DEVICE_SESSION_NOT_READY", message: "Wait for the existing device session to resume before adding Motion.", details: nil))
+        return
+      }
+      let pinChanged = !sharesSession && requestedDeviceId != pinnedDeviceId
+      if pinChanged {
+        await teardownDeviceSession()
+        pinnedDeviceId = requestedDeviceId
+        deviceSelector = makeDeviceSelector()
+        lastSelectorRebuild = Date()
+        startDeviceAvailabilityMonitoring()
+        activeDeviceHandler?.restartMonitoring(force: true)
+        deviceStateHandler?.restartMonitoring(force: true)
+      }
+      if pinChanged, requestedDeviceId != nil {
+        let deadline = Date().addingTimeInterval(selectorResolveTimeout)
+        while deviceSelector.activeDevice == nil, Date() < deadline,
+              startGeneration == startCancellationGeneration, !mustNotStreamNow {
+          try? await Task.sleep(for: .milliseconds(150))
+        }
+      }
+      guard startGeneration == startCancellationGeneration,
+            !streamTeardownGate.isActive, !mustNotStreamNow else {
+        result(FlutterError(code: "START_CANCELLED", message: "The Motion start was cancelled by session teardown.", details: nil))
+        return
+      }
+      do {
+        let session = try await ensureDeviceSessionStarted()
+        guard startGeneration == startCancellationGeneration,
+              deviceSession === session, session.state == .started,
+              !streamTeardownGate.isActive, !mustNotStreamNow else {
+          result(FlutterError(code: "START_CANCELLED", message: "The Motion start was cancelled by session teardown.", details: nil))
+          return
+        }
+        guard let motion = try session.addMotion(configuration: MotionConfiguration(samplingRate: samplingRate)) else {
+          if streamSession == nil { await teardownDeviceSession() }
+          result(FlutterError(code: "ADD_MOTION_ERROR", message: "Motion requires a started device session.", details: nil))
+          return
+        }
+        motionController.attach(motion)
+        result(true)
+      } catch {
+        if let error = error as? DeviceSessionError {
+          let (code, message) = StreamErrorStreamHandler.map(deviceSessionError: error)
+          motionController.sendError(code: code, message: message)
+        }
+        if streamSession == nil { await teardownDeviceSession() }
+        result(FlutterError(code: "DEVICE_SESSION_ERROR", message: "Could not start Motion: \(error)", details: nil))
+      }
+    }
+  }
+
+  @MainActor
+  private func removeMotionCapability() async throws {
+    guard motionController.isAttached else { return }
+    await motionController.stopDelivery()
+    if let session = deviceSession, session.state == .started {
+      try session.removeMotion()
+    } else if let session = deviceSession, session.state != .stopped {
+      // Do not forget a still-attached capability on a paused/stopping parent.
+      // Its owner remains available for a later explicit stop or full teardown.
+      throw DeviceSessionError.unexpectedError(description: "Motion cannot be removed until its device session is started or stopped.")
+    }
+    motionController.release()
+  }
+
+  func stopMotion(result: @escaping FlutterResult) {
+    Task { @MainActor in
+      switch SharedSessionPolicy.stopAdmission(
+        stopping: .motion,
+        starting: isStartingSession ? (isStartingMotion ? .motion : .camera) : nil,
+        isAttached: motionController.isAttached
+      ) {
+      case .alreadyIdle:
+        result(true)
+        return
+      case .waitForSiblingStart:
+        while isStartingSession { try? await Task.sleep(for: .milliseconds(20)) }
+      case .proceed:
+        break
+      }
+      startCancellationGeneration &+= 1
+      streamTeardownGate.enter()
+      defer { streamTeardownGate.leave() }
+      do {
+        if !cameraKeepsSessionAlive {
+          // Ending the parent removes Motion even when the SDK parent is paused.
+          await teardownDeviceSession()
+        } else {
+          try await removeMotionCapability()
+          if !cameraKeepsSessionAlive, !motionController.isAttached {
+            await teardownDeviceSession()
+          }
+        }
+        result(true)
+      } catch {
+        result(FlutterError(code: "REMOVE_MOTION_ERROR", message: "Could not stop Motion: \(error)", details: nil))
+      }
+    }
+  }
+
   // MARK: - Stream Session
 
   /// True when starting a stream would immediately contradict the background
@@ -1892,6 +2101,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       }
       isStartingSession = true
       defer { isStartingSession = false }
+      let startGeneration = startCancellationGeneration
+
+      if motionController.isAttached, !SharedSessionPolicy.canReuseDevice(
+        requestedId: requestedDeviceId, sessionDeviceId: deviceSession?.deviceId) {
+        result(FlutterError(code: "MOTION_ACTIVE", message: "Motion is active on another device. Stop it before switching devices.", details: nil))
+        return
+      }
 
       // A non-nil `streamSession` only counts as active if it's not terminal:
       // the SDK can stop a stream (hinges, thermal) without clearing our
@@ -1909,7 +2125,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         // does want a fresh session calls `stopStreamSession()` first, which
         // never reaches this guard.
         if existing.state != .stopped && existing.state != .stopping {
-          if requestedDeviceId == pinnedDeviceId {
+          if SharedSessionPolicy.canReuseDevice(
+            requestedId: requestedDeviceId, sessionDeviceId: deviceSession?.deviceId,
+            pinnedDeviceId: pinnedDeviceId) {
             if let texId = textureId {
               result(texId)
             } else {
@@ -1927,7 +2145,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
       // Apply a pin change (or clear) before creating the session: rebuild the
       // shared selector and rebind every observer (internal watchdog + the two
       // event-channel handlers) so none keep watching the old selector.
-      let pinChanged = requestedDeviceId != pinnedDeviceId
+      if motionController.isAttached, deviceSession?.state != .started {
+        result(FlutterError(code: "DEVICE_SESSION_NOT_READY", message: "Wait for the existing Motion device session to resume before adding the camera.", details: nil))
+        return
+      }
+      let pinChanged = !motionController.isAttached && requestedDeviceId != pinnedDeviceId
       if pinChanged {
         pinnedDeviceId = requestedDeviceId
         await teardownDeviceSession()
@@ -1948,6 +2170,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         }
       }
 
+      guard startGeneration == startCancellationGeneration, !streamTeardownGate.isActive, !mustNotStreamNow else {
+        result(FlutterError(code: "START_CANCELLED", message: "The camera start was cancelled by session teardown.", details: nil))
+        return
+      }
+
       guard let registry = textureRegistry else {
         result(FlutterError(code: "TEXTURE_ERROR", message: "Texture registry not available", details: nil))
         return
@@ -1963,6 +2190,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         return
       } catch {
         result(FlutterError(code: "DEVICE_SESSION_ERROR", message: error.localizedDescription, details: nil))
+        return
+      }
+
+      guard startGeneration == startCancellationGeneration,
+            self.deviceSession === deviceSession, deviceSession.state == .started,
+            !streamTeardownGate.isActive, !mustNotStreamNow else {
+        result(FlutterError(code: "START_CANCELLED", message: "The camera start was cancelled by session teardown.", details: nil))
         return
       }
 
@@ -2057,6 +2291,13 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
       camera = addedCamera
       streamSession = session
+      cameraStartPending = true
+      cameraOwnershipToken = session.statePublisher.listen { [weak self, weak session] _ in
+        Task { @MainActor in
+          guard let self, let session, self.streamSession === session else { return }
+          self.cameraStartPending = false
+        }
+      }
       streamStateHandler.session = session
       streamErrorHandler.session = session
 
@@ -2069,18 +2310,39 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
 
   func stopStreamSession(call: FlutterMethodCall, result: @escaping FlutterResult) {
     Task { @MainActor in
+      switch SharedSessionPolicy.stopAdmission(
+        stopping: .camera,
+        starting: isStartingSession ? (isStartingMotion ? .motion : .camera) : nil,
+        isAttached: streamSession != nil
+      ) {
+      case .alreadyIdle:
+        result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
+        return
+      case .waitForSiblingStart:
+        while isStartingSession { try? await Task.sleep(for: .milliseconds(20)) }
+      case .proceed:
+        break
+      }
+      startCancellationGeneration &+= 1
       guard streamSession != nil else {
         // No stream, but a failed start can leave a started DeviceSession
         // cached — end it anyway so the glasses aren't left mid-session
         // (which would also mute the next start's tone).
-        if deviceSession != nil {
+        if deviceSession != nil, !motionController.keepsSessionAlive {
           await teardownDeviceSession()
         }
         result(FlutterError(code: "SESSION_NOT_FOUND", message: "No active stream session", details: nil))
         return
       }
 
-      // End the DeviceSession too, not just the stream. The glasses'
+      if motionController.keepsSessionAlive {
+        await teardownStreamOnly()
+        if !motionController.keepsSessionAlive { await teardownDeviceSession() }
+        result(true)
+        return
+      }
+
+      // End the DeviceSession when this was its last capability. The glasses'
       // stream-ended tone hangs off the session lifecycle — Meta's
       // CameraAccess sample ends its session as the user-visible stop and
       // chimes; keeping the session cached here (the old behaviour, for fast

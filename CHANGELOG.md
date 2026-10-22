@@ -1,3 +1,10 @@
+## Unreleased
+
+- Add DAT Motion on iOS and Android: `startMotion`, `stopMotion`, and typed sample, state, and error streams. Supports 5, 10, 15, 24, 30, and 60 Hz, with independently nullable acceleration, angular velocity, magnetic field, and orientation readings. Motion requires a development or beta release channel.
+- Share one device session between camera and Motion. Either capability can start first; stopping one leaves the other running, and stopping the last ends the device session. Motion needs no camera or microphone permission and follows the existing background-streaming opt-in.
+- Add an example Motion panel with rate selection, sample readings, lifecycle errors, and sample-driven UI updates capped at 10 Hz. Registration no longer automatically requests camera access; use a camera action when needed.
+- Android: recognize Activity resume when Flutter attaches after the start callback, so the first background transition stops camera and Motion when background streaming is off.
+
 ## 1.0.1
 
 - Upgrade Meta Wearables DAT to 1.0.1 on iOS and Android. Android includes upstream fixes for HEVC buffer corruption and stream lag/stutter; iOS has no developer-facing SDK changes. The known intermittent iOS locked-background session termination remains unresolved.

@@ -24,6 +24,13 @@ import com.meta.wearable.dat.core.types.DatResult
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionError
 import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.motion.Motion
+import com.meta.wearable.dat.motion.addMotion
+import com.meta.wearable.dat.motion.removeMotion
+import com.meta.wearable.dat.motion.types.MotionConfiguration
+import com.meta.wearable.dat.motion.types.MotionError
+import com.meta.wearable.dat.motion.types.MotionSamplingRate
+import com.meta.wearable.dat.motion.types.MotionState
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -49,6 +56,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** MetaWearablesDatPlugin */
 class MetaWearablesDatPlugin :
@@ -107,6 +116,23 @@ class MetaWearablesDatPlugin :
     // the same Flutter event channel that Stream.errorStream uses. Cancelled
     // and recreated alongside the session lifecycle.
     private var sessionErrorsJob: Job? = null
+    private lateinit var motionSamplesChannel: EventChannel
+    private lateinit var motionStateChannel: EventChannel
+    private lateinit var motionErrorsChannel: EventChannel
+    private val motionSamplesHandler = MotionSamplesStreamHandler()
+    private val motionStateHandler = MotionEventStreamHandler(initialState = "stopped")
+    private val motionErrorsHandler = MotionEventStreamHandler()
+    private var motion: Motion? = null
+    private var motionStartInProgress = false
+    private var motionSamplesJob: Job? = null
+    private var motionStateJob: Job? = null
+    private var motionErrorsJob: Job? = null
+    // Public capability operations share one lock. A stop waits for an in-flight
+    // start, and the shared start latch rejects simultaneous starts immediately.
+    private val capabilityMutex = Mutex()
+    private var lifecycleGeneration = 0L
+    private class DeviceSessionNotReadyException : IllegalStateException(
+            "The device session is paused. Wait for it to resume before adding another capability.")
 
     // Background streaming — tracks whether the foreground service has been
     // started so we can idempotently re-start / stop it, and so we can tear
@@ -169,8 +195,8 @@ class MetaWearablesDatPlugin :
     // Streaming state — the DAT SDK splits what was historically one
     // `StreamSession` into a `DeviceSession` (device lifecycle) and a `Stream`
     // (a capability added to a started session). The `DeviceSession` is
-    // reused across stream start/stop toggles; it's only torn down when the
-    // device disappears or the plugin is disposed.
+    // shared with Motion while either capability is active. Stopping the last
+    // capability, device loss, background opt-out, or detach ends the session.
     private var session: DeviceSession? = null
     // DAT 0.9.0 consolidated stream capability ownership into `Camera`: the
     // session hands out a `Camera`, which owns the `Stream`. Both are kept —
@@ -285,6 +311,16 @@ class MetaWearablesDatPlugin :
                 )
         deviceStateChannel.setStreamHandler(deviceStateStreamHandler)
 
+        motionSamplesChannel = EventChannel(
+                flutterPluginBinding.binaryMessenger, "flutter_meta_wearables_dat/motion_samples")
+        motionSamplesChannel.setStreamHandler(motionSamplesHandler)
+        motionStateChannel = EventChannel(
+                flutterPluginBinding.binaryMessenger, "flutter_meta_wearables_dat/motion_state")
+        motionStateChannel.setStreamHandler(motionStateHandler)
+        motionErrorsChannel = EventChannel(
+                flutterPluginBinding.binaryMessenger, "flutter_meta_wearables_dat/motion_errors")
+        motionErrorsChannel.setStreamHandler(motionErrorsHandler)
+
         textureRegistry = flutterPluginBinding.textureRegistry
 
         val context = flutterPluginBinding.applicationContext
@@ -344,7 +380,10 @@ class MetaWearablesDatPlugin :
         Log.d(TAG, "lifecycle: stopping session (background streaming off)")
         // Tell Dart why, before the terminal `stopped`, so consumers can tell a
         // deliberate stop from a fault and skip their retry logic.
-        streamSessionErrorStreamHandler?.sendError(
+        if (motion != null) motionErrorsHandler.sendError(
+                "stoppedForBackground",
+                "The app was backgrounded and background streaming is not enabled.")
+        if (stream != null) streamSessionErrorStreamHandler?.sendError(
                 "stoppedForBackground",
                 "The app was backgrounded and background streaming is not enabled.",
                 bypassSuppression = true,
@@ -408,6 +447,8 @@ class MetaWearablesDatPlugin :
             }
             "startStreamSession" -> startStreamSession(call, result)
             "stopStreamSession" -> stopStreamSession(call, result)
+            "startMotion" -> startMotion(call, result)
+            "stopMotion" -> stopMotion(result)
             "capturePhoto" -> capturePhoto(call, result)
             "enableBackgroundStreaming" -> enableBackgroundStreaming(call, result)
             "disableBackgroundStreaming" -> disableBackgroundStreaming(result)
@@ -438,6 +479,12 @@ class MetaWearablesDatPlugin :
         videoFrameStreamHandler.dispose()
         audioFramesChannel.setStreamHandler(null)
         audioFrameStreamHandler.dispose()
+        motionSamplesChannel.setStreamHandler(null)
+        motionStateChannel.setStreamHandler(null)
+        motionErrorsChannel.setStreamHandler(null)
+        motionSamplesHandler.dispose()
+        motionStateHandler.dispose()
+        motionErrorsHandler.dispose()
         permissionRequests.abort("Flutter engine detached.")
         deviceStateChannel.setStreamHandler(null)
         deviceStateStreamHandler?.dispose()
@@ -795,6 +842,7 @@ class MetaWearablesDatPlugin :
         }
         try {
             ensureWearablesInitialized()
+            check(teardownSession()) { "Failed to stop the device session before disconnecting." }
             Wearables.startUnregistration(act)
             result.success(true)
         } catch (e: Exception) {
@@ -1098,6 +1146,7 @@ class MetaWearablesDatPlugin :
     private fun disableBackgroundStreaming(result: Result) {
         try {
             stopBackgroundServiceIfRunning()
+            if (isAppInBackground) handleEnteredBackground()
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to stop BackgroundStreamingService", e)
@@ -1193,6 +1242,11 @@ class MetaWearablesDatPlugin :
             return
         }
 
+        if (motion != null && !matchesSessionDevice(deviceId)) {
+            result.error("MOTION_ACTIVE", "Motion is active on another device. Stop it before switching devices.", null)
+            return
+        }
+
         // A non-nil `stream` only counts as active if it's not terminal: the SDK
         // can stop a stream (hinges, thermal) without clearing our reference.
         // Same selection → return the existing texture; a *different* device →
@@ -1229,7 +1283,7 @@ class MetaWearablesDatPlugin :
                         stats.hasArrived &&
                                 (stats.sinceArrivalNanos ?: 0L) >
                                         frameStallTimeoutMs * 1_000_000L
-                if (deviceId != pinnedDeviceId) {
+                if (deviceId != pinnedDeviceId && (motion == null || !matchesSessionDevice(deviceId))) {
                     result.error(
                             "STREAM_ACTIVE",
                             "A stream is already active on another device. Stop it before switching devices.",
@@ -1261,224 +1315,237 @@ class MetaWearablesDatPlugin :
             teardownStreamOnly()
         }
 
+        if (session?.state?.value == DeviceSessionState.PAUSED) {
+            result.error("DEVICE_SESSION_NOT_READY", DeviceSessionNotReadyException().message, null)
+            return
+        }
         startInProgress = true
 
         scope.launch {
-            try {
-                ensureWearablesInitialized()
+            capabilityMutex.withLock {
+                val operationGeneration = lifecycleGeneration
+                try {
+                    ensureWearablesInitialized()
 
-                // Apply a pin change (or clear) before creating the session:
-                // rebuild the shared selector and rebind every observer. The
-                // availability watchdog is relaunched by ensureSessionStarted()
-                // below (it re-reads deviceSelector()).
-                val pinChanged = deviceId != pinnedDeviceId
-                if (pinChanged) {
-                    pinnedDeviceId = deviceId
-                    teardownSession()
-                    deviceSelectorRef = makeDeviceSelector()
-                    activeDeviceStreamHandler?.restartMonitoring(force = true)
-                    deviceStateStreamHandler?.restartMonitoring(force = true)
-                }
-
-                // The just-rebuilt selector resolves its active device
-                // asynchronously; creating the session before it resolves
-                // returns noEligibleDevice. When a specific device is pinned,
-                // wait briefly for it to resolve.
-                if (pinChanged && deviceId != null) {
-                    withTimeoutOrNull(8_000L) {
-                        deviceSelector().activeDeviceFlow().first { it != null }
+                    // Apply a pin change (or clear) before creating the session:
+                    // rebuild the shared selector and rebind every observer. The
+                    // availability watchdog is relaunched by ensureSessionStarted()
+                    // below (it re-reads deviceSelector()).
+                    val pinChanged = motion == null && deviceId != pinnedDeviceId
+                    if (pinChanged) {
+                        check(teardownSession(invalidateStart = false)) { "Failed to stop the previous device session." }
+                        pinnedDeviceId = deviceId
+                        deviceSelectorRef = makeDeviceSelector()
+                        activeDeviceStreamHandler?.restartMonitoring(force = true)
+                        deviceStateStreamHandler?.restartMonitoring(force = true)
                     }
-                }
 
-                sessionKey = key
-                frameProcessor.configure(fps)
-
-                // Register a Flutter texture for zero-copy rendering
-                val registry = textureRegistry
-                if (registry == null) {
-                    result.error(
-                            "TEXTURE_REGISTRATION_FAILED",
-                            "TextureRegistry is not available.",
-                            null,
-                    )
-                    return@launch
-                }
-                val entry = registry.createSurfaceTexture()
-                val surfaceTexture = entry.surfaceTexture()
-                surfaceTexture.setDefaultBufferSize(1280, 720)
-                val surface = Surface(surfaceTexture)
-                textureEntry = entry
-                textureSurface = surface
-                val textureId = entry.id()
-                Log.d(TAG, "Registered texture $textureId for session $key")
-
-                val activeSession = ensureSessionStarted() ?: run {
-                    teardownStreamOnly()
-                    result.error(
-                            "STREAM_ERROR",
-                            "Failed to create or start device session.",
-                            null,
-                    )
-                    return@launch
-                }
-
-                // DAT 0.9.0 replaced `addStream` with `addCamera`; the returned
-                // `Camera` owns the stream.
-                var addedCamera: Camera? = null
-                activeSession
-                        .addCamera(cameraStreamConfiguration(streamQuality, fps, audioEnabled))
-                        .onSuccess { addedCamera = it }
-                        .onFailure { error, _ ->
-                            val code =
-                                    when {
-                                        error.description.contains("already", ignoreCase = true) ->
-                                                "capabilityAlreadyActive"
-                                        else -> "unexpectedError"
-                                    }
-                            streamSessionErrorStreamHandler?.sendError(code, error.description)
-                            Log.e(TAG, "addCamera failed: ${error.description}")
-                        }
-
-                val newCamera = addedCamera
-                if (newCamera == null) {
-                    teardownStreamOnly()
-                    result.error("STREAM_ERROR", "Failed to add camera to session.", null)
-                    return@launch
-                }
-                val newStream = newCamera.stream
-
-                camera = newCamera
-                stream = newStream
-                streamAudioEnabled = audioEnabled
-                val audioSession = audioFrameStreamHandler.beginSession()
-                if (audioEnabled) {
-                    // Subscribe before start(), while keeping subsequent collection off main.
-                    audioJob = scope.launch(
-                            Dispatchers.Default,
-                            start = CoroutineStart.UNDISPATCHED,
-                    ) {
-                        try {
-                            newStream.audioStream.collect { frame ->
-                                audioFrameStreamHandler.emit(audioSession, frame.buffer) {
-                                    stream === newStream && newStream.state.value.let {
-                                        it != StreamState.STOPPING &&
-                                                it != StreamState.STOPPED &&
-                                                it != StreamState.CLOSED
-                                    }
-                                }
-                            }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (error: Exception) {
-                            withContext(Dispatchers.Main.immediate) {
-                                if (stream === newStream) {
-                                    streamSessionErrorStreamHandler?.sendError(
-                                            "audioStreamingError",
-                                            error.message ?: "Audio frame delivery failed.",
-                                    )
-                                }
-                            }
+                    // The just-rebuilt selector resolves its active device
+                    // asynchronously; creating the session before it resolves
+                    // returns noEligibleDevice. When a specific device is pinned,
+                    // wait briefly for it to resolve.
+                    if (pinChanged && deviceId != null) {
+                        withTimeoutOrNull(8_000L) {
+                            deviceSelector().activeDeviceFlow().first { it != null }
                         }
                     }
-                }
-                streamStateStreamHandler?.stream = newStream
-                videoFrameStreamHandler.resetSessionState()
 
-                videoJob =
-                        scope.launch(Dispatchers.Default) {
-                            newStream.videoStream.collect { videoFrame ->
-                                // Before any gate below: this clock answers
-                                // "is the SDK still delivering?", which must
-                                // stay true whatever the plugin then does with
-                                // the frame. The stall watchdog reads it.
-                                frameProcessor.noteArrival()
-                                NativeVideoFrameConsumers.dispatch(videoFrame)
-                                if (frameProcessor.needsBufferSizeUpdate(
-                                                videoFrame.width,
-                                                videoFrame.height,
+                    if (operationGeneration != lifecycleGeneration || mustNotStreamNow) {
+                        result.error("STREAM_ERROR", "Session start was interrupted.", null)
+                        return@withLock
+                    }
+                    sessionKey = key
+                    frameProcessor.configure(fps)
+
+                    // Register a Flutter texture for zero-copy rendering
+                    val registry = textureRegistry
+                    if (registry == null) {
+                        result.error(
+                                "TEXTURE_REGISTRATION_FAILED",
+                                "TextureRegistry is not available.",
+                                null,
+                        )
+                        return@withLock
+                    }
+                    val entry = registry.createSurfaceTexture()
+                    val surfaceTexture = entry.surfaceTexture()
+                    surfaceTexture.setDefaultBufferSize(1280, 720)
+                    val surface = Surface(surfaceTexture)
+                    textureEntry = entry
+                    textureSurface = surface
+                    val textureId = entry.id()
+                    Log.d(TAG, "Registered texture $textureId for session $key")
+
+                    val activeSession = ensureSessionStarted() ?: run {
+                        teardownStreamOnly()
+                        result.error(
+                                "STREAM_ERROR",
+                                "Failed to create or start device session.",
+                                null,
+                        )
+                        return@withLock
+                    }
+
+                    // DAT 0.9.0 replaced `addStream` with `addCamera`; the returned
+                    // `Camera` owns the stream.
+                    var addedCamera: Camera? = null
+                    activeSession
+                            .addCamera(cameraStreamConfiguration(streamQuality, fps, audioEnabled))
+                            .onSuccess { addedCamera = it }
+                            .onFailure { error, _ ->
+                                val code =
+                                        when {
+                                            error.description.contains("already", ignoreCase = true) ->
+                                                    "capabilityAlreadyActive"
+                                            else -> "unexpectedError"
+                                        }
+                                streamSessionErrorStreamHandler?.sendError(code, error.description)
+                                Log.e(TAG, "addCamera failed: ${error.description}")
+                            }
+
+                    val newCamera = addedCamera
+                    if (newCamera == null) {
+                        teardownStreamOnly()
+                        result.error("STREAM_ERROR", "Failed to add camera to session.", null)
+                        return@withLock
+                    }
+                    val newStream = newCamera.stream
+
+                    camera = newCamera
+                    stream = newStream
+                    streamAudioEnabled = audioEnabled
+                    val audioSession = audioFrameStreamHandler.beginSession()
+                    if (audioEnabled) {
+                        // Subscribe before start(), while keeping subsequent collection off main.
+                        audioJob = scope.launch(
+                                Dispatchers.Default,
+                                start = CoroutineStart.UNDISPATCHED,
+                        ) {
+                            try {
+                                newStream.audioStream.collect { frame ->
+                                    audioFrameStreamHandler.emit(audioSession, frame.buffer) {
+                                        stream === newStream && newStream.state.value.let {
+                                            it != StreamState.STOPPING &&
+                                                    it != StreamState.STOPPED &&
+                                                    it != StreamState.CLOSED
+                                        }
+                                    }
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                withContext(Dispatchers.Main.immediate) {
+                                    if (stream === newStream) {
+                                        streamSessionErrorStreamHandler?.sendError(
+                                                "audioStreamingError",
+                                                error.message ?: "Audio frame delivery failed.",
                                         )
-                                ) {
-                                    val (targetWidth, targetHeight) =
-                                            frameProcessor.targetDimensions(
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    streamStateStreamHandler?.stream = newStream
+                    videoFrameStreamHandler.resetSessionState()
+
+                    videoJob =
+                            scope.launch(Dispatchers.Default) {
+                                newStream.videoStream.collect { videoFrame ->
+                                    // Before any gate below: this clock answers
+                                    // "is the SDK still delivering?", which must
+                                    // stay true whatever the plugin then does with
+                                    // the frame. The stall watchdog reads it.
+                                    frameProcessor.noteArrival()
+                                    NativeVideoFrameConsumers.dispatch(videoFrame)
+                                    if (frameProcessor.needsBufferSizeUpdate(
                                                     videoFrame.width,
                                                     videoFrame.height,
                                             )
-                                    entry.surfaceTexture()
-                                            .setDefaultBufferSize(targetWidth, targetHeight)
-                                    videoStreamSizeStreamHandler?.send(targetWidth, targetHeight)
-                                    frameProcessor.onSurfaceBufferSizeApplied(
-                                            videoFrame.width,
-                                            videoFrame.height,
+                                    ) {
+                                        val (targetWidth, targetHeight) =
+                                                frameProcessor.targetDimensions(
+                                                        videoFrame.width,
+                                                        videoFrame.height,
+                                                )
+                                        entry.surfaceTexture()
+                                                .setDefaultBufferSize(targetWidth, targetHeight)
+                                        videoStreamSizeStreamHandler?.send(targetWidth, targetHeight)
+                                        frameProcessor.onSurfaceBufferSizeApplied(
+                                                videoFrame.width,
+                                                videoFrame.height,
+                                        )
+                                    }
+                                    // Emit the raw I420 frame to Dart for recording /
+                                    // custom processing before handing off to the
+                                    // texture renderer. Guarded on hasListener so
+                                    // unsubscribed apps pay nothing.
+                                    if (videoFrameStreamHandler.hasListener) {
+                                        emitVideoFrame(videoFrame)
+                                    }
+                                    frameProcessor.processFrame(videoFrame, surface)
+                                }
+                            }
+
+                    streamErrorJob =
+                            scope.launch {
+                                newStream.errorStream.collect { streamError ->
+                                    Log.e(
+                                            TAG,
+                                            "Stream error: $streamError (${streamError.description})",
                                     )
+                                    streamSessionErrorStreamHandler?.send(streamError)
                                 }
-                                // Emit the raw I420 frame to Dart for recording /
-                                // custom processing before handing off to the
-                                // texture renderer. Guarded on hasListener so
-                                // unsubscribed apps pay nothing.
-                                if (videoFrameStreamHandler.hasListener) {
-                                    emitVideoFrame(videoFrame)
-                                }
-                                frameProcessor.processFrame(videoFrame, surface)
                             }
-                        }
 
-                streamErrorJob =
-                        scope.launch {
-                            newStream.errorStream.collect { streamError ->
-                                Log.e(
-                                        TAG,
-                                        "Stream error: $streamError (${streamError.description})",
-                                )
-                                streamSessionErrorStreamHandler?.send(streamError)
-                            }
-                        }
-
-                // Teardown cascades parent -> child but NOT child -> parent, so a
-                // `start()` returns a DatResult that used to be discarded,
-                // silently swallowing start failures. A failure here means the
-                // texture will never receive a frame, so tear it down and fail
-                // the call — returning success would hand back a dead texture,
-                // and an app without an error-stream subscription would see a
-                // successful Future and a permanently frozen view. The typed
-                // error still goes out on the channel for subscribers.
-                //
-                // iOS cannot do this: its `Stream.start()` returns Void, so a
-                // synchronous start failure is undetectable there and the
-                // texture is always returned.
-                var startFailure: String? = null
-                newStream.start().onFailure { error, _ ->
-                    Log.e(TAG, "Stream start failed: ${error.description}")
-                    streamSessionErrorStreamHandler?.send(error)
-                    startFailure = error.description
-                }
-                val failure = startFailure
-                if (failure != null) {
-                    teardownStreamOnly()
-                    result.error("STREAM_ERROR", failure, null)
-                    return@launch
-                }
-                // Last commit point. Bringing a session up can take seconds,
-                // which is ample time for the user to background the app
-                // mid-start. Committing anyway would leave a live stream
-                // running in a backgrounded app that nothing will stop.
-                if (mustNotStreamNow) {
-                    Log.d(TAG, "app backgrounded during start — abandoning")
+                    // Teardown cascades parent -> child but NOT child -> parent, so a
+                    // `start()` returns a DatResult that used to be discarded,
+                    // silently swallowing start failures. A failure here means the
+                    // texture will never receive a frame, so tear it down and fail
+                    // the call — returning success would hand back a dead texture,
+                    // and an app without an error-stream subscription would see a
+                    // successful Future and a permanently frozen view. The typed
+                    // error still goes out on the channel for subscribers.
+                    //
+                    // iOS cannot do this: its `Stream.start()` returns Void, so a
+                    // synchronous start failure is undetectable there and the
+                    // texture is always returned.
+                    var startFailure: String? = null
+                    newStream.start().onFailure { error, _ ->
+                        Log.e(TAG, "Stream start failed: ${error.description}")
+                        streamSessionErrorStreamHandler?.send(error)
+                        startFailure = error.description
+                    }
+                    val failure = startFailure
+                    if (failure != null) {
+                        teardownStreamOnly()
+                        result.error("STREAM_ERROR", failure, null)
+                        return@withLock
+                    }
+                    // Last commit point. Bringing a session up can take seconds,
+                    // which is ample time for the user to background the app
+                    // mid-start. Committing anyway would leave a live stream
+                    // running in a backgrounded app that nothing will stop.
+                    if (mustNotStreamNow || operationGeneration != lifecycleGeneration) {
+                        Log.d(TAG, "app backgrounded during start — abandoning")
+                        teardownStreamOnly()
+                        result.error(
+                                "APP_BACKGROUNDED",
+                                "The app was backgrounded before the stream could start.",
+                                null,
+                        )
+                        return@withLock
+                    }
+                    startFrameWatchdog()
+                    result.success(textureId)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to start stream session", e)
                     teardownStreamOnly()
                     result.error(
-                            "APP_BACKGROUNDED",
-                            "The app was backgrounded before the stream could start.",
-                            null,
-                    )
-                    return@launch
+                            if (e is DeviceSessionNotReadyException) "DEVICE_SESSION_NOT_READY" else "STREAM_ERROR",
+                            e.message ?: "Failed to start stream session.", null)
+                } finally {
+                    startInProgress = false
                 }
-                startFrameWatchdog()
-                result.success(textureId)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start stream session", e)
-                teardownStreamOnly()
-                result.error("STREAM_ERROR", e.message ?: "Failed to start stream session.", null)
-            } finally {
-                startInProgress = false
             }
         }
     }
@@ -1491,68 +1558,67 @@ class MetaWearablesDatPlugin :
     private suspend fun ensureSessionStarted(): DeviceSession? {
         val existing = session
         if (existing != null) {
-            val currentState = existing.state.firstOrNull()
-            if (currentState == DeviceSessionState.STARTED) {
-                return existing
+            val current = existing.state.value
+            if (current == DeviceSessionState.STARTED) return existing
+            if (current == DeviceSessionState.PAUSED) throw DeviceSessionNotReadyException()
+            // Stopping sessions remain owned until STOPPED; replacing one while
+            // the SDK still has its device claim causes sessionAlreadyExists.
+            if (current == DeviceSessionState.STOPPING) {
+                val stopped = withTimeoutOrNull(10_000L) {
+                    existing.state.first { it == DeviceSessionState.STOPPED }
+                }
+                if (stopped == null || session !== existing) return null
+            } else if (current != DeviceSessionState.STOPPED) {
+                val reached = withTimeoutOrNull(10_000L) {
+                    existing.state.first {
+                        it == DeviceSessionState.STARTED || it == DeviceSessionState.STOPPED
+                    }
+                }
+                return existing.takeIf {
+                    reached == DeviceSessionState.STARTED && session === existing
+                }
             }
+            // A terminal parent ended all its children. Clear stale references
+            // before establishing the next session.
+            if (!teardownSession(invalidateStart = false)) return null
         }
 
-        // Capture the auto-selector's current pick *before* createSession so a
-        // later A→B switch can't misattribute which device this session bound.
         val candidate = deviceSelector().activeDevice()?.identifier
         var created: DeviceSession? = null
         Wearables.createSession(deviceSelector())
-                .onSuccess {
-                    created = it
-                    sessionDeviceId = candidate
-                }
+                .onSuccess { created = it }
                 .onFailure { error, _ ->
-                    sessionDeviceId = null
-                    val identifier = error.description.lowercase()
-                    val code =
-                            when {
-                                identifier.contains("no eligible") -> "noEligibleDevice"
-                                identifier.contains("already") -> "sessionAlreadyExists"
-                                else -> "unexpectedError"
-                            }
-                    streamSessionErrorStreamHandler?.sendError(code, error.description)
+                    val (code, message) = StreamSessionErrorStreamHandler.mapDeviceSessionError(error)
+                    streamSessionErrorStreamHandler?.sendError(code, message)
+                    if (motionStartInProgress) motionErrorsHandler.sendError(code, message)
                     Log.e(TAG, "createSession failed: ${error.description}")
                 }
-
         val newSession = created ?: return null
         session = newSession
-        newSession.start()
-
-        // 0.7.0: subscribe to DeviceSession.errors so session-scoped errors
-        // (thermal, battery, peakPower, datAppUpdate, dwaUnavailable) reach
-        // Dart on the same event channel as stream errors. Replace any
-        // previous subscription — sessions are reused across start/stop
-        // toggles, but this is the canonical point to (re-)attach.
+        sessionDeviceId = candidate
         sessionErrorsJob?.cancel()
-        sessionErrorsJob =
-                scope.launch {
-                    newSession.errors.collect { error ->
-                        streamSessionErrorStreamHandler?.send(error)
-                    }
+        sessionErrorsJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            newSession.errors.collect { error ->
+                if (session === newSession) {
+                    streamSessionErrorStreamHandler?.send(error)
+                    val (code, message) = StreamSessionErrorStreamHandler.mapDeviceSessionError(error)
+                    if (motion != null || motionStartInProgress) motionErrorsHandler.sendError(code, message)
                 }
-
-        // Wait until the session transitions to STARTED before we try to add a
-        // stream — mirrors the reference app pattern. Also bail on a terminal
-        // STOPPED so a session torn down underneath us can't hang the awaiter.
-        val reached =
-                newSession.state.first {
-                    it == DeviceSessionState.STARTED || it == DeviceSessionState.STOPPED
-                }
-        if (reached != DeviceSessionState.STARTED) {
-            Log.w(TAG, "Session reached $reached before STARTED; aborting start")
+            }
+        }
+        newSession.start()
+        val reached = withTimeoutOrNull(10_000L) {
+            newSession.state.first {
+                it == DeviceSessionState.STARTED || it == DeviceSessionState.STOPPED
+            }
+        }
+        if (reached != DeviceSessionState.STARTED || session !== newSession) {
+            Log.w(TAG, "Session did not reach STARTED; aborting start")
+            if (session === newSession) teardownSession(invalidateStart = false)
             return null
         }
-
-        // Subscribe to the active-device flow so we tear the Session down
-        // when the device disappears. Safe to call multiple times.
         startDeviceAvailabilityMonitoring()
-
-        return newSession
+        return newSession.takeIf { session === it && it.state.value == DeviceSessionState.STARTED }
     }
 
     private fun startDeviceAvailabilityMonitoring() {
@@ -1562,6 +1628,8 @@ class MetaWearablesDatPlugin :
                     deviceSelector().activeDeviceFlow().collect { device ->
                         if (device == null && session != null) {
                             Log.d(TAG, "Active device lost — tearing down Session")
+                            if (motion != null) motionErrorsHandler.sendError(
+                                    "deviceDisconnected", "The Motion device disconnected.")
                             teardownSession()
                         }
                     }
@@ -1569,33 +1637,203 @@ class MetaWearablesDatPlugin :
     }
 
     private fun stopStreamSession(call: MethodCall, result: Result) {
-        if (stream == null) {
-            // No stream, but a failed start can leave a started DeviceSession
-            // cached — end it anyway so the glasses aren't left mid-session
-            // (which would also mute the next start's tone). Mirrors iOS.
-            if (session != null) {
-                teardownSession()
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            capabilityMutex.withLock {
+                if (stream == null) {
+                    if (session != null && motion == null) teardownSession()
+                    result.error("SESSION_NOT_FOUND", "No stream found for '${sessionKey ?: "auto"}'.", null)
+                    return@withLock
+                }
+                try {
+                    if (hasLiveMotion()) teardownStreamOnly() else check(teardownSession()) { "Failed to stop device session." }
+                    result.success(true)
+                } catch (error: Exception) {
+                    result.error("STREAM_ERROR", error.message ?: "Failed to stop camera.", null)
+                }
             }
-            val key = sessionKey ?: "auto"
-            result.error("SESSION_NOT_FOUND", "No stream found for '$key'.", null)
+        }
+    }
+
+    private fun hasLiveMotion(): Boolean {
+        val current = motion ?: return false
+        return current.state.value.let { it != MotionState.STOPPED && it != MotionState.STOPPING } ||
+                current.errors.value == MotionError.DEVICE_DISCONNECTED
+    }
+
+    private fun hasLiveCamera(): Boolean = stream?.state?.value?.let {
+        it != StreamState.STOPPED && it != StreamState.STOPPING && it != StreamState.CLOSED
+    } ?: false
+
+    /** null joins the selected pair; an explicit id must identify that same pair. */
+    private fun matchesSessionDevice(requested: String?): Boolean =
+            requested == null || requested == sessionDeviceId || requested == pinnedDeviceId
+
+    private fun startMotion(call: MethodCall, result: Result) {
+        if (application == null || !btPermissionsGranted) {
+            result.error("NOT_INITIALIZED", "Call requestAndroidPermissions() before starting Motion.", null)
             return
         }
+        if (mustNotStreamNow) {
+            result.error("APP_BACKGROUNDED", "Enable background streaming before starting Motion in the background.", null)
+            return
+        }
+        if (startInProgress) {
+            result.error("MOTION_ACTIVE", "A capability start is already in progress.", null)
+            return
+        }
+        val rate = motionSamplingRate(call.argument<Int>("samplingRate") ?: 10)
+        if (rate == null) {
+            result.error("INVALID_ARGUMENT", "Motion samplingRate must be 5, 10, 15, 24, 30, or 60 Hz.", null)
+            return
+        }
+        val deviceId = call.argument<String>("deviceId")
+        if ((stream != null || motion != null) && !matchesSessionDevice(deviceId)) {
+            result.error("MOTION_ACTIVE", "A capability is active on another device. Stop it before switching devices.", null)
+            return
+        }
+        val existing = motion
+        if (existing != null && existing.state.value != MotionState.STOPPED) {
+            if (existing.configuration.samplingRate != rate) {
+                result.error("MOTION_ACTIVE", "Stop Motion before changing its sampling rate.", null)
+            } else {
+                result.success(true)
+            }
+            return
+        }
+        if (session?.state?.value == DeviceSessionState.PAUSED) {
+            result.error("DEVICE_SESSION_NOT_READY", DeviceSessionNotReadyException().message, null)
+            return
+        }
+        startInProgress = true
+        motionStartInProgress = true
+        scope.launch {
+            capabilityMutex.withLock {
+                val operationGeneration = lifecycleGeneration
+                try {
+                    ensureWearablesInitialized()
+                    if (motion != null) teardownMotionOnly()
+                    val pinChanged = stream == null && deviceId != pinnedDeviceId
+                    if (pinChanged) {
+                        check(teardownSession(invalidateStart = false)) { "Failed to stop the previous device session." }
+                        pinnedDeviceId = deviceId
+                        deviceSelectorRef = makeDeviceSelector()
+                        activeDeviceStreamHandler?.restartMonitoring(force = true)
+                        deviceStateStreamHandler?.restartMonitoring(force = true)
+                        if (deviceId != null) withTimeoutOrNull(8_000L) {
+                            deviceSelector().activeDeviceFlow().first { it != null }
+                        }
+                    }
+                    if (operationGeneration != lifecycleGeneration || mustNotStreamNow) {
+                        result.error("MOTION_ERROR", "Motion start was interrupted.", null)
+                        return@withLock
+                    }
+                    val parent = ensureSessionStarted()
+                    if (parent == null || operationGeneration != lifecycleGeneration || mustNotStreamNow) {
+                        result.error("MOTION_ERROR", "Failed to create or start device session.", null)
+                        return@withLock
+                    }
+                    var added: Motion? = null
+                    var addFailure: String? = null
+                    parent.addMotion(MotionConfiguration(samplingRate = rate))
+                            .onSuccess { added = it }
+                            .onFailure { error, _ ->
+                                addFailure = error.description
+                                val (code, message) = StreamSessionErrorStreamHandler.mapDeviceSessionError(error)
+                                motionErrorsHandler.sendError(code, message)
+                            }
+                    val current = added ?: throw IllegalStateException(addFailure ?: "Failed to add Motion.")
+                    motion = current
+                    val sampleSession = motionSamplesHandler.beginSession()
+                    // No SDK replay: all three subscriptions are established before start().
+                    motionSamplesJob = scope.launch(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) {
+                        try {
+                            current.samples.collect { sample ->
+                                motionSamplesHandler.emit(sampleSession, sample) {
+                                    motion === current && current.state.value == MotionState.STARTED
+                                }
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            withContext(Dispatchers.Main.immediate) {
+                                if (motion === current) motionErrorsHandler.sendError(
+                                        "unexpectedError", error.message ?: "Motion delivery failed.")
+                            }
+                        }
+                    }
+                    motionStateJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        current.state.collect { state ->
+                            if (motion === current) motionStateHandler.send(motionStateName(state))
+                        }
+                    }
+                    motionErrorsJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        current.errors.collect { error ->
+                            if (motion === current && error != null) {
+                                motionErrorsHandler.sendError(motionErrorCode(error), error.description)
+                            }
+                        }
+                    }
+                    current.start()
+                    // Success means the start request was accepted. State and errors
+                    // report asynchronous availability, including sensorUnavailable.
+                    result.success(true)
+                } catch (error: Exception) {
+                    try {
+                        if (motion != null) teardownMotionOnly()
+                        if (stream == null) teardownSession(invalidateStart = false)
+                    } catch (cleanup: Exception) {
+                        Log.w(TAG, "Motion start cleanup failed; retaining capability: ${cleanup.message}")
+                    }
+                    result.error(
+                            if (error is DeviceSessionNotReadyException) "DEVICE_SESSION_NOT_READY" else "MOTION_ERROR",
+                            error.message ?: "Failed to start Motion.", null)
+                } finally {
+                    startInProgress = false
+                    motionStartInProgress = false
+                }
+            }
+        }
+    }
 
-        // End the DeviceSession too, not just the stream. The glasses'
-        // stream-ended tone hangs off the session lifecycle — Meta's
-        // CameraAccess sample ends its session as the user-visible stop and
-        // chimes; keeping the session cached here (the old behaviour, for fast
-        // restarts) meant the glasses only chimed when the app was backgrounded
-        // or killed. Matches iOS as of 0.9.1, so Stop means the same thing on
-        // both platforms. Trade-off: the next startStreamSession is a full
-        // session reconnect rather than a fast addCamera.
-        //
-        // Unlike iOS there is no await-the-cascade machinery here: Kotlin
-        // objects are not deterministically freed when the plugin drops its
-        // references, so the SDK's stop cascade runs regardless. Do not port
-        // the iOS awaitDeviceSessionStopped over.
-        teardownSession()
-        result.success(true)
+    private fun stopMotion(result: Result) {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            capabilityMutex.withLock {
+                try {
+                    if (motion != null) teardownMotionOnly()
+                    if (!hasLiveCamera() && session != null) check(teardownSession()) { "Failed to stop device session." }
+                    result.success(true)
+                } catch (error: Exception) {
+                    result.error("MOTION_ERROR", error.message ?: "Failed to stop Motion.", null)
+                }
+            }
+        }
+    }
+
+    private fun cancelMotionSubscriptions() {
+        motionSamplesHandler.endSession()
+        motionSamplesJob?.cancel()
+        motionSamplesJob = null
+        motionStateJob?.cancel()
+        motionStateJob = null
+        motionErrorsJob?.cancel()
+        motionErrorsJob = null
+    }
+
+    private fun teardownMotionOnly() {
+        val current = motion ?: return
+        cancelMotionSubscriptions()
+        current.stop()
+        motionStateHandler.send("stopped")
+        var failure: String? = null
+        session?.removeMotion()?.onFailure { error, _ ->
+            failure = error.description
+            val (code, message) = StreamSessionErrorStreamHandler.mapDeviceSessionError(error)
+            motionErrorsHandler.sendError(code, message)
+        }
+        // On detach failure retain the handle; a later stop can retry. Never
+        // pretend Motion is detached while its parent still owns the capability.
+        failure?.let { throw IllegalStateException(it) }
+        motion = null
     }
 
     private fun capturePhoto(call: MethodCall, result: Result) {
@@ -1845,7 +2083,9 @@ class MetaWearablesDatPlugin :
         // so every plugin-initiated teardown reached Dart as silence — a live
         // texture id and a frozen preview with nothing to react to. Matches the
         // iOS fix from 0.8.1.
-        streamStateStreamHandler?.detachEmittingStopped()
+        if (stream != null || camera != null || textureEntry != null) {
+            streamStateStreamHandler?.detachEmittingStopped()
+        }
         // Stop BOTH, stream first — they do different jobs and neither
         // substitutes for the other:
         //
@@ -1889,7 +2129,12 @@ class MetaWearablesDatPlugin :
      * device loss and plugin dispose. The next `startStreamSession` will create
      * a fresh Session.
      */
-    private fun teardownSession() {
+    private fun teardownSession(invalidateStart: Boolean = true): Boolean {
+        if (invalidateStart) lifecycleGeneration++
+        val hadMotion = motion != null
+        cancelMotionSubscriptions()
+        // A parent stop closes Motion as well, including a capability whose
+        // explicit remove failed. Preserve references if the stop itself throws.
         teardownStreamOnly()
         sessionErrorsJob?.cancel()
         sessionErrorsJob = null
@@ -1899,9 +2144,13 @@ class MetaWearablesDatPlugin :
             session?.stop()
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping session: ${e.message}")
+            return false
         }
+        motion = null
+        if (hadMotion) motionStateHandler.send("stopped")
         session = null
         sessionDeviceId = null
+        return true
     }
 
     // endregion
