@@ -5,7 +5,13 @@ import MWDATMotion
 struct MotionTests {
   @MainActor
   static func main() async {
+    await pendingListenerReplacement()
+    await listenerAfterStart()
+    await cancelledRefresh()
+    await stoppedMotionDoesNotRefresh()
     let controller = MotionController()
+    var refreshed: Motion?
+    installRefresh(controller) { refreshed = $0 }
     var samples: [[String: Any]] = []
     var states: [String] = []
     var errors: [[String: String]] = []
@@ -58,12 +64,19 @@ struct MotionTests {
     var newSamples: [[String: Any]] = []
     _ = controller.samples.onListen(withArguments: nil) { newSamples.append($0 as! [String: Any]) }
     precondition(newSamples.isEmpty && replacement.stops == 0)
+    // A sample produced by the old capability even after relisten is withheld
+    // until the new SDK capability establishes the subscription boundary.
     replacement.continuation.yield(MotionSample(timestampNs: 6))
+    await drain()
+    precondition(newSamples.isEmpty && replacement.stops == 1)
+    guard let refreshed else { fatalError("Relistening did not refresh Motion") }
+    precondition(refreshed.starts == 1)
+    refreshed.continuation.yield(MotionSample(timestampNs: 6))
     await drain()
     precondition(samples.count == 2 && newSamples.count == 1)
     precondition(newSamples[0]["timestampNs"] as? Int64 == 6)
 
-    replacement.errorPublisher.send(.sensorUnavailable)
+    refreshed.errorPublisher.send(.sensorUnavailable)
     await drain()
     precondition(errors.last?["code"] == "sensorUnavailable")
     precondition(!controller.keepsSessionAlive)
@@ -77,7 +90,126 @@ struct MotionTests {
     await controller.stopDelivery()
     controller.release()
     precondition(!controller.isAttached)
-    print("Motion controller: nullable payload, timestamp precision, stale callbacks, replacement, cancellation, state replay and rate validation passed")
+    print("Motion controller: payload, timestamp precision, stale callbacks, listener refresh/buffer isolation, cancellation, state replay and rate validation passed")
+  }
+
+  @MainActor
+  static func pendingListenerReplacement() async {
+    let controller = MotionController()
+    let motion = Motion()
+    var refreshed: Motion?
+    var refreshes = 0
+    installRefresh(controller) { refreshed = $0; refreshes += 1 }
+    _ = controller.samples.onListen(withArguments: nil) { _ in }
+    controller.attach(motion)
+    await drain()
+    // None of this burst may cross into a new subscription, even when the
+    // main actor has not resumed the SDK consumer before cancel/relisten.
+    for timestamp in 777...1032 {
+      motion.continuation.yield(MotionSample(timestampNs: Int64(timestamp)))
+    }
+    _ = controller.samples.onCancel(withArguments: nil)
+    // Rapid replacements must coalesce around the latest listener.
+    _ = controller.samples.onListen(withArguments: nil) { _ in
+      fatalError("An intermediate listener received an old sample")
+    }
+    _ = controller.samples.onCancel(withArguments: nil)
+    var received: [Int64] = []
+    _ = controller.samples.onListen(withArguments: nil) {
+      received.append(($0 as! [String: Any])["timestampNs"] as! Int64)
+    }
+    await drain()
+    precondition(received.isEmpty, "Previous subscription leaked buffered timestamps: \(received)")
+    precondition(refreshes == 1 && motion.stops == 1)
+    refreshed!.continuation.yield(MotionSample(timestampNs: 2000))
+    await drain()
+    precondition(received == [2000])
+    await controller.stopDelivery()
+    controller.release()
+  }
+
+  @MainActor
+  static func listenerAfterStart() async {
+    let controller = MotionController()
+    let motion = Motion()
+    var refreshed: Motion?
+    installRefresh(controller) { refreshed = $0 }
+    controller.attach(motion)
+    motion.continuation.yield(MotionSample(timestampNs: 1))
+    var received: [Int64] = []
+    _ = controller.samples.onListen(withArguments: nil) {
+      received.append(($0 as! [String: Any])["timestampNs"] as! Int64)
+    }
+    await drain()
+    precondition(received.isEmpty && motion.stops == 1 && refreshed != nil)
+    refreshed!.continuation.yield(MotionSample(timestampNs: 2))
+    await drain()
+    precondition(received == [2])
+    await controller.stopDelivery()
+    controller.release()
+  }
+
+  @MainActor
+  static func cancelledRefresh() async {
+    for stopCapability in [false, true] {
+      let controller = MotionController()
+      let motion = Motion()
+      var refreshes = 0
+      installRefresh(controller) { _ in refreshes += 1 }
+      _ = controller.samples.onListen(withArguments: nil) { _ in }
+      controller.attach(motion)
+      await drain()
+      _ = controller.samples.onCancel(withArguments: nil)
+      _ = controller.samples.onListen(withArguments: nil) { _ in }
+      if stopCapability {
+        await controller.stopDelivery()
+        controller.release()
+      } else {
+        _ = controller.samples.onCancel(withArguments: nil)
+      }
+      await drain()
+      precondition(refreshes == 0 && motion.starts == 1)
+      precondition(motion.stops == (stopCapability ? 1 : 0))
+      if !stopCapability {
+        await controller.stopDelivery()
+        controller.release()
+      }
+    }
+  }
+
+  @MainActor
+  static func stoppedMotionDoesNotRefresh() async {
+    let controller = MotionController()
+    let motion = Motion()
+    var refreshes = 0
+    installRefresh(controller) { _ in refreshes += 1 }
+    _ = controller.samples.onListen(withArguments: nil) { _ in }
+    controller.attach(motion)
+    motion.stop()
+    await drain()
+    _ = controller.samples.onCancel(withArguments: nil)
+    _ = controller.samples.onListen(withArguments: nil) { _ in }
+    await drain()
+    precondition(refreshes == 0 && motion.starts == 1)
+    await controller.stopDelivery()
+    controller.release()
+  }
+
+  /// The real plugin serializes this work with camera/device operations and
+  /// removes/adds Motion on the same parent. This double tests controller routing
+  /// and fresh-buffer isolation, not the full plugin or physical device lifetime.
+  @MainActor
+  static func installRefresh(_ controller: MotionController, created: @escaping (Motion) -> Void) {
+    controller.onSampleSubscriptionRefresh = { [weak controller] previous, subscription in
+      guard let controller, controller.motion === previous,
+            controller.samples.subscriptionGeneration == subscription,
+            controller.needsSampleSubscriptionRefresh else { return }
+      await controller.stopDelivery()
+      controller.release()
+      let replacement = Motion()
+      controller.attach(replacement)
+      created(replacement)
+    }
   }
 
   @MainActor

@@ -833,6 +833,15 @@ class MetaWearablesDat {
   ///
   /// Multiple callers share a broadcast stream. Cancelling a subscription does
   /// not stop the motion capability; call [stopMotion] when finished.
+  ///
+  /// On iOS, listening again after the last listener cancels refreshes the
+  /// active motion capability so its old sample buffer cannot be replayed.
+  /// The camera and device session stay active. Expect a brief sample gap and
+  /// motion state transitions. Listening for the first time after starting
+  /// motion also refreshes it; subscribe before [startMotion] to avoid this.
+  /// A paused device session defers refresh until it resumes. Refresh failures
+  /// appear on [motionErrorStream] as `sampleSubscriptionRefreshFailed`;
+  /// explicitly stop and start motion to retry.
   static Stream<MotionSample> motionSamplesStream() {
     return MetaWearablesDatPlatform.instance.motionSamplesStream();
   }

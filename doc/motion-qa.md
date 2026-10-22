@@ -31,6 +31,21 @@ Record the phone model/OS, glasses model/firmware, Meta AI app version, DAT rele
 
 Successful compilation, mock channels, or generated samples do not prove these hardware scenarios. Record pass/fail and evidence separately for iOS and Android.
 
+## Review-fix checks requiring a new device run
+
+The earlier physical runs below predate the terminal-parent cleanup and iOS listener-refresh fixes. The Swift harness exercises the controller with SDK doubles and the shared-session policy, not the complete native plugin lifecycle.
+
+For an iOS consumer that can cancel/recreate its sample subscription:
+
+1. Subscribe to samples and state/errors, then start Motion and camera on the same glasses. Record Motion timestamps and verify camera frames are updating.
+2. Cancel every sample listener while keeping Motion active, wait briefly, then attach a new sample listener. Confirm a brief Motion restart followed by fresh samples, with the same camera texture and parent session still active. Additional concurrent listeners must not restart Motion.
+3. Repeat with Motion alone. Cancel/relisten rapidly and explicitly stop Motion during a refresh. Confirm no automatic restart after the explicit stop and no samples from the previous capability reach the new listener.
+4. If the parent is paused, relisten and let it resume. Confirm refresh waits for the existing parent rather than replacing it. Record any `sampleSubscriptionRefreshFailed` error and verify explicit Motion stop/start recovers when the glasses are ready.
+
+The example provider retains its sample subscription when the sheet closes, so merely closing/reopening that sheet does not exercise this subscription boundary. Use the consuming app's subscription controls or a dedicated QA fixture.
+
+For Android, end the DAT device session while leaving glasses discoverable if the test setup supports it. Call `stopMotion()` twice, then start again when ready. Both stops must complete, and a fresh start must not be blocked by retained terminal ownership. A glasses power-off is useful regression coverage but does not reproduce the specific no-availability-loss case.
+
 
 ## Physical run — 2026-10-21
 

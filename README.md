@@ -766,6 +766,8 @@ await motionErrors.cancel();
 
 `startMotion()` returns whether the start request was accepted; use `MotionState.started` and samples to confirm delivery. `stopMotion()` releases Motion. Stopping the last active capability ends the device session. Keep the same device selection when using camera and Motion together; starting either capability on another pair while the first is active is rejected. Stop both capabilities before switching pairs. Stop Motion before changing its sampling rate.
 
+Sample subscriptions share one broadcast stream. Cancelling the last listener leaves Motion running. **On iOS, resubscribing refreshes only the active Motion capability** to discard its old SDK sample buffer; the camera and parent device session stay active. Expect a brief sample gap and Motion state transitions. The same refresh happens if you start Motion before attaching the first sample listener, so subscribe before starting. Additional listeners on an already-listened broadcast stream do not cause a refresh. A paused parent defers refresh until it resumes; a stopped or failed Motion capability requires an explicit start. If refreshing fails, `motionErrorStream()` reports `sampleSubscriptionRefreshFailed`; stop and start Motion to retry.
+
 | Sample field | Type | Meaning |
 | --- | --- | --- |
 | `timestampNs` | `int` | Nanoseconds on the glasses' monotonic clock. Use for ordering and intervals, not a `DateTime`. |
@@ -868,4 +870,4 @@ Contributions are welcome! Feel free to open [issues](https://github.com/rodcone
 
 MIT License — see [LICENSE](LICENSE) for details.
 
-DAT 1.0 compatibility: `insufficientSDKVersion` is terminal and requires an app update; `dwaOutOfStuRange` is a nonblocking warning and must not stop or restart the stream. The plugin retains app-initiated registration; Meta-AI-initiated registration requests remain unexposed. Experimental camera audio is available on iOS and Android starting with plugin 1.0.1, in development/beta release channels only. Motion, inputs, speech, and standalone photo capabilities remain unexposed.
+DAT 1.0 compatibility: `insufficientSDKVersion` is terminal and requires an app update; `dwaOutOfStuRange` is a nonblocking warning and must not stop or restart the stream. The plugin retains app-initiated registration; Meta-AI-initiated registration requests remain unexposed. Experimental camera audio is available on iOS and Android starting with plugin 1.0.1, in development/beta release channels only. Motion is added in the unreleased changes described above; inputs, speech, and standalone photo capabilities remain unexposed.

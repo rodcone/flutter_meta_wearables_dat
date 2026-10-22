@@ -8,6 +8,7 @@ final class MotionStreamHandler: NSObject, FlutterStreamHandler {
   private let replayLatest: Bool
   private var latest: Any?
   private(set) var subscriptionGeneration: UInt64 = 0
+  var didStartListening: (() -> Void)?
 
   init(initialValue: Any? = nil, replayLatest: Bool = false) {
     self.latest = initialValue
@@ -21,6 +22,7 @@ final class MotionStreamHandler: NSObject, FlutterStreamHandler {
     subscriptionGeneration &+= 1
     sink = events
     if replayLatest, let latest { events(latest) }
+    didStartListening?()
     return nil
   }
 

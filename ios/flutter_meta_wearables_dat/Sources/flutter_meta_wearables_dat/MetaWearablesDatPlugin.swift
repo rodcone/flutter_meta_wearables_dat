@@ -940,6 +940,9 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     deviceSessionStateTask = Task { [weak self] in
       for await state in session.stateStream() {
         guard let self, self.deviceSession === session, !Task.isCancelled else { return }
+        if state == .started {
+          self.motionController.requestSampleSubscriptionRefresh()
+        }
         if state == .stopped {
           // DeviceSession stopped externally — tear down associated stream
           // and drop our reference. A fresh session is created on demand.
@@ -1977,7 +1980,7 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
           result(FlutterError(code: "ADD_MOTION_ERROR", message: "Motion requires a started device session.", details: nil))
           return
         }
-        motionController.attach(motion)
+        attachMotionCapability(motion)
         result(true)
       } catch {
         if let error = error as? DeviceSessionError {
@@ -1987,6 +1990,54 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
         if streamSession == nil { await teardownDeviceSession() }
         result(FlutterError(code: "DEVICE_SESSION_ERROR", message: "Could not start Motion: \(error)", details: nil))
       }
+    }
+  }
+
+  @MainActor
+  private func attachMotionCapability(_ motion: MWDATMotion.Motion) {
+    motionController.onSampleSubscriptionRefresh = { [weak self] previous, subscription in
+      await self?.refreshMotionSampleSubscription(previous, subscription: subscription)
+    }
+    motionController.attach(motion)
+  }
+
+  /// Refresh only Motion: the SDK has no way to flush its persistent sample
+  /// buffer. Serializing this as a Motion start preserves camera/parent ownership
+  /// and lets an explicit stop or background teardown cancel the replacement.
+  @MainActor
+  private func refreshMotionSampleSubscription(_ previous: MWDATMotion.Motion, subscription: UInt64) async {
+    func stillRequested() -> Bool {
+      motionController.motion === previous &&
+        motionController.samples.subscriptionGeneration == subscription &&
+        motionController.needsSampleSubscriptionRefresh && !mustNotStreamNow
+    }
+    while isStartingSession || streamTeardownGate.isActive {
+      guard stillRequested() else { return }
+      try? await Task.sleep(for: .milliseconds(20))
+    }
+    // A paused parent defers refresh until its state observer sees .started.
+    guard stillRequested(), let parent = deviceSession, parent.state == .started else { return }
+    isStartingSession = true
+    isStartingMotion = true
+    defer { isStartingSession = false; isStartingMotion = false }
+    let startGeneration = startCancellationGeneration
+    let configuration = previous.configuration
+    do {
+      try await removeMotionCapability()
+      guard startGeneration == startCancellationGeneration,
+            deviceSession === parent, !streamTeardownGate.isActive, !mustNotStreamNow else { return }
+      guard parent.state == .started,
+            let replacement = try parent.addMotion(configuration: configuration) else {
+        throw DeviceSessionError.unexpectedError(description: "Motion could not be refreshed on its existing device session.")
+      }
+      // A listener may cancel/relisten while removal suspends. The fresh
+      // capability binds to the latest subscription and cannot replay old data.
+      attachMotionCapability(replacement)
+    } catch {
+      guard startGeneration == startCancellationGeneration, deviceSession === parent else { return }
+      motionController.sendError(
+        code: "sampleSubscriptionRefreshFailed",
+        message: "Could not refresh Motion samples; stop and start Motion to retry: \(error)")
     }
   }
 

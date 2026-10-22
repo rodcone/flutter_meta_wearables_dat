@@ -11,14 +11,36 @@ final class MotionController {
   let samples = MotionStreamHandler()
   let states = MotionStreamHandler(initialValue: "stopped", replayLatest: true)
   let errors = MotionStreamHandler()
+  var onSampleSubscriptionRefresh: ((MWDATMotion.Motion, UInt64) async -> Void)?
   private(set) var motion: MWDATMotion.Motion?
   private(set) var keepsSessionAlive = false
   private var sampleTask: Task<Void, Never>?
   private var stateToken: (any AnyListenerToken)?
   private var errorToken: (any AnyListenerToken)?
   private var generation: UInt64 = 0
+  private var sampleSubscriptionGeneration: UInt64 = 0
 
   var isAttached: Bool { motion != nil }
+
+  var needsSampleSubscriptionRefresh: Bool {
+    guard let motion, motion.state == .started || motion.state == .starting else { return false }
+    return keepsSessionAlive && samples.hasListener &&
+      sampleSubscriptionGeneration != samples.subscriptionGeneration
+  }
+
+  /// DAT owns one persistent buffered stream per capability. A listener that
+  /// replaces the original must wait for a new capability, not drain that buffer.
+  func requestSampleSubscriptionRefresh() {
+    guard needsSampleSubscriptionRefresh, let motion else { return }
+    let epoch = generation
+    let subscription = samples.subscriptionGeneration
+    Task { [weak self] in
+      guard let self, self.generation == epoch,
+            self.samples.subscriptionGeneration == subscription,
+            self.needsSampleSubscriptionRefresh else { return }
+      await self.onSampleSubscriptionRefresh?(motion, subscription)
+    }
+  }
 
   func attach(_ motion: MWDATMotion.Motion) {
     precondition(self.motion == nil)
@@ -26,6 +48,14 @@ final class MotionController {
     keepsSessionAlive = true
     generation &+= 1
     let epoch = generation
+    sampleSubscriptionGeneration = samples.subscriptionGeneration
+    let subscription = sampleSubscriptionGeneration
+    samples.didStartListening = { [weak self] in
+      Task { @MainActor in
+        guard let self, self.generation == epoch else { return }
+        self.requestSampleSubscriptionRefresh()
+      }
+    }
     stateToken = motion.statePublisher.listen { [weak self] state in
       Task { @MainActor in
         guard let self, self.generation == epoch else { return }
@@ -46,7 +76,8 @@ final class MotionController {
     sampleTask = Task { [weak self] in
       for await sample in stream {
         guard let self, !Task.isCancelled, self.generation == epoch else { return }
-        guard self.samples.hasListener else { continue }
+        guard self.samples.hasListener,
+              self.samples.subscriptionGeneration == subscription else { continue }
         self.samples.send(Self.sampleMap(sample))
       }
     }
@@ -73,7 +104,11 @@ final class MotionController {
     states.send("stopped")
   }
 
-  func release() { motion = nil; keepsSessionAlive = false }
+  func release() {
+    motion = nil
+    keepsSessionAlive = false
+    samples.didStartListening = nil
+  }
 
   func sendError(code: String, message: String) {
     errors.send(["code": code, "message": message])

@@ -1,21 +1,29 @@
 package io.rodcone.flutter_meta_wearables_dat
 
 import android.app.Application
+import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.camera.Stream
 import com.meta.wearable.dat.camera.types.StreamState
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.core.session.DeviceSession
+import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.types.DatResult
+import com.meta.wearable.dat.core.types.DeviceIdentifier
 import com.meta.wearable.dat.core.types.DeviceSessionError
 import com.meta.wearable.dat.motion.Motion
+import com.meta.wearable.dat.motion.removeMotion
 import com.meta.wearable.dat.motion.types.MotionState
 import com.meta.wearable.dat.motion.types.MotionConfiguration
 import com.meta.wearable.dat.motion.types.MotionSamplingRate
+import com.meta.wearable.dat.motion.types.MotionSample
+import com.meta.wearable.dat.motion.types.MotionError
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.EventChannel
 import kotlin.test.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.test.*
 import org.junit.jupiter.api.Test
@@ -168,6 +176,136 @@ class AndroidMotionLifecycleTest {
             assertSame(parent, field(plugin, "session").get(plugin))
             verify(camera, never()).stop(); verify(camera, never()).start(); verify(parent, never()).stop()
         } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun `ended parent releases Motion without a device availability loss`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val plugin = MetaWearablesDatPlugin()
+            val parentState = MutableStateFlow(DeviceSessionState.STARTED)
+            val parent = terminalRemovalParent(parentState)
+            val motion = mock(Motion::class.java)
+            field(plugin, "session").set(plugin, parent)
+            field(plugin, "sessionDeviceId").set(plugin, "still-discoverable-glasses")
+            field(plugin, "motion").set(plugin, motion)
+
+            // The SDK ends its session, but device discovery never emits null.
+            parentState.value = DeviceSessionState.STOPPED
+            var removalError: DeviceSessionError? = null
+            parent.removeMotion().onFailure { error, _ -> removalError = error }
+            assertEquals(DeviceSessionError.SESSION_ALREADY_STOPPED, removalError)
+            val result = mock(MethodChannel.Result::class.java)
+            repeat(2) { plugin.onMethodCall(MethodCall("stopMotion", null), result) }
+            advanceUntilIdle()
+
+            verify(result, times(2)).success(true)
+            verify(result, never()).error(anyString(), anyString(), any())
+            assertNull(field(plugin, "motion").get(plugin))
+            assertNull(field(plugin, "session").get(plugin))
+            assertNull(field(plugin, "sessionDeviceId").get(plugin))
+            verify(parent, never()).stop()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun `parent ending during Motion stop is terminal cleanup rather than retryable removal failure`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val plugin = MetaWearablesDatPlugin()
+            val parentState = MutableStateFlow(DeviceSessionState.STARTED)
+            val parent = terminalRemovalParent(parentState)
+            val motion = mock(Motion::class.java)
+            doAnswer { parentState.value = DeviceSessionState.STOPPED; null }.`when`(motion).stop()
+            field(plugin, "session").set(plugin, parent)
+            field(plugin, "motion").set(plugin, motion)
+            val result = mock(MethodChannel.Result::class.java)
+            val states = mock(EventChannel.EventSink::class.java)
+            (field(plugin, "motionStateHandler").get(plugin) as MotionEventStreamHandler).onListen(null, states)
+            clearInvocations(states)
+
+            plugin.onMethodCall(MethodCall("stopMotion", null), result)
+            advanceUntilIdle()
+
+            verify(result).success(true)
+            assertNull(field(plugin, "motion").get(plugin))
+            assertNull(field(plugin, "session").get(plugin))
+            verify(parent, never()).stop()
+            verify(states, times(1)).success("stopped")
+        } finally { Dispatchers.resetMain() }
+    }
+
+    /** Run DAT's actual SESSION_ALREADY_STOPPED removal branch, not a plugin-shaped fake. */
+    private fun terminalRemovalParent(state: MutableStateFlow<DeviceSessionState>): DeviceSession {
+        val parent = mock(DeviceSession::class.java) { invocation ->
+            if (invocation.method.name.startsWith("removeCapabilityByType")) invocation.callRealMethod()
+            else RETURNS_DEFAULTS.answer(invocation)
+        }
+        DeviceSession::class.java.getDeclaredField("lock").apply { isAccessible = true }.set(parent, Any())
+        DeviceSession::class.java.getDeclaredField("_state").apply { isAccessible = true }.set(parent, state)
+        `when`(parent.state).thenReturn(state)
+        return parent
+    }
+
+    @Test fun `start after a terminal parent creates a fresh session without a manual stop`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val sdkInstance = Wearables::class.java.getDeclaredField("instance").apply { isAccessible = true }
+        val originalSdkInstance = sdkInstance.get(null)
+        val plugin = MetaWearablesDatPlugin()
+        try {
+            ready(plugin)
+            val oldParent = terminalRemovalParent(MutableStateFlow(DeviceSessionState.STOPPED))
+            val oldMotion = mock(Motion::class.java)
+            // Even a stale nonterminal child must not make start return early
+            // when its parent's terminal state is already known.
+            `when`(oldMotion.state).thenReturn(MutableStateFlow(MotionState.PAUSED))
+            `when`(oldMotion.configuration).thenReturn(MotionConfiguration(MotionSamplingRate.HZ_10))
+            field(plugin, "session").set(plugin, oldParent)
+            field(plugin, "motion").set(plugin, oldMotion)
+
+            val newMotion = mock(Motion::class.java)
+            val newMotionState = MutableStateFlow(MotionState.STOPPED)
+            `when`(newMotion.state).thenReturn(newMotionState)
+            `when`(newMotion.errors).thenReturn(MutableStateFlow<MotionError?>(null))
+            `when`(newMotion.samples).thenReturn(MutableSharedFlow<MotionSample>())
+            doAnswer { newMotionState.value = MotionState.STARTED; null }.`when`(newMotion).start()
+            val newParent = mock(DeviceSession::class.java) { invocation ->
+                if (invocation.method.name.startsWith("addCapabilityByType")) {
+                    DatResult.success<Motion, DeviceSessionError>(newMotion)
+                } else RETURNS_DEFAULTS.answer(invocation)
+            }
+            val newParentState = MutableStateFlow(DeviceSessionState.IDLE)
+            `when`(newParent.state).thenReturn(newParentState)
+            `when`(newParent.errors).thenReturn(MutableSharedFlow<DeviceSessionError>())
+            doAnswer { newParentState.value = DeviceSessionState.STARTED; null }.`when`(newParent).start()
+            val selector = mock(DeviceSelector::class.java)
+            val device = DeviceIdentifier("still-discoverable-glasses")
+            `when`(selector.activeDevice()).thenReturn(device)
+            `when`(selector.activeDeviceFlow()).thenReturn(MutableStateFlow(device))
+            field(plugin, "deviceSelectorRef").set(plugin, selector)
+
+            // Keep the actual plugin and public SDK dispatch, replacing only
+            // session creation so this regression needs no Android/Bluetooth host.
+            val implementation = mock(Class.forName("com.meta.wearable.dat.core.internal.WearablesImpl")) { invocation ->
+                if (invocation.method.name.startsWith("createSession")) {
+                    DatResult.success<DeviceSession, DeviceSessionError>(newParent)
+                } else RETURNS_DEFAULTS.answer(invocation)
+            }
+            sdkInstance.set(null, implementation)
+            val result = mock(MethodChannel.Result::class.java)
+            plugin.onMethodCall(MethodCall("startMotion", mapOf("samplingRate" to 60)), result)
+            advanceUntilIdle()
+
+            verify(result).success(true)
+            assertSame(newParent, field(plugin, "session").get(plugin))
+            assertSame(newMotion, field(plugin, "motion").get(plugin))
+            assertEquals(device.identifier, field(plugin, "sessionDeviceId").get(plugin))
+            verify(newParent).start()
+            verify(newMotion).start()
+            verify(oldParent, never()).stop()
+        } finally {
+            (field(plugin, "scope").get(plugin) as CoroutineScope).cancel()
+            sdkInstance.set(null, originalSdkInstance)
+            Dispatchers.resetMain()
+        }
     }
 
     @Test fun `paused parent rejects adding either sibling without stopping active capability`() = runTest {

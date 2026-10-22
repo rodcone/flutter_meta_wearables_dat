@@ -21,6 +21,7 @@ import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.types.DatResult
+import com.meta.wearable.dat.core.types.DeviceSessionError
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionError
 import com.meta.wearable.dat.core.types.PermissionStatus
@@ -1692,7 +1693,8 @@ class MetaWearablesDatPlugin :
             return
         }
         val existing = motion
-        if (existing != null && existing.state.value != MotionState.STOPPED) {
+        if (existing != null && session?.state?.value != DeviceSessionState.STOPPED &&
+                existing.state.value != MotionState.STOPPED) {
             if (existing.configuration.samplingRate != rate) {
                 result.error("MOTION_ACTIVE", "Stop Motion before changing its sampling rate.", null)
             } else {
@@ -1821,18 +1823,31 @@ class MetaWearablesDatPlugin :
 
     private fun teardownMotionOnly() {
         val current = motion ?: return
+        val parent = session
+        // Discovery may still report this device after its session has ended.
+        // Its children are terminal too; do not retry removal from a dead parent.
+        if (parent?.state?.value == DeviceSessionState.STOPPED) {
+            teardownSession(invalidateStart = false, parentAlreadyStopped = true)
+            return
+        }
         cancelMotionSubscriptions()
         current.stop()
+        var failure: DeviceSessionError? = null
+        parent?.removeMotion()?.onFailure { error, _ -> failure = error }
+        // The parent can finish between the state check above and removeMotion.
+        // DAT's terminal removal result is cleanup, not a retryable detach error.
+        if (failure == DeviceSessionError.SESSION_ALREADY_STOPPED ||
+                parent?.state?.value == DeviceSessionState.STOPPED) {
+            teardownSession(invalidateStart = false, parentAlreadyStopped = true)
+            return
+        }
         motionStateHandler.send("stopped")
-        var failure: String? = null
-        session?.removeMotion()?.onFailure { error, _ ->
-            failure = error.description
+        // Other detach failures retain ownership so a subsequent stop can retry.
+        failure?.let { error ->
             val (code, message) = StreamSessionErrorStreamHandler.mapDeviceSessionError(error)
             motionErrorsHandler.sendError(code, message)
+            throw IllegalStateException(error.description)
         }
-        // On detach failure retain the handle; a later stop can retry. Never
-        // pretend Motion is detached while its parent still owns the capability.
-        failure?.let { throw IllegalStateException(it) }
         motion = null
     }
 
@@ -2129,7 +2144,10 @@ class MetaWearablesDatPlugin :
      * device loss and plugin dispose. The next `startStreamSession` will create
      * a fresh Session.
      */
-    private fun teardownSession(invalidateStart: Boolean = true): Boolean {
+    private fun teardownSession(
+            invalidateStart: Boolean = true,
+            parentAlreadyStopped: Boolean = false,
+    ): Boolean {
         if (invalidateStart) lifecycleGeneration++
         val hadMotion = motion != null
         cancelMotionSubscriptions()
@@ -2141,7 +2159,9 @@ class MetaWearablesDatPlugin :
         deviceAvailabilityJob?.cancel()
         deviceAvailabilityJob = null
         try {
-            session?.stop()
+            if (!parentAlreadyStopped && session?.state?.value != DeviceSessionState.STOPPED) {
+                session?.stop()
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping session: ${e.message}")
             return false
