@@ -32,3 +32,35 @@ connection and recovery; there is no app `pause()` / `resume()` call.
 
 Existing `startStreamSession` / `stopStreamSession` preserve their combined
 connect/start and camera-plus-device-stop behavior.
+
+On Android, a device start waits up to 20 seconds, then requests cleanup if it
+times out. Cleanup can wait a further 10 seconds for the SDK to confirm shutdown.
+`stopDeviceSession` also waits up to 10 seconds and throws `STOP_TIMEOUT` when
+shutdown is unconfirmed. The device-state stream remains `stopping` until the
+SDK reports `stopped`; a retry waits for that confirmation before creating a new
+session. A device-initiated stop emits one terminal `stopped`, after releasing
+the camera and texture. Connection timeouts and failed session creation keep
+`STREAM_ERROR` for legacy `startStreamSession` calls and use
+`DEVICE_SESSION_ERROR` for `startDeviceSession`.
+
+## Android device verification
+
+Use paired glasses with camera permission granted and subscribe to
+`deviceSessionStateStream()` before starting. Native unit tests simulate delayed
+starts and missing stop acknowledgements; these steps check the physical device
+behavior separately:
+
+1. Run the separate-lifecycle sequence above. Confirm that stopping the camera
+   leaves the device connected, and reattaching gives a working preview using
+   the new texture ID.
+2. With a camera stream running, power off the glasses. Confirm the preview is
+   cleared and there is one terminal device `stopped`, with no later `stopping`
+   event. Power the glasses on, wait for availability, and reconnect successfully.
+3. Start a device session, then request `stopDeviceSession` while it is still
+   starting. Confirm that start fails, stop completes when acknowledged, and a
+   later start succeeds. Repeat using the combined `startStreamSession` and
+   `stopStreamSession` calls: the failed start keeps `STREAM_ERROR`, and stop may
+   report `SESSION_NOT_FOUND` if no camera was created. A later start must work.
+4. If a start or stop times out, confirm that no successful connection or new
+   texture is returned while the old session is still stopping. Once the SDK
+   confirms `stopped` and the glasses are available, retry and verify streaming.

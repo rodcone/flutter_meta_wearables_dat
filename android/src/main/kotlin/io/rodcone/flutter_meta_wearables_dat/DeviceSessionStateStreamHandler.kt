@@ -5,7 +5,11 @@ import io.flutter.plugin.common.EventChannel
 internal class DeviceSessionStateStreamHandler : EventChannel.StreamHandler {
     private var sink: EventChannel.EventSink? = null
     private var state = "stopped"
-    fun send(next: String) { state = next; sink?.success(next) }
+    fun send(next: String) {
+        if (state == next) return
+        state = next
+        sink?.success(next)
+    }
     override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
         sink = events
         events.success(state)

@@ -483,7 +483,7 @@ jobs:
       - name: Android unit tests
         working-directory: example/android
         run: ./gradlew :flutter_meta_wearables_dat:testDebugUnitTest
-      - name: Verify Android audio regression tests executed
+      - name: Verify Android audio and lifecycle regression tests executed
         run: python3 scripts/check-android-audio-tests.py
       - name: Android photo-sharing tests
         working-directory: example/android

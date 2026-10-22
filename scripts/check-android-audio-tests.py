@@ -1,10 +1,11 @@
-"""Fail CI if any required native audio suite is absent, empty, skipped or failing."""
+"""Fail CI if required audio/lifecycle suites are absent, empty, skipped or failing."""
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
 root = Path('example/build/flutter_meta_wearables_dat/test-results/testDebugUnitTest')
 for name in ('AudioFrameStreamHandlerTest', 'CameraStreamConfigurationTest',
-             'PermissionRequestCoordinatorTest', 'AndroidAudioLifecycleTest'):
+             'PermissionRequestCoordinatorTest', 'AndroidAudioLifecycleTest',
+             'DeviceSessionLifecycleTest'):
     report = root / f'TEST-io.rodcone.flutter_meta_wearables_dat.{name}.xml'
     if not report.is_file():
         raise SystemExit(f'Missing JUnit report: {report}')
