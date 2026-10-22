@@ -21,6 +21,7 @@ import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.types.DatResult
+import com.meta.wearable.dat.core.types.DeviceSessionError
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionError
 import com.meta.wearable.dat.core.types.PermissionStatus
@@ -39,24 +40,32 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** MetaWearablesDatPlugin */
-class MetaWearablesDatPlugin :
+class MetaWearablesDatPlugin internal constructor(
+        private val initializeSdk: (Application) -> Unit,
+        private val createDeviceSession: (DeviceSelector) -> DatResult<DeviceSession, DeviceSessionError>,
+) :
         FlutterPlugin,
         MethodCallHandler,
         ActivityAware,
         PluginRegistry.ActivityResultListener,
         PluginRegistry.RequestPermissionsResultListener {
+
+    constructor() : this(
+            initializeSdk = { Wearables.initialize(it) },
+            createDeviceSession = { Wearables.createSession(it) },
+    )
 
     companion object {
         private const val TAG = "MetaWearablesDat"
@@ -107,6 +116,11 @@ class MetaWearablesDatPlugin :
     // the same Flutter event channel that Stream.errorStream uses. Cancelled
     // and recreated alongside the session lifecycle.
     private var sessionErrorsJob: Job? = null
+    private var sessionStateJob: Job? = null
+    private val deviceSessionStateHandler = DeviceSessionStateStreamHandler()
+    private var deviceSessionChannel: EventChannel? = null
+    private var lifecycleJob: Job? = null
+    private var lifecycleGeneration = 0L
 
     // Background streaming — tracks whether the foreground service has been
     // started so we can idempotently re-start / stop it, and so we can tear
@@ -172,6 +186,9 @@ class MetaWearablesDatPlugin :
     // reused across stream start/stop toggles; it's only torn down when the
     // device disappears or the plugin is disposed.
     private var session: DeviceSession? = null
+    // Keep ownership until the SDK confirms STOPPED. A late STARTED after a
+    // timeout must not make this session reusable or admit a replacement.
+    private var sessionStopping = false
     // DAT 0.9.0 consolidated stream capability ownership into `Camera`: the
     // session hands out a `Camera`, which owns the `Stream`. Both are kept —
     // the `Camera` because it's the handle that detaches the capability, the
@@ -199,6 +216,7 @@ class MetaWearablesDatPlugin :
     // Guards teardownStreamOnly against re-entry — it is reachable from the
     // method channel, device-loss monitoring and the start-failure paths.
     private var isTearingDownStream = false
+    private var isTearingDownSession = false
     private var deviceAvailabilityJob: Job? = null
     // Texture API — renders I420 frames to a SurfaceTexture
     // instead of encoding to JPEG and copying bytes across the platform channel.
@@ -285,6 +303,10 @@ class MetaWearablesDatPlugin :
                 )
         deviceStateChannel.setStreamHandler(deviceStateStreamHandler)
 
+        deviceSessionChannel = EventChannel(flutterPluginBinding.binaryMessenger,
+                "flutter_meta_wearables_dat/device_session_state").also {
+            it.setStreamHandler(deviceSessionStateHandler)
+        }
         textureRegistry = flutterPluginBinding.textureRegistry
 
         val context = flutterPluginBinding.applicationContext
@@ -361,8 +383,8 @@ class MetaWearablesDatPlugin :
         // backgrounding, so the stop cascade completes normally. Do not port
         // that machinery over.
         teardownSession()
-        // Teardown is synchronous here, so the window can close immediately
-        // rather than riding out the timeout.
+        // Stream/error subscriptions are detached synchronously; the remaining
+        // session-state observer only waits for the shutdown acknowledgement.
         streamSessionErrorStreamHandler?.endBackgroundStopSuppression()
     }
 
@@ -406,8 +428,39 @@ class MetaWearablesDatPlugin :
                 activeDeviceStreamHandler?.restartMonitoring()
                 result.success(true)
             }
-            "startStreamSession" -> startStreamSession(call, result)
-            "stopStreamSession" -> stopStreamSession(call, result)
+            "startDeviceSession", "startCameraStream", "startStreamSession" ->
+                enqueueLifecycle(call, result) { reply -> startStreamSession(call, reply) }
+            "stopCameraStream", "stopDeviceSession", "stopStreamSession" -> {
+                lifecycleGeneration++
+                enqueueLifecycle(call, result) { reply ->
+                    when (call.method) {
+                        "stopCameraStream" -> scope.launch {
+                            val stoppingStream = stream
+                            val stoppingCamera = camera
+                            teardownStreamOnly()
+                            val stopped = withTimeoutOrNull(3_000L) {
+                                stoppingStream?.state?.first {
+                                    it == com.meta.wearable.dat.camera.types.StreamState.STOPPED ||
+                                    it == com.meta.wearable.dat.camera.types.StreamState.CLOSED
+                                }
+                                true
+                            } ?: false
+                            // Keep capability ownership through the shutdown acknowledgement.
+                            if (!stopped && stoppingCamera != null) {
+                                reply.error("STOP_TIMEOUT", "Camera shutdown did not complete.", null)
+                            } else reply.success(true)
+                        }
+                        "stopDeviceSession" -> scope.launch {
+                            val stopping = session
+                            teardownSession()
+                            val stopped = awaitSessionStopped(stopping)
+                            if (!stopped) reply.error("STOP_TIMEOUT", "Device shutdown did not complete.", null)
+                            else reply.success(true)
+                        }
+                        else -> stopStreamSession(call, reply)
+                    }
+                }
+            }
             "capturePhoto" -> capturePhoto(call, result)
             "enableBackgroundStreaming" -> enableBackgroundStreaming(call, result)
             "disableBackgroundStreaming" -> disableBackgroundStreaming(result)
@@ -418,6 +471,8 @@ class MetaWearablesDatPlugin :
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        deviceSessionChannel?.setStreamHandler(null)
+        deviceSessionChannel = null
         channel.setMethodCallHandler(null)
         activeDeviceChannel.setStreamHandler(null)
         activeDeviceStreamHandler?.dispose()
@@ -1128,7 +1183,33 @@ class MetaWearablesDatPlugin :
     private val mustNotStreamNow: Boolean
         get() = isAppInBackground && !backgroundStreamingStarted
 
+    private fun enqueueLifecycle(call: MethodCall, result: Result, operation: (Result) -> Unit) {
+        val previous = lifecycleJob
+        val generation = lifecycleGeneration
+        // Preserve immediate admission and audio invalidation when the queue is idle.
+        lifecycleJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            previous?.join()
+            if (call.method.startsWith("start") && generation != lifecycleGeneration) {
+                result.error("START_CANCELLED", "Start superseded by stop.", null)
+                return@launch
+            }
+            val done = CompletableDeferred<Unit>()
+            operation(object : Result {
+                override fun success(value: Any?) { result.success(value); done.complete(Unit) }
+                override fun error(code: String, message: String?, details: Any?) {
+                    result.error(code, message, details); done.complete(Unit)
+                }
+                override fun notImplemented() { result.notImplemented(); done.complete(Unit) }
+            })
+            done.await()
+        }
+    }
+
     private fun startStreamSession(call: MethodCall, result: Result) {
+        val connectionOnly = call.method == "startDeviceSession"
+        val cameraOnly = call.method == "startCameraStream"
+        val connectionErrorCode = if (call.method == "startStreamSession") "STREAM_ERROR" else "DEVICE_SESSION_ERROR"
+        val generation = lifecycleGeneration
         val app = application
         if (app == null) {
             result.error("STREAM_ERROR", "Application context is not available.", null)
@@ -1198,6 +1279,15 @@ class MetaWearablesDatPlugin :
         // Same selection → return the existing texture; a *different* device →
         // caller must stop first; a stale (terminal) stream is torn down and
         // recreated below.
+        if (cameraOnly && (sessionStopping || session?.state?.value != DeviceSessionState.STARTED || deviceId != pinnedDeviceId)) {
+            result.error("DEVICE_SESSION_NOT_READY", "Start the matching device session first.", null)
+            return
+        }
+        if (connectionOnly && !sessionStopping && session != null && deviceId == pinnedDeviceId &&
+            session?.state?.value?.name in listOf("STARTED", "PAUSED")) {
+            result.success(true)
+            return
+        }
         val existingStream = stream
         if (existingStream != null) {
             val st = existingStream.state.value
@@ -1267,14 +1357,26 @@ class MetaWearablesDatPlugin :
             try {
                 ensureWearablesInitialized()
 
+                // A previous timed-out start/stop still owns its SDK session
+                // until STOPPED. Do not create another or reuse a late STARTED.
+                if (sessionStopping && !awaitSessionStopped(session)) {
+                    result.error(connectionErrorCode, "Previous device session is still stopping.", null)
+                    return@launch
+                }
+
                 // Apply a pin change (or clear) before creating the session:
                 // rebuild the shared selector and rebind every observer. The
                 // availability watchdog is relaunched by ensureSessionStarted()
                 // below (it re-reads deviceSelector()).
                 val pinChanged = deviceId != pinnedDeviceId
                 if (pinChanged) {
-                    pinnedDeviceId = deviceId
+                    val stopping = session
                     teardownSession()
+                    if (!awaitSessionStopped(stopping)) {
+                        result.error(connectionErrorCode, "Previous device session is still stopping.", null)
+                        return@launch
+                    }
+                    pinnedDeviceId = deviceId
                     deviceSelectorRef = makeDeviceSelector()
                     activeDeviceStreamHandler?.restartMonitoring(force = true)
                     deviceStateStreamHandler?.restartMonitoring(force = true)
@@ -1290,6 +1392,19 @@ class MetaWearablesDatPlugin :
                     }
                 }
 
+                val connectedSession = if (cameraOnly) session else withTimeoutOrNull(20_000L) { ensureSessionStarted() }
+                if (connectedSession == null || sessionStopping || generation != lifecycleGeneration || session !== connectedSession || connectedSession.state.value != DeviceSessionState.STARTED || mustNotStreamNow) {
+                    if (!cameraOnly && connectedSession != null && session === connectedSession) {
+                        teardownSession()
+                    }
+                    if (sessionStopping) awaitSessionStopped(session)
+                    result.error(connectionErrorCode, "Device session start failed or was cancelled.", null)
+                    return@launch
+                }
+                if (connectionOnly) {
+                    result.success(true)
+                    return@launch
+                }
                 sessionKey = key
                 frameProcessor.configure(fps)
 
@@ -1312,15 +1427,7 @@ class MetaWearablesDatPlugin :
                 val textureId = entry.id()
                 Log.d(TAG, "Registered texture $textureId for session $key")
 
-                val activeSession = ensureSessionStarted() ?: run {
-                    teardownStreamOnly()
-                    result.error(
-                            "STREAM_ERROR",
-                            "Failed to create or start device session.",
-                            null,
-                    )
-                    return@launch
-                }
+                val activeSession = connectedSession
 
                 // DAT 0.9.0 replaced `addStream` with `addCamera`; the returned
                 // `Camera` owns the stream.
@@ -1461,7 +1568,7 @@ class MetaWearablesDatPlugin :
                 // which is ample time for the user to background the app
                 // mid-start. Committing anyway would leave a live stream
                 // running in a backgrounded app that nothing will stop.
-                if (mustNotStreamNow) {
+                if (mustNotStreamNow || sessionStopping || generation != lifecycleGeneration || session !== connectedSession) {
                     Log.d(TAG, "app backgrounded during start — abandoning")
                     teardownStreamOnly()
                     result.error(
@@ -1476,6 +1583,7 @@ class MetaWearablesDatPlugin :
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start stream session", e)
                 teardownStreamOnly()
+                if (sessionStopping) awaitSessionStopped(session)
                 result.error("STREAM_ERROR", e.message ?: "Failed to start stream session.", null)
             } finally {
                 startInProgress = false
@@ -1485,23 +1593,23 @@ class MetaWearablesDatPlugin :
 
     /**
      * Lazily create and start a [DeviceSession], reusing an existing one
-     * across stream start/stop toggles. Returns `null` if creation or
-     * start-up failed (an error has already been pushed onto the error stream).
+     * across camera start/stop toggles. Returns `null` if the current session
+     * is not ready, or creation/start-up failed.
      */
     private suspend fun ensureSessionStarted(): DeviceSession? {
         val existing = session
         if (existing != null) {
-            val currentState = existing.state.firstOrNull()
-            if (currentState == DeviceSessionState.STARTED) {
-                return existing
-            }
+            // Never overwrite a non-started session. In particular, PAUSED
+            // belongs to the SDK's recovery path and STOPPING still owns the
+            // device until its terminal acknowledgement.
+            return existing.takeIf { !sessionStopping && it.state.value == DeviceSessionState.STARTED }
         }
 
         // Capture the auto-selector's current pick *before* createSession so a
         // later A→B switch can't misattribute which device this session bound.
         val candidate = deviceSelector().activeDevice()?.identifier
         var created: DeviceSession? = null
-        Wearables.createSession(deviceSelector())
+        createDeviceSession(deviceSelector())
                 .onSuccess {
                     created = it
                     sessionDeviceId = candidate
@@ -1521,38 +1629,54 @@ class MetaWearablesDatPlugin :
 
         val newSession = created ?: return null
         session = newSession
-        newSession.start()
-
-        // 0.7.0: subscribe to DeviceSession.errors so session-scoped errors
-        // (thermal, battery, peakPower, datAppUpdate, dwaUnavailable) reach
-        // Dart on the same event channel as stream errors. Replace any
-        // previous subscription — sessions are reused across start/stop
-        // toggles, but this is the canonical point to (re-)attach.
-        sessionErrorsJob?.cancel()
-        sessionErrorsJob =
-                scope.launch {
-                    newSession.errors.collect { error ->
-                        streamSessionErrorStreamHandler?.send(error)
+        sessionStopping = false
+        sessionStateJob?.cancel()
+        sessionStateJob = scope.launch {
+            newSession.state.collect { state ->
+                if (session === newSession) {
+                    if (state == DeviceSessionState.STOPPED) {
+                        teardownSession()
+                    } else if (!sessionStopping) {
+                        if (state == DeviceSessionState.STOPPING) {
+                            sessionStopping = true
+                            deviceSessionStateHandler.send("stopping")
+                            // The SDK initiated shutdown. Release the camera
+                            // now, but keep observing the terminal confirmation.
+                            teardownSession()
+                        } else {
+                            deviceSessionStateHandler.send(state.name.lowercase())
+                        }
                     }
                 }
-
-        // Wait until the session transitions to STARTED before we try to add a
-        // stream — mirrors the reference app pattern. Also bail on a terminal
-        // STOPPED so a session torn down underneath us can't hang the awaiter.
-        val reached =
-                newSession.state.first {
-                    it == DeviceSessionState.STARTED || it == DeviceSessionState.STOPPED
-                }
-        if (reached != DeviceSessionState.STARTED) {
-            Log.w(TAG, "Session reached $reached before STARTED; aborting start")
-            return null
+            }
         }
+        var started = false
+        try {
+            // Subscribe before start so synchronous session failures are seen.
+            sessionErrorsJob?.cancel()
+            sessionErrorsJob = scope.launch {
+                newSession.errors.collect { error ->
+                    streamSessionErrorStreamHandler?.send(error)
+                }
+            }
+            newSession.start()
 
-        // Subscribe to the active-device flow so we tear the Session down
-        // when the device disappears. Safe to call multiple times.
-        startDeviceAvailabilityMonitoring()
+            // The caller bounds this wait. Its timeout cancels this coroutine,
+            // so cleanup must live in finally, not after first() returns.
+            val reached = newSession.state.first {
+                it == DeviceSessionState.STARTED || it == DeviceSessionState.STOPPED
+            }
+            if (reached != DeviceSessionState.STARTED || session !== newSession || sessionStopping) {
+                Log.w(TAG, "Session reached $reached before start completed; aborting start")
+                return null
+            }
 
-        return newSession
+            startDeviceAvailabilityMonitoring()
+            started = true
+            return newSession
+        } finally {
+            if (!started && session === newSession) teardownSession()
+        }
     }
 
     private fun startDeviceAvailabilityMonitoring() {
@@ -1590,10 +1714,9 @@ class MetaWearablesDatPlugin :
         // both platforms. Trade-off: the next startStreamSession is a full
         // session reconnect rather than a fast addCamera.
         //
-        // Unlike iOS there is no await-the-cascade machinery here: Kotlin
-        // objects are not deterministically freed when the plugin drops its
-        // references, so the SDK's stop cascade runs regardless. Do not port
-        // the iOS awaitDeviceSessionStopped over.
+        // Preserve the legacy reply timing: request shutdown and return. The
+        // state observer retains session ownership until the SDK acknowledges
+        // STOPPED, and a subsequent start waits for that acknowledgement.
         teardownSession()
         result.success(true)
     }
@@ -1886,22 +2009,62 @@ class MetaWearablesDatPlugin :
 
     /**
      * Tear down the entire session, including the active stream. Called on
-     * device loss and plugin dispose. The next `startStreamSession` will create
-     * a fresh Session.
+     * device loss and plugin dispose. Release stream resources immediately, but
+     * retain session ownership and its state observer until the SDK confirms
+     * STOPPED. Only then can a subsequent start create a fresh session.
      */
     private fun teardownSession() {
+        if (isTearingDownSession) return
+        isTearingDownSession = true
+        try {
+            teardownSessionLocked()
+        } finally {
+            isTearingDownSession = false
+        }
+    }
+
+    private fun teardownSessionLocked() {
+        val stopping = session
         teardownStreamOnly()
         sessionErrorsJob?.cancel()
         sessionErrorsJob = null
         deviceAvailabilityJob?.cancel()
         deviceAvailabilityJob = null
+        if (stopping == null) return
+        if (stopping.state.value == DeviceSessionState.STOPPED) {
+            finishSessionStop(stopping)
+            return
+        }
+        if (sessionStopping) return
+        sessionStopping = true
+        deviceSessionStateHandler.send("stopping")
         try {
-            session?.stop()
+            stopping.stop()
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping session: ${e.message}")
         }
+        if (stopping.state.value == DeviceSessionState.STOPPED) finishSessionStop(stopping)
+    }
+
+    private fun finishSessionStop(stopped: DeviceSession) {
+        if (session !== stopped) return
+        sessionStateJob?.cancel()
+        sessionStateJob = null
         session = null
         sessionDeviceId = null
+        sessionStopping = false
+        deviceSessionStateHandler.send("stopped")
+    }
+
+    private suspend fun awaitSessionStopped(stopping: DeviceSession?): Boolean {
+        if (stopping == null) return true
+        val stopped = withTimeoutOrNull(10_000L) {
+            stopping.state.first { it == DeviceSessionState.STOPPED }
+            true
+        } ?: false
+        // Complete cleanup even if this waiter resumes before the observer.
+        if (stopped && session === stopping) teardownSession()
+        return stopped
     }
 
     // endregion
@@ -1916,7 +2079,7 @@ class MetaWearablesDatPlugin :
             return
         }
         val app = application ?: return
-        Wearables.initialize(app)
+        initializeSdk(app)
         if (!wearablesInitializedLogged) {
             Log.d(TAG, "ensureWearablesInitialized — Wearables.initialize() called")
             wearablesInitializedLogged = true
