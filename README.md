@@ -4,7 +4,7 @@
 [![Pub Downloads](https://img.shields.io/pub/dm/flutter_meta_wearables_dat)](https://pub.dev/packages/flutter_meta_wearables_dat)
 [![style: very good analysis](https://img.shields.io/badge/style-very_good_analysis-B22C89.svg)](https://pub.dev/packages/very_good_analysis)
 
-[![Docs](https://img.shields.io/badge/API_Reference-0.9-blue?logo=meta)](https://wearables.developer.meta.com/docs/reference/ios_swift/dat/0.9)
+[![Docs](https://img.shields.io/badge/API_Reference-1.0-blue?logo=meta)](https://wearables.developer.meta.com/docs/reference/ios_swift/dat/1.0)
 
 # flutter_meta_wearables_dat
 
