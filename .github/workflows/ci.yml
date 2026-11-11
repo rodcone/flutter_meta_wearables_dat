@@ -250,6 +250,10 @@ jobs:
           xcode-version: latest-stable
       - name: Native iOS stream lifecycle regressions
         run: sh scripts/test-ios-stream-lifecycle.sh
+      - name: Test iOS Motion channels and lifecycle
+        run: sh scripts/test-ios-motion.sh
+      - name: Test shared camera and Motion session policy
+        run: sh scripts/test-ios-shared-session.sh
 
   # Gate on a perfect pub.dev score for both packages. pana is the analyzer
   # behind pub.dev's "pub points"; --exit-code-threshold 0 fails the job when

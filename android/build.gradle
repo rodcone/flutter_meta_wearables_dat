@@ -57,6 +57,7 @@ android {
     dependencies {
         implementation("com.meta.wearable:mwdat-core:$mwdat_version")
         implementation("com.meta.wearable:mwdat-camera:$mwdat_version")
+        implementation("com.meta.wearable:mwdat-motion:$mwdat_version")
         implementation("androidx.emoji2:emoji2:1.5.0")
         // Required for ActivityResultRegistry and ComponentActivity
         implementation("androidx.activity:activity-ktx:1.9.3")

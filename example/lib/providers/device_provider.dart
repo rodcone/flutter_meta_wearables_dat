@@ -8,8 +8,8 @@ class DeviceProvider extends ChangeNotifier {
   bool? _hasCameraPermissionGranted;
   RegistrationState? _registrationState;
   StreamSubscription<RegistrationState>? _registrationStateSubscription;
-  // Gates the register-transition side effects (active-device restart +
-  // camera-permission auto-request) so they only fire on a genuine state
+  // Gates the register-transition side effect (active-device restart)
+  // so it only fires on a genuine state
   // change, never while seeding the initial state on launch.
   bool _initialized = false;
 
@@ -174,13 +174,8 @@ class DeviceProvider extends ChangeNotifier {
     // Fresh (re-)registration. Re-subscribe the plugin to the device flow so it
     // picks up the newly available device…
     unawaited(MetaWearablesDat.restartActiveDeviceMonitoring());
-    // …and re-request camera permission. Unregistration revokes it, and the SDK
-    // will not surface the glasses in its device flow until at least one
-    // permission is granted again via Meta AI — so without this the user is
-    // stranded behind a Start button that never enables. This is a no-op (no
-    // Meta AI navigation) when permission is already granted, e.g. right after
-    // first-time onboarding.
-    unawaited(requestCameraPermission());
+    // Camera permission is requested only by the camera action. Motion does
+    // not need it, including immediately after registration.
   }
 
   Future<void> refreshCameraPermissionStatus({bool notify = true}) async {
@@ -199,7 +194,7 @@ class DeviceProvider extends ChangeNotifier {
       if (e.isDeviceDisconnected) {
         // Expected while the glasses are still (re)connecting — not a denial.
         // Leave the status unknown; it resolves once a device is active or the
-        // user re-grants permission (auto-requested on the register transition).
+        // user grants permission from the camera action.
         _hasCameraPermissionGranted = null;
       } else {
         debugPrint('[MetaWearablesDAT] Camera permission status error: $e');

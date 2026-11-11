@@ -25,6 +25,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 xcframeworks=(
   "$repo_root/ios/flutter_meta_wearables_dat/Frameworks/MWDATCore.xcframework"
   "$repo_root/ios/flutter_meta_wearables_dat/Frameworks/MWDATCamera.xcframework"
+  "$repo_root/ios/flutter_meta_wearables_dat/Frameworks/MWDATMotion.xcframework"
   "$repo_root/flutter_meta_wearables_dat_mock_device/ios/flutter_meta_wearables_dat_mock_device/Frameworks/MWDATMockDevice.xcframework"
 )
 

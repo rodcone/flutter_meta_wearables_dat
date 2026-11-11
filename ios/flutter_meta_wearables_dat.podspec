@@ -22,11 +22,12 @@ capture, and background streaming on iOS 17.2+.
   s.static_framework = true
   s.vendored_frameworks = [
     'flutter_meta_wearables_dat/Frameworks/MWDATCore.xcframework',
-    'flutter_meta_wearables_dat/Frameworks/MWDATCamera.xcframework'
+    'flutter_meta_wearables_dat/Frameworks/MWDATCamera.xcframework',
+    'flutter_meta_wearables_dat/Frameworks/MWDATMotion.xcframework'
   ]
   s.preserve_paths = 'flutter_meta_wearables_dat/Frameworks/*.xcframework'
   s.frameworks = 'CoreBluetooth', 'Network', 'AVFoundation', 'Accelerate', 'VideoToolbox'
-  s.xcconfig = { 'OTHER_LDFLAGS' => '-framework MWDATCamera -framework MWDATCore' }
+  s.xcconfig = { 'OTHER_LDFLAGS' => '-framework MWDATCamera -framework MWDATCore -framework MWDATMotion' }
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386', 'OTHER_LDFLAGS' => '-lc++' }

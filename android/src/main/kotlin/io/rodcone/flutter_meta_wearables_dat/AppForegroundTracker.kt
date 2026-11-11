@@ -32,11 +32,11 @@ import java.util.WeakHashMap
  * 1. **Identity set, not a counter.** A counter can be corrupted by a missed
  *    callback and can go negative; a set cannot double-count. Held weakly so a
  *    leaked Activity cannot pin the app in the "foreground" state forever.
- * 2. **Edge-triggered, and only after we have seen a foreground.** If the
- *    plugin attached after the Activity already started — cached engine,
- *    add-to-app — we never observed the start, so we never claim a background
- *    transition. Failing closed keeps a live stream alive; failing open would
- *    kill it.
+ * 2. **Edge-triggered, and only after we have seen a foreground.** Observe
+ *    both start and resume: Flutter can attach the engine after the start
+ *    callback during Activity startup. Resume still establishes that the
+ *    Activity is foregrounded before its first stop. A stop with neither
+ *    callback remains ignored.
  * 3. **Configuration changes are not backgrounding.** `isChangingConfigurations`
  *    filters rotation and `Activity.recreate()`.
  * 4. **Debounce before reporting.** Android can deliver `A.onStop` after
@@ -106,7 +106,11 @@ internal class AppForegroundTracker(
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
 
-    override fun onActivityResumed(activity: Activity) = Unit
+    override fun onActivityResumed(activity: Activity) {
+        // The identity set makes start + resume idempotent. This also catches
+        // engine attachment after onActivityStarted but before onActivityResumed.
+        onActivityStarted(activity)
+    }
 
     override fun onActivityPaused(activity: Activity) = Unit
 

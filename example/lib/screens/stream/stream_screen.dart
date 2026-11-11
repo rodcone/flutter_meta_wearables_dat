@@ -256,6 +256,16 @@ class _StreamScreenState extends State<StreamScreen> {
                     // Show Start button only when not streaming and not
                     // mid-reconnect (auto-recovery drives its own restart).
                     if (!streamProvider.isStreaming &&
+                        !streamProvider.isRecovering &&
+                        !canStart &&
+                        deviceProvider.hasCameraPermissionGranted != true)
+                      MetaButton.text(
+                        text: 'Enable camera',
+                        onPressed: () async {
+                          await deviceProvider.ensureCameraPermission();
+                        },
+                      ),
+                    if (!streamProvider.isStreaming &&
                         !streamProvider.isRecovering)
                       MetaButton.text(
                         text: 'Start streaming',

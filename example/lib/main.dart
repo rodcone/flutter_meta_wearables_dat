@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_meta_wearables_dat/flutter_meta_wearables_dat.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/device_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provider.dart';
+import 'package:flutter_meta_wearables_dat_example/providers/motion_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/home/home_screen.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/mock_device/mock_device_sheet.dart';
+import 'package:flutter_meta_wearables_dat_example/screens/motion/motion_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/settings/settings_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/stream/paired_devices_sheet.dart';
 import 'package:flutter_meta_wearables_dat_example/screens/stream/stream_screen.dart';
@@ -104,6 +106,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       providers: [
         ChangeNotifierProvider(create: (_) => DeviceProvider()),
         ChangeNotifierProvider(create: (_) => MockDeviceProvider()),
+        ChangeNotifierProvider(create: (_) => MotionProvider(), lazy: false),
         ChangeNotifierProxyProvider2<
           DeviceProvider,
           MockDeviceProvider,
@@ -130,6 +133,29 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    if (deviceProvider.isRegistered)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 5),
+                        child: FloatingActionButton.small(
+                          heroTag: 'motion',
+                          backgroundColor: Colors.blueAccent,
+                          tooltip: 'Motion',
+                          onPressed: () {
+                            HapticFeedback.lightImpact();
+                            showModalBottomSheet<void>(
+                              isScrollControlled: true,
+                              context: context,
+                              builder: (ctx) => MotionSheet(
+                                deviceId: streamProvider.selectedDeviceId,
+                              ),
+                            );
+                          },
+                          child: const Icon(
+                            Icons.screen_rotation_alt,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
                     // Paired devices — only worth surfacing when more than one
                     // device is connected, since the sheet exists to switch
                     // between active pairs. Stays reachable while streaming.

@@ -76,6 +76,32 @@ class AppForegroundTrackerTest {
     }
 
     @Test
+    fun `attach after start observes resume before the first background`() {
+        val a = activity()
+        // Flutter can attach its engine during Activity startup after the
+        // application's onActivityStarted callback has already been delivered.
+        tracker.onActivityResumed(a)
+        tracker.onActivityStopped(a)
+        scheduler.advance()
+
+        assertEquals(1, backgroundCount)
+        tracker.onActivityStarted(a)
+        tracker.onActivityResumed(a)
+        assertEquals(1, foregroundCount)
+    }
+
+    @Test
+    fun `start and resume do not count the same activity twice`() {
+        val a = activity()
+        tracker.onActivityStarted(a)
+        tracker.onActivityResumed(a)
+        tracker.onActivityStopped(a)
+        scheduler.advance()
+
+        assertEquals(1, backgroundCount)
+    }
+
+    @Test
     fun `activity to activity transition is not a background`() {
         // Android guarantees A.onPause -> B.onStart -> A.onStop, so the set is
         // never empty. A per-activity onStop hook gets this wrong.

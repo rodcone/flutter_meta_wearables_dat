@@ -166,7 +166,7 @@ internal class StreamSessionErrorStreamHandler : EventChannel.StreamHandler {
             return code to description
         }
 
-        private fun mapDeviceSessionError(
+        internal fun mapDeviceSessionError(
                 error: DeviceSessionError
         ): Pair<String, String> {
             val identifier = error.toString().uppercase()
