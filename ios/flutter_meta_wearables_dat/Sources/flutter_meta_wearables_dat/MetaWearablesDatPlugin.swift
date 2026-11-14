@@ -271,6 +271,11 @@ public class MetaWearablesDatPlugin: NSObject, FlutterPlugin {
     }
   }
 
+  public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
+    deviceStateHandler?.dispose()
+    deviceStateHandler = nil
+  }
+
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
       case "requestAndroidPermissions":

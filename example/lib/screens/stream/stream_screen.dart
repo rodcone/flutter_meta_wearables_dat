@@ -8,6 +8,7 @@ import 'package:flutter_meta_wearables_dat_example/providers/mock_device_provide
 import 'package:flutter_meta_wearables_dat_example/providers/stream_provider.dart'
     as stream_providers;
 import 'package:flutter_meta_wearables_dat_example/shared/widgets/meta_button.dart';
+import 'package:flutter_meta_wearables_dat_example/screens/stream/device_state_card.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -118,215 +119,232 @@ class _StreamScreenState extends State<StreamScreen> {
         // previously pinned pair has gone away.
         final canStart = streamProvider.canStartSelected;
 
-        return Stack(
-          children: [
-            // Full screen video stream, reconnecting overlay, or placeholder
-            Positioned.fill(
-              child:
-                  streamProvider.isStreaming && streamProvider.textureId != null
-                  ? _TextureStreamWidget(
-                      textureId: streamProvider.textureId!,
-                      videoStreamSize: streamProvider.videoStreamSize,
-                    )
-                  : streamProvider.isRecovering
-                  ? const _ReconnectingView()
-                  : ColoredBox(
-                      color: Colors.black,
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Image.asset(
-                              'assets/images/cameraAccessIcon.png',
-                              width: 120,
-                              color: Colors.white,
-                              colorBlendMode: BlendMode.srcIn,
-                            ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Stream Your Glasses Camera',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              // While blocked, Start is disabled — say why,
-                              // otherwise a greyed-out button reads as a bug.
-                              child: Text(
-                                streamProvider.pendingUserActionHint ??
-                                    'Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  color:
-                                      streamProvider.pendingUserAction != null
-                                      ? Colors.amber.shade200
-                                      : Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
+        final preview =
+            streamProvider.isStreaming && streamProvider.textureId != null
+            ? _TextureStreamWidget(
+                textureId: streamProvider.textureId!,
+                videoStreamSize: streamProvider.videoStreamSize,
+              )
+            : streamProvider.isRecovering
+            ? const _ReconnectingView()
+            : ColoredBox(
+                color: Colors.black,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/images/cameraAccessIcon.png',
+                        width: 120,
+                        color: Colors.white,
+                        colorBlendMode: BlendMode.srcIn,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Stream Your Glasses Camera',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
                         ),
                       ),
-                    ),
-            ),
-            // Keep thermal monitoring visible even before the first reading.
-            if (streamProvider.isStreaming)
-              Positioned(
-                top: 0,
-                left: 0,
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: _ThermalChip(level: streamProvider.thermalLevel),
+                      const SizedBox(height: 12),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                        ),
+                        // While blocked, Start is disabled — say why,
+                        // otherwise a greyed-out button reads as a bug.
+                        child: Text(
+                          streamProvider.pendingUserActionHint ??
+                              'Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: streamProvider.pendingUserAction != null
+                                ? Colors.amber.shade200
+                                : Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            // Controls overlay at the bottom
-            Positioned(
-              bottom: 24,
-              left: 0,
-              right: 0,
-              child: SafeArea(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Session state label ("Reconnecting…" takes precedence
-                    // while auto-recovery is in flight).
-                    if (streamProvider.isRecovering)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 5),
-                        child: Text(
-                          'Reconnecting…',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.white.withOpacity(0.7),
-                          ),
-                        ),
-                      )
-                    else if (streamProvider.sessionState != null &&
-                        streamProvider.sessionState !=
-                            StreamSessionState.streaming &&
-                        streamProvider.sessionState !=
-                            StreamSessionState.stopped)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 5),
-                        child: Text(
-                          _sessionStateLabel(streamProvider.sessionState!),
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.white.withOpacity(0.7),
-                          ),
-                        ),
-                      ),
-                    // Show "Waiting for an active device" message when no device is available
-                    // Always render it but control visibility with opacity (like native sample app)
-                    Opacity(
-                      opacity: canStart || streamProvider.isRecovering
-                          ? 0.0
-                          : 1.0,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 5),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.hourglass_empty,
-                              size: 16,
-                              color: Colors.white.withOpacity(0.7),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Waiting for an active device',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.white.withOpacity(0.7),
-                              ),
-                            ),
-                          ],
-                        ),
+              );
+        // Metadata is available before starting a camera session.
+        final status = SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: DeviceStateCard(
+              state: streamProvider.deviceState,
+              deviceName: streamProvider.monitoredDeviceName,
+            ),
+          ),
+        );
+        final controls = Padding(
+          padding: const EdgeInsets.only(bottom: 24),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Session state label ("Reconnecting…" takes precedence
+                // while auto-recovery is in flight).
+                if (streamProvider.isRecovering)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 5),
+                    child: Text(
+                      'Reconnecting…',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.white.withOpacity(0.7),
                       ),
                     ),
-                    // Show Start button only when not streaming and not
-                    // mid-reconnect (auto-recovery drives its own restart).
-                    if (!streamProvider.isStreaming &&
-                        !streamProvider.isRecovering)
-                      MetaButton.text(
-                        text: 'Start streaming',
-                        enabled: canStart,
+                  )
+                else if (streamProvider.sessionState != null &&
+                    streamProvider.sessionState !=
+                        StreamSessionState.streaming &&
+                    streamProvider.sessionState != StreamSessionState.stopped)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 5),
+                    child: Text(
+                      _sessionStateLabel(streamProvider.sessionState!),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.white.withOpacity(0.7),
+                      ),
+                    ),
+                  ),
+                // Show "Waiting for an active device" message when no device is available
+                // Always render it but control visibility with opacity (like native sample app)
+                Opacity(
+                  opacity: canStart || streamProvider.isRecovering ? 0.0 : 1.0,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 5),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.hourglass_empty,
+                          size: 16,
+                          color: Colors.white.withOpacity(0.7),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            'Waiting for an active device',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.white.withOpacity(0.7),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Show Start button only when not streaming and not
+                // mid-reconnect (auto-recovery drives its own restart).
+                if (!streamProvider.isStreaming && !streamProvider.isRecovering)
+                  MetaButton.text(
+                    text: 'Start streaming',
+                    enabled: canStart,
+                    onPressed: () async {
+                      unawaited(HapticFeedback.mediumImpact());
+
+                      if (!canStart) return;
+
+                      final hasPermission = await deviceProvider
+                          .ensureCameraPermission();
+                      if (!hasPermission || !context.mounted) return;
+
+                      await streamProvider.startStreamSession();
+                    },
+                  ),
+                // Show Stop button only when streaming
+                if (streamProvider.isStreaming)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: MetaButton.text(
+                          text: 'Stop streaming',
+                          onPressed: () {
+                            streamProvider.stopStreamSession();
+                          },
+                          color: Colors.red,
+                        ),
+                      ),
+                      MetaButton.icon(
+                        icon: const Icon(Icons.camera_alt),
+                        // Shooting and transferring the photo off the
+                        // glasses takes a few seconds before the share
+                        // sheet can open — without this the tap looks
+                        // like it did nothing.
+                        loading: streamProvider.isCapturingPhoto,
                         onPressed: () async {
                           unawaited(HapticFeedback.mediumImpact());
 
-                          if (!canStart) return;
-
-                          final hasPermission = await deviceProvider
-                              .ensureCameraPermission();
-                          if (!hasPermission || !context.mounted) return;
-
-                          await streamProvider.startStreamSession();
-                        },
-                      ),
-                    // Show Stop button only when streaming
-                    if (streamProvider.isStreaming)
-                      Row(
-                        children: [
-                          Expanded(
-                            child: MetaButton.text(
-                              text: 'Stop streaming',
-                              onPressed: () {
-                                streamProvider.stopStreamSession();
-                              },
-                              color: Colors.red,
-                            ),
-                          ),
-                          MetaButton.icon(
-                            icon: const Icon(Icons.camera_alt),
-                            // Shooting and transferring the photo off the
-                            // glasses takes a few seconds before the share
-                            // sheet can open — without this the tap looks
-                            // like it did nothing.
-                            loading: streamProvider.isCapturingPhoto,
-                            onPressed: () async {
-                              unawaited(HapticFeedback.mediumImpact());
-
-                              final photo = await streamProvider.capturePhoto();
-                              if (photo == null || !context.mounted) {
-                                return;
-                              }
-                              final box =
-                                  context.findRenderObject() as RenderBox?;
-                              final shareOrigin = box == null
-                                  ? null
-                                  : box.localToGlobal(Offset.zero) & box.size;
-                              await SharePlus.instance.share(
-                                ShareParams(
-                                  files: [
-                                    XFile.fromData(
-                                      photo.bytes,
-                                      mimeType: photo.mimeType,
-                                    ),
-                                  ],
-                                  fileNameOverrides: [
-                                    'captured_photo.${photo.fileExtension}',
-                                  ],
-                                  sharePositionOrigin: shareOrigin,
+                          final photo = await streamProvider.capturePhoto();
+                          if (photo == null || !context.mounted) {
+                            return;
+                          }
+                          final box = context.findRenderObject() as RenderBox?;
+                          final shareOrigin = box == null
+                              ? null
+                              : box.localToGlobal(Offset.zero) & box.size;
+                          await SharePlus.instance.share(
+                            ShareParams(
+                              files: [
+                                XFile.fromData(
+                                  photo.bytes,
+                                  mimeType: photo.mimeType,
                                 ),
-                              );
-                            },
-                            color: Colors.blue,
-                          ),
-                        ],
+                              ],
+                              fileNameOverrides: [
+                                'captured_photo.${photo.fileExtension}',
+                              ],
+                              sharePositionOrigin: shareOrigin,
+                            ),
+                          );
+                        },
+                        color: Colors.blue,
                       ),
-                  ],
-                ),
-              ),
+                    ],
+                  ),
+              ],
             ),
+          ),
+        );
+
+        if (!streamProvider.isStreaming && !streamProvider.isRecovering) {
+          // Let the readout, instructions, and controls scroll together when
+          // enlarged text or a short screen needs more space.
+          return ColoredBox(
+            color: Colors.black,
+            child: CustomScrollView(
+              slivers: [
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      status,
+                      Expanded(child: preview),
+                      controls,
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return Stack(
+          children: [
+            Positioned.fill(child: preview),
+            Positioned(top: 0, left: 0, right: 0, child: status),
+            Positioned(bottom: 0, left: 0, right: 0, child: controls),
           ],
         );
       },
@@ -342,67 +360,6 @@ String _sessionStateLabel(StreamSessionState state) {
     StreamSessionState.paused => 'Paused',
     _ => '',
   };
-}
-
-// Shows live thermal readings, distinguishing pending and unknown from normal.
-class _ThermalChip extends StatelessWidget {
-  final ThermalLevel? level;
-
-  const _ThermalChip({required this.level});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _colorFor(level);
-    final label = _labelFor(level);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.85),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.thermostat, color: Colors.white, size: 14),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _colorFor(ThermalLevel? level) {
-    return switch (level) {
-      null || ThermalLevel.unknown => Colors.blueGrey.shade700,
-      ThermalLevel.none || ThermalLevel.light => Colors.green.shade700,
-      ThermalLevel.moderate => Colors.amber.shade800,
-      ThermalLevel.severe => Colors.orange.shade800,
-      ThermalLevel.critical => Colors.red.shade700,
-      ThermalLevel.emergency || ThermalLevel.shutdown => Colors.red.shade900,
-    };
-  }
-
-  String _labelFor(ThermalLevel? level) {
-    return switch (level) {
-      null => 'Thermal: waiting…',
-      ThermalLevel.unknown => 'Thermal: unknown',
-      ThermalLevel.none => 'Thermal: normal',
-      ThermalLevel.light => 'Warm',
-      ThermalLevel.moderate => 'Warming',
-      ThermalLevel.severe => 'Hot',
-      ThermalLevel.critical => 'Critical',
-      ThermalLevel.emergency => 'Emergency',
-      ThermalLevel.shutdown => 'Shutdown',
-    };
-  }
 }
 
 /// Shown while the provider transparently restarts a stream that hit a

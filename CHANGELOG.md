@@ -1,3 +1,10 @@
+## Unreleased
+
+- Extend `DeviceState` with battery percentage, charging state, worn/removed state, hinge state, device identity, connection state, and compatibility. Observe through the existing `deviceStateStream()` without starting a camera/device session.
+- Preserve thermal-only constructor calls and payloads. New fields default to unknown; Android's ambiguous zero battery reading becomes `null`, while an explicit iOS zero is retained. Equality now compares the complete snapshot, and events may change any field.
+- Share one native Device State subscription across Dart callers. Clear stale readings when the device disconnects, disappears, changes, or unregisters; reject late callbacks after cancellation and teardown.
+- Show physical state before camera start in the example, with a scrollable idle layout and wrapping status labels for small screens and enlarged text. Add native, channel, provider, and widget regressions; physical-glasses QA remains pending.
+
 ## 1.0.1
 
 - Upgrade Meta Wearables DAT to 1.0.1 on iOS and Android. Android includes upstream fixes for HEVC buffer corruption and stream lag/stutter; iOS has no developer-facing SDK changes. The known intermittent iOS locked-background session termination remains unresolved.

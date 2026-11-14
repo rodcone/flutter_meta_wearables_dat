@@ -62,7 +62,7 @@ Communication:
 | `VideoStreamSize` | `width`, `height`, `aspectRatio` |
 | `VideoFrame` | `codec` (VideoCodec), `bytes` (Uint8List), `width`, `height`, `presentationTimestampUs`, `isKeyframe` |
 | `BackgroundNotification` | `title`, `text`, `channelId`, `channelName`, `iconResourceName?` (Android only) |
-| `DeviceState` | `thermalLevel` (ThermalLevel) |
+| `DeviceState` | `thermalLevel`, `deviceId?`, `linkState`, `compatibility`, `batteryLevel?`, `chargingState`, `donState`, `hingeState` (expanded fields unreleased) |
 | `WearableDevice` | `id`, `name`, `type` (WearableDeviceType), `linkState` (WearableLinkState), `compatibility` (WearableCompatibility), `supportsDisplay`, `isActive`, `isStreamingDevice`, `firmwareInfo?` |
 
 ### Error codes (StreamSessionError)
@@ -145,8 +145,8 @@ static Future<void> enableBackgroundStreaming({
 static Future<void> disableBackgroundStreaming()
 static Stream<VideoFrame> videoFramesStream()   // foreground + background
 
-// Device state (thermal) — live ThermalLevel updates from the active device.
-// Useful for warning the user *before* a thermalCritical error stops the stream.
+// Device state — physical/connection metadata for the native selected device.
+// Expanded fields are unreleased; no camera/device session is needed.
 static Stream<DeviceState> deviceStateStream()
 
 // Navigation — opens the Meta AI app to the DAT-app-update screen on the
@@ -605,3 +605,19 @@ iOS: Wi-Fi never prompts, or one transport streams unreliably?
 - [Version Dependencies](https://wearables.developer.meta.com/docs/version-dependencies)
 - [Example app](https://github.com/rodcone/flutter_meta_wearables_dat/tree/main/example)
 - [pub.dev](https://pub.dev/packages/flutter_meta_wearables_dat)
+
+## Expanded Device State (unreleased)
+
+`deviceStateStream()` adds nullable `batteryLevel`, `WearableChargingState`
+(unknown/charging/notCharging), `WearableDonState` (unknown/donned/doffed), and
+`WearableHingeState` (unknown/open/closed). Each snapshot also carries `deviceId`,
+`WearableLinkState`, and `WearableCompatibility`; existing thermal codes remain
+unchanged. Android zero battery is ambiguous and maps to null; iOS reported zero
+is preserved. Unknown never means removed, folded, or empty.
+
+New native handlers clear physical readings when disconnected and emit an empty
+snapshot on device loss or unregistration. Observation follows the native selector
+without owning a session. Calls share one native subscription; additional Dart
+listeners do not replay the last event, so retain state in a provider. Observe
+before starting sessions; cancel subscriptions in dispose. See
+[the implementation and QA plan](doc/plans/device-state.md).

@@ -28,7 +28,7 @@ class StreamSessionProvider extends ChangeNotifier {
   VideoCodec _videoCodec = VideoCodec.raw;
   StreamSessionState? _sessionState;
   StreamSessionError? _lastError;
-  ThermalLevel? _thermalLevel;
+  DeviceState? _deviceState;
   String? _selectedVideo;
   String? _selectedImage;
   bool _isLoadingVideo = false;
@@ -138,6 +138,7 @@ class StreamSessionProvider extends ChangeNotifier {
   StreamSessionProvider(this.deviceProvider, this.mockDeviceProvider) {
     _lastMockUUID = mockDeviceProvider.deviceUUID;
     mockDeviceProvider.addListener(_onMockDeviceChanged);
+    deviceProvider.addListener(_onDeviceRegistrationChanged);
     _initializeActiveDeviceMonitoring();
     _initializeDeviceStateMonitoring();
   }
@@ -276,17 +277,35 @@ class StreamSessionProvider extends ChangeNotifier {
   /// Current thermal level of the active device, or `null` if no device is
   /// active or the SDK hasn't reported a level yet. Updated live via
   /// [MetaWearablesDat.deviceStateStream].
-  ThermalLevel? get thermalLevel => _thermalLevel;
+  ThermalLevel? get thermalLevel => _deviceState?.thermalLevel;
+
+  DeviceState? get deviceState => _deviceState;
+
+  String? get monitoredDeviceName {
+    final id = _deviceState?.deviceId;
+    for (final device in _devices) {
+      if (device.id == id) return device.name;
+    }
+    return null;
+  }
+
+  void _onDeviceRegistrationChanged() {
+    if (!deviceProvider.isRegistered && _deviceState != null) {
+      _deviceState = null;
+      notifyListeners();
+    }
+  }
 
   void _initializeActiveDeviceMonitoring() {
     _activeDeviceSubscription = MetaWearablesDat.activeDeviceStream().listen(
       (hasActiveDevice) {
         final reappeared = hasActiveDevice && !_hasActiveDevice;
         _hasActiveDevice = hasActiveDevice;
-        // Reset thermal readout when device goes away so the UI doesn't show
-        // stale data; the next active device will repopulate it.
-        if (!hasActiveDevice) {
-          _thermalLevel = null;
+        // Legacy snapshots need this fallback. Rich snapshots carry their own
+        // connection/identity: a late availability event must not clear a new
+        // device's state from the independent device-state channel.
+        if (!hasActiveDevice && _deviceState?.deviceId == null) {
+          _deviceState = null;
         }
         // The device coming back is the one trustworthy "user fixed it" signal
         // we get — it fires on power-on and on re-entering range.
@@ -317,7 +336,7 @@ class StreamSessionProvider extends ChangeNotifier {
       onError: (dynamic error) {
         debugPrint('[MetaWearablesDAT] Error in active device stream: $error');
         _hasActiveDevice = false;
-        _thermalLevel = null;
+        if (_deviceState?.deviceId == null) _deviceState = null;
         notifyListeners();
       },
     );
@@ -326,13 +345,15 @@ class StreamSessionProvider extends ChangeNotifier {
   void _initializeDeviceStateMonitoring() {
     _deviceStateSubscription = MetaWearablesDat.deviceStateStream().listen(
       (state) {
-        if (_thermalLevel != state.thermalLevel) {
-          _thermalLevel = state.thermalLevel;
+        if (_deviceState != state) {
+          _deviceState = state;
           notifyListeners();
         }
       },
       onError: (dynamic error) {
         debugPrint('[MetaWearablesDAT] Device state stream error: $error');
+        _deviceState = null;
+        notifyListeners();
       },
     );
   }
@@ -391,6 +412,7 @@ class StreamSessionProvider extends ChangeNotifier {
   @override
   void dispose() {
     mockDeviceProvider.removeListener(_onMockDeviceChanged);
+    deviceProvider.removeListener(_onDeviceRegistrationChanged);
     _activeDeviceSubscription?.cancel();
     _sessionStateSubscription?.cancel();
     _sessionErrorSubscription?.cancel();

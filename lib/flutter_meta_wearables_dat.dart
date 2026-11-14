@@ -282,29 +282,172 @@ enum ThermalLevel {
   }
 }
 
-/// Snapshot of per-device state emitted by
-/// [MetaWearablesDat.deviceStateStream].
+/// Whether the glasses battery is charging.
+enum WearableChargingState {
+  unknown('unknown'),
+  charging('charging'),
+  notCharging('notCharging');
+
+  const WearableChargingState(this.code);
+
+  /// The canonical platform-channel code.
+  final String code;
+
+  /// Decodes a platform code, falling back to [unknown].
+  static WearableChargingState fromCode(String? code) => values.firstWhere(
+    (state) => state.code == code,
+    orElse: () => unknown,
+  );
+}
+
+/// Whether the glasses are being worn.
+enum WearableDonState {
+  unknown('unknown'),
+  donned('donned'),
+  doffed('doffed');
+
+  const WearableDonState(this.code);
+
+  /// The canonical platform-channel code.
+  final String code;
+
+  /// Decodes a platform code, falling back to [unknown].
+  static WearableDonState fromCode(String? code) => values.firstWhere(
+    (state) => state.code == code,
+    orElse: () => unknown,
+  );
+}
+
+/// Whether the glasses arms are open or folded closed.
+enum WearableHingeState {
+  unknown('unknown'),
+  open('open'),
+  closed('closed');
+
+  const WearableHingeState(this.code);
+
+  /// The canonical platform-channel code.
+  final String code;
+
+  /// Decodes a platform code, falling back to [unknown].
+  static WearableHingeState fromCode(String? code) => values.firstWhere(
+    (state) => state.code == code,
+    orElse: () => unknown,
+  );
+}
+
+/// A snapshot of the device observed by [MetaWearablesDat.deviceStateStream].
 ///
-/// Currently carries only [thermalLevel]; this is a value type rather than a
-/// raw `ThermalLevel` so additional state fields can be added later without
-/// breaking the public API.
+/// Physical readings are available while connected, independently of a camera
+/// or device session. Unknown values are not evidence that the glasses are
+/// empty, removed, or folded. New native implementations clear physical readings
+/// when the connection is lost; [deviceId] identifies the observed pair rather
+/// than a pair selected for a future camera start.
 @immutable
 class DeviceState {
-  const DeviceState({required this.thermalLevel});
+  const DeviceState({
+    required this.thermalLevel,
+    this.deviceId,
+    this.linkState = WearableLinkState.unknown,
+    this.compatibility = WearableCompatibility.undefined,
+    this.batteryLevel,
+    this.chargingState = WearableChargingState.unknown,
+    this.donState = WearableDonState.unknown,
+    this.hingeState = WearableHingeState.unknown,
+  });
 
-  /// Current thermal level of the active device.
+  /// Decodes a native snapshot, accepting older thermal-only payloads.
+  ///
+  /// Missing or malformed optional values use their unknown defaults. Invalid
+  /// battery values become `null`; a reported iOS zero is preserved. Android
+  /// converts its ambiguous zero to `null` before sending the event.
+  factory DeviceState.fromMap(Map<Object?, Object?> map) {
+    String? code(String key) => map[key] is String ? map[key]! as String : null;
+    final battery = map['batteryLevel'];
+    final thermal = map['thermalLevel'];
+    final id = code('deviceId');
+    return DeviceState(
+      thermalLevel:
+          thermal is num &&
+              thermal.isFinite &&
+              thermal == thermal.roundToDouble()
+          ? ThermalLevel.fromInt(thermal.toInt())
+          : ThermalLevel.unknown,
+      deviceId: id == null || id.trim().isEmpty ? null : id,
+      linkState: WearableLinkState.fromCode(code('linkState')),
+      compatibility: WearableCompatibility.fromCode(code('compatibility')),
+      batteryLevel:
+          battery is num &&
+              battery.isFinite &&
+              battery >= 0 &&
+              battery <= 100 &&
+              battery == battery.roundToDouble()
+          ? battery.toInt()
+          : null,
+      chargingState: WearableChargingState.fromCode(code('chargingState')),
+      donState: WearableDonState.fromCode(code('donState')),
+      hingeState: WearableHingeState.fromCode(code('hingeState')),
+    );
+  }
+
+  /// The reported thermal level, or [ThermalLevel.unknown] if unavailable.
   final ThermalLevel thermalLevel;
 
+  /// The observed [WearableDevice.id], or `null` if no device is resolved.
+  final String? deviceId;
+
+  /// The connection state from the same native snapshot as the readings.
+  final WearableLinkState linkState;
+
+  /// The reported SDK/device compatibility.
+  final WearableCompatibility compatibility;
+
+  /// The battery percentage, or `null` if no usable reading is available.
+  ///
+  /// iOS can report 0–100. Android reports 1–100 here: its SDK uses zero for
+  /// both unknown and empty, which the plugin conservatively maps to `null`.
+  final int? batteryLevel;
+
+  /// The reported charging state.
+  final WearableChargingState chargingState;
+
+  /// Whether the glasses are worn, removed, or have not reported a state.
+  final WearableDonState donState;
+
+  /// Whether the glasses arms are open, folded, or have not reported a state.
+  final WearableHingeState hingeState;
+
   @override
-  String toString() => 'DeviceState(thermalLevel: $thermalLevel)';
+  String toString() =>
+      'DeviceState(deviceId: $deviceId, linkState: $linkState, '
+      'compatibility: $compatibility, batteryLevel: $batteryLevel, '
+      'chargingState: $chargingState, donState: $donState, '
+      'hingeState: $hingeState, thermalLevel: $thermalLevel)';
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is DeviceState && other.thermalLevel == thermalLevel;
+      other is DeviceState &&
+          other.thermalLevel == thermalLevel &&
+          other.deviceId == deviceId &&
+          other.linkState == linkState &&
+          other.compatibility == compatibility &&
+          other.batteryLevel == batteryLevel &&
+          other.chargingState == chargingState &&
+          other.donState == donState &&
+          other.hingeState == hingeState;
 
   @override
-  int get hashCode => thermalLevel.hashCode;
+  int get hashCode => Object.hash(
+    thermalLevel,
+    deviceId,
+    linkState,
+    compatibility,
+    batteryLevel,
+    chargingState,
+    donState,
+    hingeState,
+  );
 }
 
 /// Hardware model of a paired Meta wearable, as reported by the DAT SDK.
@@ -1182,16 +1325,24 @@ class MetaWearablesDat {
     return MetaWearablesDatPlatform.instance.openDATGlassesAppUpdate();
   }
 
-  /// Stream of [DeviceState] snapshots for the active device.
+  /// Streams state snapshots for the device resolved by the native selector.
   ///
-  /// Currently emits whenever the device's [ThermalLevel] changes. Subscribe
-  /// to drive thermal warnings in your UI — by the time a critical-level
-  /// thermal error reaches [streamSessionErrorStream] the stream has already
-  /// stopped, so reacting to [ThermalLevel.moderate] / [ThermalLevel.severe]
-  /// gives you a chance to warn the user before that happens.
+  /// Includes battery, charging, worn/removed, hinge, thermal, and connection
+  /// metadata. Monitoring does not start a session or request camera/microphone
+  /// permission. Android still requires [requestAndroidPermissions] first.
   ///
-  /// The stream switches its underlying subscription automatically when the
-  /// active device changes.
+  /// No device produces an unknown snapshot with a null [DeviceState.deviceId].
+  /// Disconnects clear physical readings. A selector change invalidates the
+  /// previous reading before observing the next device. The latest SDK report
+  /// is not a guarantee of a new sensor measurement or continuous delivery
+  /// while the app is suspended.
+  ///
+  /// Callers share one broadcast stream. The first native subscription and a
+  /// subscription after the last cancellation receive a current snapshot.
+  /// Additional listeners do not replay it; retain the latest value in your
+  /// app's state. Events can change any field, not just temperature.
+  /// Use [ThermalLevel.moderate] or [ThermalLevel.severe] for early warnings;
+  /// critical thermal errors pause a session rather than necessarily ending it.
   static Stream<DeviceState> deviceStateStream() {
     return MetaWearablesDatPlatform.instance.deviceStateStream();
   }

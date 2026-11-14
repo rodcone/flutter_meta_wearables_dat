@@ -57,7 +57,7 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
   );
 
   /// The event channel used to receive per-device state updates
-  /// (thermal level). Tracks the active device on the native side.
+  /// (physical and connection state). Tracks the native selector.
   @visibleForTesting
   final deviceStateEventChannel = const EventChannel(
     'flutter_meta_wearables_dat/device_state',
@@ -385,23 +385,12 @@ class MethodChannelMetaWearablesDat extends MetaWearablesDatPlatform {
     return ok ?? false;
   }
 
-  @override
-  Stream<DeviceState> deviceStateStream() {
-    return deviceStateEventChannel.receiveBroadcastStream().map((
-      dynamic event,
-    ) {
-      final map = Map<String, dynamic>.from(event as Map);
-      final state = DeviceState(
-        thermalLevel: ThermalLevel.fromInt(
-          (map['thermalLevel'] as num).toInt(),
-        ),
+  late final Stream<DeviceState> _deviceStates = deviceStateEventChannel
+      .receiveBroadcastStream()
+      .map(
+        (dynamic event) => DeviceState.fromMap(event as Map<Object?, Object?>),
       );
-      if (kDebugMode) {
-        debugPrint(
-          '[MetaWearablesDAT] deviceState → thermalLevel=${state.thermalLevel}',
-        );
-      }
-      return state;
-    });
-  }
+
+  @override
+  Stream<DeviceState> deviceStateStream() => _deviceStates;
 }
